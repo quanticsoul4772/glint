@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from glint.meter import BudgetExceeded, Caps, Meter, meta_cost
+from glint.meter import BudgetExceeded, Caps, Meter, guarded, meta_cost
 from glint.ratelimit import RateLimiter
 
 
@@ -30,6 +30,24 @@ def test_cap_trips_and_ledger_persists(tmp_path):
     assert reloaded.gpu_usd == pytest.approx(3.26)
     with pytest.raises(BudgetExceeded):
         Meter(Caps(meta_usd=1.0, gpu_usd=3.0), ledger).check()
+
+
+def test_zero_gpu_cap_does_not_block_meta_calls(tmp_path):
+    m = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), tmp_path / "ledger.jsonl")
+    m.check_meta()
+    with pytest.raises(BudgetExceeded):
+        m.check_gpu()
+
+
+def test_guarded_blocks_the_call_over_cap(tmp_path):
+    m = Meter(Caps(meta_usd=0.05, gpu_usd=0.0), tmp_path / "ledger.jsonl")
+    calls = []
+    fn = guarded(lambda **kw: calls.append(kw) or "ok", m)
+    assert fn(model="x") == "ok"
+    m.record_meta("muse-wonder-1.0", 10_000, 0, 2_000)  # $0.08
+    with pytest.raises(BudgetExceeded):
+        fn(model="x")
+    assert len(calls) == 1
 
 
 def test_rate_limiter_paces():

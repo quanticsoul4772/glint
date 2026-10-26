@@ -21,6 +21,8 @@ META_PRICES = {
     "muse-spark-1.3-contributor": {"input": 0.10, "cached": 0.002, "output": 0.20},
     "muse-spark-1.2-contributor": {"input": 0.10, "cached": 0.002, "output": 0.20},
     "muse-wonder-1.0": {"input": 4.00, "cached": 0.20, "output": 20.00},
+    # Spark Open on Baseten (hackathon credit; baseten.co/library/muse-spark-open, 2026-10-26).
+    "muse-spark-open-1026": {"input": 1.25, "cached": 0.15, "output": 4.25},
 }
 
 DEFAULT_LEDGER = Path(r"<workspace>\measure\meter\ledger.jsonl")
@@ -88,26 +90,42 @@ class Meter:
                           "tag": tag})
         return usd
 
-    def check(self) -> None:
+    def check_meta(self) -> None:
         if self.meta_usd >= self.caps.meta_usd:
             raise BudgetExceeded(f"Meta API spend ${self.meta_usd:.4f} reached cap ${self.caps.meta_usd}")
+
+    def check_gpu(self) -> None:
         if self.gpu_usd >= self.caps.gpu_usd:
             raise BudgetExceeded(f"GPU spend ${self.gpu_usd:.2f} reached cap ${self.caps.gpu_usd}")
 
+    def check(self) -> None:
+        self.check_meta()
+        self.check_gpu()
 
-def litellm_callback(meter: Meter, limiter=None):
-    """A LiteLLM CustomLogger that rate-limits before each call and meters usage after it.
+
+def guarded(completion_fn, meter: Meter, limiter=None):
+    """Wrap a completion function so the Meta cap and the rate limiter are enforced before every call.
+
+    This cannot live in a LiteLLM callback: LiteLLM catches exceptions raised in `log_pre_api_call` and sends
+    the request anyway. Install with e.g. `tau2.utils.llm_utils.completion = guarded(completion, meter, limiter)`.
+    """
+    def _call(*args, **kwargs):
+        meter.check_meta()
+        if limiter is not None:
+            limiter.acquire()
+        return completion_fn(*args, **kwargs)
+
+    return _call
+
+
+def litellm_callback(meter: Meter):
+    """A LiteLLM CustomLogger that meters usage after each call (enforcement is `guarded`).
 
     Aborted / failed calls are metered too when the provider returned usage.
     """
     from litellm.integrations.custom_logger import CustomLogger
 
     class _MeterLogger(CustomLogger):
-        def log_pre_api_call(self, model, messages, kwargs):
-            meter.check()
-            if limiter is not None:
-                limiter.acquire()
-
         def _record(self, kwargs, response_obj):
             usage = getattr(response_obj, "usage", None)
             if usage is None:
