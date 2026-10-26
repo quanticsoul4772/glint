@@ -18,6 +18,7 @@ dependencies = [
     "scikit-learn",
     "statsmodels",
     "python-dotenv",
+    "kaggle>=2.2.5",
 ]
 
 [project.optional-dependencies]
