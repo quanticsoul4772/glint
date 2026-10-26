@@ -1,0 +1,20 @@
+# secrets
+.env
+*.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# data, activations, run outputs (live on the Modal Volume or in ../measure/data)
+data/
+runs/
+activations/
+*.npy
+*.npz
+*.safetensors
+*.pt
+meter/*.jsonl
