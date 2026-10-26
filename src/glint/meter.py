@@ -23,6 +23,8 @@ META_PRICES = {
     "muse-wonder-1.0": {"input": 4.00, "cached": 0.20, "output": 20.00},
     # Spark Open on Baseten (hackathon credit; baseten.co/library/muse-spark-open, 2026-10-26).
     "muse-spark-open-1026": {"input": 1.25, "cached": 0.15, "output": 4.25},
+    # Glimmer on DeepInfra (bf16; matches the `estimated_cost` DeepInfra returned on 2026-10-26).
+    "Muse-Glimmer-30B": {"input": 0.30, "cached": 0.04, "output": 1.20},
 }
 
 DEFAULT_LEDGER = Path(r"<workspace>\measure\meter\ledger.jsonl")
