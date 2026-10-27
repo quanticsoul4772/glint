@@ -26,6 +26,8 @@ META_PRICES = {
     "muse-spark-open-1026": {"input": 1.25, "cached": 0.15, "output": 4.25},
     # Glimmer on DeepInfra (bf16; matches the `estimated_cost` DeepInfra returned on 2026-10-26).
     "Muse-Glimmer-30B": {"input": 0.30, "cached": 0.04, "output": 1.20},
+    # Glimmer served on Modal (glint.glimmer_serve): no per-token price; its cost is GPU time, metered by session()
+    "Muse-Glimmer-30B-modal": {"input": 0.0, "cached": 0.0, "output": 0.0},
 }
 
 DEFAULT_LEDGER = Path(r"<workspace>\measure\meter\ledger.jsonl")
