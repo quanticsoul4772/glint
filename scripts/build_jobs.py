@@ -1,11 +1,12 @@
-"""Build glint_capture job lines from recorded τ² simulations, with each step's prompt exactly as τ² sent it
-(earlier reasoning removed; token counts verified against DeepInfra in M1-prefix-check.json).
+"""Build capture job lines (glint.glimmer_modal) from recorded τ² simulations, with each step's prompt exactly as τ²
+sent it (earlier reasoning removed).
 
-Per agent step k: append the rest of prompt_k (read at its last token: turn_start), append Glimmer's generated
-tokens (read at the <|eom|> closing the reasoning channel: P2, and at the last token: P4), then truncate back to
-the longest prefix shared with prompt_{k+1}. Generated tokens are re-tokenized from the logprob stream text and
-checked against the stream's token count.
-Usage: python build_jobs.py SIMS.json OUT.jsonl MAX_STEPS [TASK_ID]
+Per agent step k: append the rest of prompt_k (read at its last token: turn_start), append Glimmer's generated tokens
+(reads: P2 = the <|eom|> closing the reasoning channel, when there is reasoning; P3a = the <|message|> opening the
+first tool-call message, when there is a call; P4 = the last token), then truncate back to the longest prefix shared
+with prompt_{k+1}. Fails loudly unless every step's prompt length equals the host's usage.prompt_tokens and the
+re-tokenized generated text equals the streamed token count.
+Usage: python build_jobs.py SIMS.json OUT.jsonl MAX_STEPS DOMAIN STRENGTH PREFIX [TASK_ID]
 """
 import json
 import sys
@@ -15,8 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from m1_prefix_check import generated_text, ids, render, to_template_messages
 from tau2.data_model.simulation import Results
 
-sims_path, out_path, max_steps = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
-only_task = sys.argv[4] if len(sys.argv) > 4 else None
 EOM = ids("<|eom|>")
 assert len(EOM) == 1, EOM
 
@@ -29,38 +28,69 @@ def p2_index(gen_text, gen_ids):
     return gen_ids.index(EOM[0])
 
 
-results = Results.model_validate_json(sims_path.read_text(encoding="utf-8"))
+def p3a_index(stream_tokens):
+    """Index of the <|message|> token right before the first <atem:function_calls>, or None without a call."""
+    text, starts = "", []
+    for t in stream_tokens:
+        starts.append(len(text))
+        text += t
+    at = text.find("<|message|><atem:function_calls>")
+    if at < 0:
+        return None
+    return starts.index(at)
 
-report, n_lines = [], 0
-with out_path.open("w", encoding="utf-8") as out:
-    for sim in results.simulations:
-        if only_task and str(sim.task_id) != only_task:
-            continue
-        steps = [i for i, m in enumerate(sim.messages) if m.role == "assistant" and m.raw_data][:max_steps]
-        ops, cur, prev_target = [], [], []
-        for n, i in enumerate(steps):
-            msg = sim.messages[i]
-            target = ids(render(to_template_messages(sim.messages[:i], keep_reasoning=False)))
-            if target[:len(prev_target)] != prev_target:
-                raise ValueError(f"task {sim.task_id} step {n}: prompt is not an extension of the previous prompt")
-            common = next((p for p, (a, b) in enumerate(zip(cur, target)) if a != b), min(len(cur), len(target)))
-            if common < len(cur):
-                ops.append({"truncate": common})
-            rest = target[common:]
-            ops.append({"append": rest, "read": [[len(rest) - 1, f"{n}:turn_start"]]})
-            gen_text = generated_text(msg)
-            gen = ids(gen_text)
-            n_stream = len(((msg.raw_data["choices"][0].get("logprobs") or {}).get("content")) or [])
-            reads = [[len(gen) - 1, f"{n}:P4"]]
-            p2 = p2_index(gen_text, gen)
-            if p2 is not None:
-                reads.insert(0, [p2, f"{n}:P2"])
-            ops.append({"append": gen, "read": reads})
-            cur, prev_target = target + gen, target
-            report.append({"task": str(sim.task_id), "step": n, "prompt_tokens": len(target), "gen_tokens": len(gen),
-                           "stream_tokens": n_stream, "retokenized_equal": len(gen) == n_stream, "has_P2": p2 is not None})
-        out.write(json.dumps({"traj": f"{sim.task_id}:{sim.trial}", "ops": ops}) + "\n")
-        n_lines += 1
 
-print(json.dumps(report, indent=1))
-print("trajectories", n_lines, "retokenized_equal", sum(r["retokenized_equal"] for r in report), "/", len(report))
+def main(argv):
+    sims_path, out_path, max_steps = Path(argv[1]), Path(argv[2]), int(argv[3])
+    domain, strength, prefix = argv[4], argv[5], argv[6]
+    only_task = argv[7] if len(argv) > 7 else None
+    results = Results.model_validate_json(sims_path.read_text(encoding="utf-8"))
+    report, n_traj = [], 0
+    with out_path.open("w", encoding="utf-8") as out:
+        for sim in results.simulations:
+            if only_task and str(sim.task_id) != only_task:
+                continue
+            n_traj += 1
+            steps = [i for i, m in enumerate(sim.messages) if m.role == "assistant" and m.raw_data][:max_steps]
+            ops, cur, prev_target = [], [], []
+            for n, i in enumerate(steps):
+                msg = sim.messages[i]
+                choice = msg.raw_data["choices"][0]
+                target = ids(render(to_template_messages(sim.messages[:i], keep_reasoning=False), domain, strength))
+                server = (msg.raw_data.get("usage") or {}).get("prompt_tokens")
+                if len(target) != server:
+                    raise ValueError(f"{sim.task_id}:{sim.trial} step {n}: rendered {len(target)} != host {server}")
+                if target[:len(prev_target)] != prev_target:
+                    raise ValueError(f"{sim.task_id}:{sim.trial} step {n}: prompt does not extend the previous one")
+                common = next((p for p, (a, b) in enumerate(zip(cur, target)) if a != b), min(len(cur), len(target)))
+                if common < len(cur):
+                    ops.append({"truncate": common})
+                rest = target[common:]
+                ops.append({"append": rest, "read": [[len(rest) - 1, f"{n}:turn_start"]]})
+                stream = [t["token"] for t in (choice.get("logprobs") or {}).get("content") or []]
+                gen_text = generated_text(msg)
+                gen = ids(gen_text)
+                if len(gen) != len(stream):
+                    raise ValueError(f"{sim.task_id}:{sim.trial} step {n}: re-tokenized {len(gen)} != stream {len(stream)}")
+                reads = []
+                p2, p3a = p2_index(gen_text, gen), p3a_index(stream)
+                if p2 is not None:
+                    reads.append([p2, f"{n}:P2"])
+                if p3a is not None:
+                    reads.append([p3a, f"{n}:P3a"])
+                reads.append([len(gen) - 1, f"{n}:P4"])
+                ops.append({"append": gen, "read": reads})
+                cur, prev_target = target + gen, target
+                report.append({"has_P2": p2 is not None, "has_P3a": p3a is not None, "prompt": len(target),
+                               "gen": len(gen)})
+            out.write(json.dumps({"traj": f"{prefix}:{sim.task_id}:{sim.trial}", "ops": ops}) + "\n")
+    summary = {"trajectories": n_traj, "steps": len(report), "with_P2": sum(r["has_P2"] for r in report),
+               "with_P3a": sum(r["has_P3a"] for r in report),
+               "replay_tokens": sum(len(op["append"]) for line in out_path.read_text().splitlines()
+                                    for op in json.loads(line)["ops"] if "append" in op)}
+    print(json.dumps(summary))
+    return summary
+
+
+if __name__ == "__main__":
+    main(sys.argv)
