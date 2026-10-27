@@ -165,6 +165,7 @@ class BankingDecisionTools(ToolKitBase):
 
 
 _ASSISTED = {"retail": AssistedRetailTools, "airline": AssistedAirlineTools}
+_ASSISTED_BANKING: dict[type, type] = {}  # composed banking toolkit class -> its assisted subclass
 
 
 def install(domain: str) -> None:
@@ -179,7 +180,9 @@ def install(domain: str) -> None:
             # The banking toolkit class is composed per retrieval variant and holds per-episode state, so keep the
             # instance and put the decision tools ahead of its class in the MRO
             cls = type(env.tools)
-            env.tools.__class__ = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
+            if cls not in _ASSISTED_BANKING:
+                _ASSISTED_BANKING[cls] = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
+            env.tools.__class__ = _ASSISTED_BANKING[cls]
         else:
             env.tools = _ASSISTED[domain](env.tools.db)
         return env
