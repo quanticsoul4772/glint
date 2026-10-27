@@ -45,7 +45,7 @@ def download() -> str:
 
 
 @app.function(image=image, volumes={"/vol": vol}, gpu=GPU, cpu=4, memory=32768, timeout=3600, max_containers=1)
-def capture(jobs_text: str, run: str) -> dict:
+def capture(jobs_text: str, run: str, max_seconds: float) -> dict:
     import numpy as np
     import torch
     from transformers import DynamicCache, MuseGlimmerForConditionalGeneration
@@ -65,19 +65,25 @@ def capture(jobs_text: str, run: str) -> dict:
 
     def hook(layer_idx):
         def _h(_module, _inputs, output):
-            for abs_pos, row in state["want"].items():
+            for abs_pos, rows in state["want"].items():
                 col = abs_pos - state["start"]
                 if 0 <= col < output.shape[1]:
-                    state["buf"][row, layer_idx] = output[0, col].to(torch.float16).cpu().numpy()
+                    vec = output[0, col].to(torch.float16).cpu().numpy()
+                    for row in rows:
+                        state["buf"][row, layer_idx] = vec
         return _h
 
     handles = [layers[i].register_forward_hook(hook(i)) for i in range(n_save)]
     out_dir = Path("/vol/out") / run
     out_dir.mkdir(parents=True, exist_ok=True)
-    index, report, total_tokens = [], [], 0
+    (out_dir / "index.jsonl").unlink(missing_ok=True)
+    report, total_tokens, stopped_early = [], 0, False
     t_compute = time.time()
     with torch.inference_mode():
         for line in filter(None, jobs_text.splitlines()):
+            if time.time() - t0 > max_seconds:
+                stopped_early = True  # the GPU budget is spent; keep what is saved
+                break
             job = json.loads(line)
             traj, ops = job["traj"], job["ops"]
             reads, op_reads, pos = [], [], 0
@@ -87,7 +93,8 @@ def capture(jobs_text: str, run: str) -> dict:
                     pos = op["truncate"]
                     continue
                 for rel, label in op.get("read", []):
-                    op_reads[-1][pos + rel] = len(reads)
+                    # two reads can share a position (P2 = P4 when a turn ends at its reasoning <|eom|>)
+                    op_reads[-1].setdefault(pos + rel, []).append(len(reads))
                     reads.append((pos + rel, label))
                 pos += len(op["append"])
             state["buf"] = np.zeros((len(reads), n_save, text_model.config.hidden_size), dtype=np.float16)
@@ -104,8 +111,8 @@ def capture(jobs_text: str, run: str) -> dict:
                     state["start"] = n_past
                     state["want"] = {p: r for p, r in wanted.items() if n_past <= p < n_past + len(chunk)}
                     text_model(input_ids=torch.tensor([chunk], device="cuda"), past_key_values=cache, use_cache=True)
-                    for r in state["want"].values():
-                        filled[r] = True
+                    for rows in state["want"].values():
+                        filled[rows] = True
                     if cache.get_seq_length() != n_past + len(chunk):
                         raise RuntimeError(f"{traj}: cache length {cache.get_seq_length()} != {n_past + len(chunk)}")
                     n_past += len(chunk)
@@ -114,7 +121,11 @@ def capture(jobs_text: str, run: str) -> dict:
                 raise RuntimeError(f"{traj}: {int((~filled).sum())} reads never captured")
             fname = traj.replace(":", "_").replace("/", "_") + ".npy"
             np.save(out_dir / fname, state["buf"])
-            index += [{"traj": traj, "row": i, "abs_pos": p, "label": lab, "file": fname} for i, (p, lab) in enumerate(reads)]
+            rows = [{"traj": traj, "row": i, "abs_pos": p, "label": lab, "file": fname} for i, (p, lab) in enumerate(reads)]
+            # written per trajectory so a later failure keeps everything already computed
+            with (out_dir / "index.jsonl").open("a") as fh:
+                fh.write("".join(json.dumps(r) + "\n" for r in rows))
+            vol.commit()
             a = state["buf"].astype(np.float32)
             report.append({"traj": traj, "tokens": traj_tokens, "reads": len(reads),
                            "seconds": round(time.time() - t_traj, 2), "finite": bool(np.isfinite(a).all()),
@@ -126,8 +137,8 @@ def capture(jobs_text: str, run: str) -> dict:
     # plain types only: the result is unpickled locally, where torch is not installed
     result = {"run": run, "load_s": round(load_s, 1), "compute_s": round(compute_s, 1), "tokens": total_tokens,
               "tok_per_s": round(total_tokens / compute_s, 1), "wall_s": round(time.time() - t0, 1),
-              "torch": str(torch.__version__), "gpu": str(torch.cuda.get_device_name()), "trajectories": report}
-    (out_dir / "index.jsonl").write_text("".join(json.dumps(r) + "\n" for r in index))
+              "torch": str(torch.__version__), "gpu": str(torch.cuda.get_device_name()),
+              "stopped_early": stopped_early, "trajectories": report}
     (out_dir / "report.json").write_text(json.dumps(result, indent=1))
     vol.commit()
     return result
@@ -140,10 +151,17 @@ def main(jobs: str, run: str, gpu_cap_usd: float = 1.0):
     meter = Meter(Caps(meta_usd=0.0, gpu_usd=gpu_cap_usd), phase=f"modal-{run}")
     meter.check_gpu()
     print("download:", download.remote())
+    # remaining budget as container seconds, less one trajectory's worth of margin (~60 s)
+    max_seconds = (gpu_cap_usd - meter.gpu_usd) / GPU_USD_PER_HOUR * 3600 - 60
     t0 = time.time()
-    result = capture.remote(Path(jobs).read_text(encoding="utf-8"), run)
-    # billed container time is at least the remote wall time; record the larger of the two clocks
-    meter.record_gpu(max(time.time() - t0, result["wall_s"]), GPU_USD_PER_HOUR, GPU, tag=run)
+    result = None
+    try:
+        result = capture.remote(Path(jobs).read_text(encoding="utf-8"), run, max_seconds)
+    finally:
+        # recorded even when capture raises or times out, so the next run's cap check sees the spend;
+        # billed container time is at least the remote wall time, so take the larger clock
+        elapsed = time.time() - t0
+        meter.record_gpu(max(elapsed, result["wall_s"]) if result else elapsed, GPU_USD_PER_HOUR, GPU, tag=run)
     result["gpu_usd_metered"] = round(meter.gpu_usd, 4)
     out = Path(r"<workspace>\research\5-measurements") / f"M1-modal-{run}.json"
     out.write_text(json.dumps(result, indent=1), encoding="utf-8")
