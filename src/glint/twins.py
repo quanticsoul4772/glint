@@ -48,13 +48,16 @@ def _covers(method: dict, amount: float) -> bool:
 
 def find_choice_points(task: dict, db: dict) -> list[ChoicePoint]:
     points = []
+    spent: dict[str, float] = {}  # gift-card charges made by earlier gold writes in this task
     for i, a in enumerate(task["evaluation_criteria"]["actions"]):
         name, args = a["name"], a["arguments"]
         order = db["orders"].get(args.get("order_id"))
         if order is None:
             continue
-        methods = db["users"][order["user_id"]]["payment_methods"]
-        if name in VARIANT_WRITES:
+        methods = {m: {**d, "balance": d.get("balance", 0) - spent.get(m, 0)} if d["source"] == "gift_card" else d
+                   for m, d in db["users"][order["user_id"]]["payment_methods"].items()}
+        # an item listed twice in one write would make the twin's single fact ambiguous
+        if name in VARIANT_WRITES and len(set(args["item_ids"])) == len(args["item_ids"]):
             pay = methods.get(args.get("payment_method_id"))
             for old, new in zip(args["item_ids"], args["new_item_ids"]):
                 variants = _product_of(db, new)["variants"]
@@ -72,16 +75,25 @@ def find_choice_points(task: dict, db: dict) -> list[ChoicePoint]:
             if name == "return_delivered_order_items":
                 original = order["payment_history"][0]["payment_method_id"]
                 valid = [m for m in methods if m == original or m.startswith("gift_card")]
+            elif name == "modify_pending_order_payment":
+                # policy: the new method must differ from the order's current one and a gift card must cover it
+                original = order["payment_history"][0]["payment_method_id"]
+                amount = sum(it["price"] for it in order["items"])
+                valid = [m for m, d in methods.items() if m != original and _covers(d, amount)]
             else:
-                if name == "modify_pending_order_payment":
-                    amount = sum(it["price"] for it in order["items"])
-                else:
-                    amount = _price_difference(db, order, args["item_ids"], args["new_item_ids"])
+                amount = _price_difference(db, order, args["item_ids"], args["new_item_ids"])
                 valid = [m for m, d in methods.items() if _covers(d, amount)]
             alts = tuple(sorted(m for m in valid if m != args["payment_method_id"]))
             if alts:
                 points.append(ChoicePoint(str(task["id"]), i, "payment", args["order_id"], None,
                                           args["payment_method_id"], alts))
+        pm = args.get("payment_method_id", "")
+        if pm.startswith("gift_card") and name != "return_delivered_order_items":
+            if name == "modify_pending_order_payment":
+                spent[pm] = spent.get(pm, 0) + sum(it["price"] for it in order["items"])
+            elif name in VARIANT_WRITES:
+                spent[pm] = spent.get(pm, 0) + max(_price_difference(db, order, args["item_ids"],
+                                                                     args["new_item_ids"]), 0)
     return points
 
 
@@ -144,6 +156,10 @@ def make_twins(task: dict, point: ChoicePoint, db: dict) -> tuple[dict, dict]:
                                     for old, new in zip(args["item_ids"], args["new_item_ids"])]
         else:
             args["payment_method_id"] = value
+        if tag == "B":
+            # NL assertions and communicate_info state gold's amounts and items, which B changes
+            twin["evaluation_criteria"]["nl_assertions"] = None
+            twin["evaluation_criteria"]["communicate_info"] = []
         twin["glint_twin"] = {"source_task": str(task["id"]), "kind": point.kind, "order_id": point.order_id,
                               "old_item": point.old_item, "stated_value": value,
                               "stated_phrases": [list(p) for p in stated_phrases(point, value, db)]}
@@ -157,7 +173,9 @@ def at_choice_point(twin: dict, tool: str, args: dict) -> bool:
     if meta is None or args.get("order_id") != meta["order_id"]:
         return False
     if meta["kind"] == "variant":
-        return tool in VARIANT_WRITES and meta["old_item"] in args.get("item_ids", [])
+        items, new = args.get("item_ids") or [], args.get("new_item_ids") or []
+        # a malformed write (missing or misaligned new_item_ids) sets no value for the choice point
+        return tool in VARIANT_WRITES and meta["old_item"] in items and len(new) == len(items)
     return tool in PAYMENT_WRITES and "payment_method_id" in args
 
 

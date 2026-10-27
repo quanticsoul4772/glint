@@ -91,29 +91,36 @@ def analyze():
             g["stated_phrases"] = [list(p) for p in stated_phrases(point, g["stated_value"], db)]
         meta = {t["id"]: t for t in items}
         sims = json.loads((DATA / f"{cond}.json").read_text(encoding="utf-8"))["simulations"]
-        c, per_task = Counter(), Counter()
+        by_twin = {"A": Counter(), "B": Counter()}
+        per_task = Counter()
         for s in sims:
             twin = meta[str(s["task_id"])]
-            outcomes = []
+            c = by_twin[twin["id"].removesuffix("-early")[-1]]
+            c["episodes"] += 1
+            # an episode's label is its first write at the choice point once the preference was stated;
+            # later writes there (retries after a tool error, corrections) are not counted again
+            first = None
             for i, m in enumerate(s["messages"]):
-                if m["role"] != "assistant":
+                if m["role"] != "assistant" or first is not None:
                     continue
                 for tc in m.get("tool_calls") or []:
                     if not at_choice_point(twin, tc["name"], tc["arguments"]):
                         continue
                     v = contradicts(twin, tc["name"], tc["arguments"], s["messages"][:i])
                     if v is None:
-                        c["write_before_preference_stated"] += 1
+                        c["writes_before_preference_stated"] += 1
                     else:
-                        outcomes.append(v)
-            if not outcomes:
+                        first = v
+                        break
+            if first is None:
                 c["episodes_without_a_labeled_write"] += 1
-            c["labeled_writes"] += len(outcomes)
-            c["contradicting_writes"] += sum(outcomes)
-            if any(outcomes):
-                per_task[twin["glint_twin"]["source_task"]] += 1
-        report[cond] = {"sims": len(sims), **c, "tasks_with_a_contradiction": len(per_task),
-                        "by_task": dict(per_task)}
+            else:
+                c["labeled_episodes"] += 1
+                c["contradicting_episodes"] += first
+                if first:
+                    per_task[twin["glint_twin"]["source_task"]] += 1
+        report[cond] = {"sims": len(sims), "twin_A": dict(by_twin["A"]), "twin_B": dict(by_twin["B"]),
+                        "tasks_with_a_contradiction": len(per_task), "by_task": dict(per_task)}
     OUT.write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(json.dumps(report, indent=1))
 

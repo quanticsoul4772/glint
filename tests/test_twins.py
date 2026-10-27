@@ -102,3 +102,35 @@ def test_gift_card_alternatives_must_cover_the_charge(db, tasks):
                     swapped = [alt if o == p.old_item else n for o, n in zip(args["item_ids"], args["new_item_ids"])]
                     assert _covers(methods[args["payment_method_id"]],
                                    _price_difference(db, order, args["item_ids"], swapped))
+
+
+def test_write_listing_an_item_twice_has_no_variant_point(db, tasks):
+    # task 105 exchanges item 7292993796 twice in one write
+    assert not [p for p in find_choice_points(tasks["105"], db) if p.kind == "variant" and p.old_item == "7292993796"]
+
+
+def test_payment_change_never_offers_the_current_method(db, tasks):
+    for t in tasks.values():
+        for p in find_choice_points(t, db):
+            action = t["evaluation_criteria"]["actions"][p.action_index]
+            if p.kind == "payment" and action["name"] == "modify_pending_order_payment":
+                original = db["orders"][p.order_id]["payment_history"][0]["payment_method_id"]
+                assert original not in p.alternatives
+    pay = [p for p in find_choice_points(tasks["40"], db) if p.kind == "payment"]
+    assert all("credit_card_8554680" not in p.alternatives for p in pay)
+
+
+def test_malformed_write_is_not_at_the_choice_point(db, tasks):
+    point = next(p for p in find_choice_points(tasks["98"], db) if p.kind == "variant" and p.old_item == "7758198585")
+    a, _ = make_twins(tasks["98"], point, db)
+    said_all = [{"role": "user", "content": ", ".join(f"{k} {v}" for k, v in a["glint_twin"]["stated_phrases"])}]
+    base = {"order_id": "#W3916020", "item_ids": ["7758198585", "4068787148"], "payment_method_id": "paypal_8194385"}
+    assert contradicts(a, "exchange_delivered_order_items", base, said_all) is None
+    assert contradicts(a, "exchange_delivered_order_items", {**base, "new_item_ids": ["5606522780"]}, said_all) is None
+
+
+def test_twin_b_drops_gold_specific_assertions(db, tasks):
+    point = find_choice_points(tasks["44"], db)[0]
+    a, b = make_twins(tasks["44"], point, db)
+    assert b["evaluation_criteria"]["nl_assertions"] is None and b["evaluation_criteria"]["communicate_info"] == []
+    assert a["evaluation_criteria"].get("nl_assertions") == tasks["44"]["evaluation_criteria"].get("nl_assertions")
