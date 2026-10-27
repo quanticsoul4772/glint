@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
-    "tau2",
+    "tau2[knowledge]",
     "litellm>=1.80.15,<1.82.7",
     "modal",
     "numpy",
