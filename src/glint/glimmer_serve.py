@@ -20,14 +20,15 @@ import modal
 APP_NAME, MODEL_NAME = "glint-serve", "Muse-Glimmer-30B-modal"
 REVISION = "cec94fcfd6512f2cfe708138c32533b346ea4f69"
 GPU, GPU_USD_PER_HOUR = "A100-80GB", 2.94   # $2.50/h GPU + ~$0.44/h for 4 cores and 32 GiB (modal.com/pricing)
-VLLM_IMAGE = "vllm/vllm-openai:v0.31.0"     # 2026-10-05; the Glimmer recipe needs vLLM >= 0.28
+VLLM_VERSION = "0.31.0"                     # 2026-10-05; the Glimmer recipe needs vLLM >= 0.28
 # Glimmer's stop tokens (generation_config.json); <|eom|> must never be a stop token
 STOP_TOKEN_IDS = [200001, 200008]
 
 app = modal.App(APP_NAME)
 weights = modal.Volume.from_name("glint-glimmer")
 vllm_cache = modal.Volume.from_name("glint-vllm-cache", create_if_missing=True)
-image = modal.Image.from_registry(VLLM_IMAGE).entrypoint([])
+# Modal cannot detect Python in the vllm/vllm-openai image, so install the vLLM wheel (it bundles its CUDA libraries)
+image = modal.Image.debian_slim(python_version="3.12").pip_install(f"vllm=={VLLM_VERSION}")
 
 
 @app.function(image=image, gpu=GPU, cpu=4, memory=32768, timeout=3600, max_containers=1, scaledown_window=120,
@@ -65,7 +66,8 @@ def session(meter, modal_cli: str, env: dict, tag: str):
     try:
         yield
     finally:
-        subprocess.run([modal_cli, "app", "stop", APP_NAME], env=env, check=False, capture_output=True)
+        # --yes: without a TTY the stop command otherwise waits for a confirmation that never comes
+        subprocess.run([modal_cli, "app", "stop", APP_NAME, "--yes"], env=env, check=False, capture_output=True)
         meter.record_gpu(time.time() - t0, GPU_USD_PER_HOUR, GPU, tag=tag)
         listing = subprocess.run([modal_cli, "app", "list", "--json"], check=True, env=env, capture_output=True,
                                  text=True)
