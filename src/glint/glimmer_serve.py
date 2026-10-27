@@ -134,68 +134,70 @@ STAGE_MARKERS = ("version ", "Resolved architecture", "Loading model", "Loading 
 
 
 class LogWatch:
-    """Streams `modal app logs` for the app in the background: `failure()` returns the first crash line seen (for
-    `wait_ready(failed=...)`), `lines` holds the new log lines. Use as a context manager.
+    """Streams the app's container log (`modal app logs -f --timestamps --show-container-id`) in the background:
+    `failure()` returns a crash by its root cause (for `wait_ready(failed=...)`), `lines` holds the log. Use as a
+    context manager.
 
-    `modal app logs` first replays the previous container's log (which may hold an old crash), so whatever arrives in
-    the first `history_s` seconds is set aside in `history` and never counts as a failure. Start it before the first
-    request wakes a container.
+    Without `-f` the CLI fetches the last 100 entries and exits (modal 1.6.2, cli/app.py: "Use -f to live-stream"),
+    which made an earlier version of this class a 5-second poller that could miss lines. With `-f` the stream only
+    ends when the app stops or the CLI fails; it is then restarted, loudly. Every line carries its timestamp and
+    container id, so the lines a restart repeats are dropped without hiding a repeated crash in a new container."""
 
-    `modal app logs` can exit (2026-10-27: right after a deploy it streamed nothing while the container booted and
-    served). The stream is restarted whenever it ends, loudly; a restart replays earlier lines, so lines already seen
-    are dropped."""
-
-    def __init__(self, modal_cli: str, env: dict, app_name: str = APP_NAME, history_s: float = 10.0,
-                 restart_s: float = 5.0):
+    def __init__(self, modal_cli: str, env: dict, app_name: str = APP_NAME, restart_s: float = 5.0):
         import threading
 
-        self.history: list[str] = []
+        self.history: list[str] = []  # kept for callers; -f streams only new lines, nothing is replayed
         self.lines: list[str] = []
         self.restarts = 0
         self._seen: set[str] = set()
-        self._buf = self.history
-        self._cmd, self._env, self._restart_s = [modal_cli, "app", "logs", app_name], env, restart_s
+        self._buf = self.lines
+        self._cmd = [modal_cli, "app", "logs", app_name, "-f", "--timestamps", "--show-container-id"]
+        self._env, self._restart_s = env, restart_s
         self._closed = False
         self._proc = None
+        self._lock = threading.Lock()
         threading.Thread(target=self._run, daemon=True).start()
-        time.sleep(history_s)
-        self._buf = self.lines
-        say(f"watching {app_name} logs ({len(self.history)} replayed lines from the previous container ignored)")
+        say(f"watching {app_name} logs (streaming)")
 
     def _run(self):
-        while not self._closed:
-            self._proc = subprocess.Popen(self._cmd, env=self._env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                          text=True, encoding="utf-8", errors="replace")
+        while True:
+            with self._lock:
+                if self._closed:
+                    return
+                self._proc = subprocess.Popen(self._cmd, env=self._env, stdout=subprocess.PIPE,
+                                              stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
             for line in self._proc.stdout:
                 self._take(line.rstrip("\n"))
             code = self._proc.wait()
             if self._closed:
                 return
             self.restarts += 1
-            say(f"WARNING: `modal app logs` ended (exit {code}) with {len(self.lines)} new lines so far; "
-                f"restarting it (restart {self.restarts})")
+            say(f"WARNING: the log stream ended (exit {code}) after {len(self.lines)} lines; restarting it "
+                f"(restart {self.restarts})")
             time.sleep(self._restart_s)
 
     def _take(self, line: str) -> None:
-        if line in self._seen:  # replayed by a restart
+        if line in self._seen:  # repeated by a restart (same timestamp and container id)
             return
         self._seen.add(line)
         self._buf.append(line)
-        if self._buf is self.lines and any(m in line for m in STAGE_MARKERS + FAILURE_MARKERS):
+        if any(m in line for m in STAGE_MARKERS + FAILURE_MARKERS):
             say(f"[vllm] {line.strip()[:240]}")
 
     def failure(self) -> str | None:
         """The crash as its root cause: the last exception line before the first failure marker (for example
-        "RuntimeError: Could not find nvcc ..."), else the marker line itself."""
+        "RuntimeError: Could not find nvcc ..."), else the marker line itself. The exception may follow a log
+        prefix such as "(EngineCore pid=25)"."""
         lines = list(self.lines)
         hit = next((i for i, line in enumerate(lines) if any(m in line for m in FAILURE_MARKERS)), None)
         if hit is None:
             return None
-        causes = [line.strip() for line in lines[:hit] if re.match(r"\s*\w+(Error|Exception):", line)]
+        causes = [m.group(0).strip() for line in lines[:hit]
+                  if (m := re.search(r"\b\w+(Error|Exception): .*", line))]
         return causes[-1] if causes else lines[hit].strip()
 
     def dump(self, n: int = 40) -> None:
-        """Print the last `n` new log lines (call on failure)."""
+        """Print the last `n` log lines (call on failure)."""
         say(f"last {min(n, len(self.lines))} container log lines:")
         for line in self.lines[-n:]:
             print(f"    | {line[:240]}", file=sys.stderr, flush=True)
@@ -204,79 +206,148 @@ class LogWatch:
         return self
 
     def __exit__(self, *exc):
-        self._closed = True
-        if self._proc is not None:
-            self._proc.terminate()
-            self._proc.wait(timeout=10)
+        with self._lock:
+            self._closed = True
+            proc = self._proc
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+CLI_TIMEOUT_S = 120.0  # every modal CLI call is bounded; a hung call must not block the stop
+STOP_WAIT_S = 90.0     # how long a stopping app may take to drain its container
+STOP_TRIES = 5
+RECORD_EVERY_S = 60.0  # GPU time reaches the ledger at least this often, so a killed process loses at most this
+STOP_MARGIN_EXTRA_S = 30.0  # slack on top of the time to notice and drain, before the cap
+
+
+def _cli(modal_cli: str, args: list[str], env: dict) -> subprocess.CompletedProcess | None:
+    """Run one modal CLI command with a timeout; None (after a loud warning) if it could not run."""
+    try:
+        return subprocess.run([modal_cli, *args], env=env, check=False, capture_output=True, text=True,
+                              timeout=CLI_TIMEOUT_S)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        say(f"WARNING: `modal {' '.join(args)}` failed: {type(e).__name__}: {e}")
+        return None
+
+
+def _running(modal_cli: str, env: dict) -> list[dict] | None:
+    """Deployments of the app that still have a container; None if the listing could not be read."""
+    out = _cli(modal_cli, ["app", "list", "--json"], env)
+    if out is None or out.returncode:
+        say(f"WARNING: app list failed: {(out.stderr or out.stdout).strip()[:300] if out else 'no output'}")
+        return None
+    try:
+        apps = json.loads(out.stdout)
+    except json.JSONDecodeError:
+        say(f"WARNING: app list returned non-JSON: {out.stdout[:200]!r}")
+        return None
+    return [a for a in apps
+            if a.get("description") == APP_NAME and a.get("state") != "stopped" and str(a.get("tasks")) != "0"]
+
+
+def _wait_stopped(modal_cli: str, env: dict) -> list[dict]:
+    """`modal app stop` returns while the app is still "stopping..." with its container up (2026-10-27), so poll the
+    listing until no deployment of the app has a container; returns what is still running after STOP_WAIT_S (an
+    unreadable listing counts as still running)."""
+    t0 = time.time()
+    while True:
+        running = _running(modal_cli, env)
+        if running == [] or time.time() - t0 > STOP_WAIT_S:
+            return running if running is not None else [{"description": APP_NAME, "state": "unknown"}]
+        if running:
+            say(f"{APP_NAME} is {running[0].get('state')} with {running[0].get('tasks')} container(s); checking again")
+        time.sleep(5)
+
+
+def stop_until_stopped(modal_cli: str, env: dict) -> list[dict]:
+    """Stop the app and wait for its containers to drain, retrying the stop up to STOP_TRIES times; returns what is
+    still running after the last try (empty when stopped)."""
+    running: list[dict] = []
+    for attempt in range(1, STOP_TRIES + 1):
+        # --yes: without a TTY the stop command otherwise waits for a confirmation that never comes
+        out = _cli(modal_cli, ["app", "stop", APP_NAME, "--yes"], env)
+        if out is not None and out.returncode:
+            say(f"WARNING: app stop exited {out.returncode}: {(out.stderr or out.stdout).strip()[:300]}")
+        running = _wait_stopped(modal_cli, env)
+        if not running:
+            return []
+        say(f"WARNING: {APP_NAME} still running after stop attempt {attempt}/{STOP_TRIES}: {running}")
+    return running
 
 
 @contextmanager
 def session(meter, modal_cli: str, env: dict, tag: str, check_s: float = 15.0):
-    """Wrap a batch that uses the endpoint. Checks the GPU cap first; afterwards stops the app (so no container idles
-    on) and records the elapsed wall time at the A100 rate, an upper bound on the billed container time.
+    """Wrap a batch that uses the endpoint. Checks the GPU cap first, and the cap holds during the batch; afterwards
+    stops the app (so no container idles on) and records the wall time at the A100 rate, an upper bound on the
+    billed container time.
 
-    The cap also holds during the batch: a watcher stops the app as soon as the session's wall time at the A100 rate
-    would take spend past the cap (requests then fail and the batch ends), and the session raises BudgetExceeded.
-    Before this, the cap was only checked at the start, so a long run could pass it unnoticed (2026-10-27: a banking
-    run reached $4.82 of a $5 cap with nothing able to stop it)."""
+    - Spend reaches the ledger every RECORD_EVERY_S, so a killed process loses at most that much, and a resumed run
+      on the same phase sees the spend.
+    - The watcher trips with a margin (the time to notice, stop and drain), stops the app with retries until no
+      container is left, and interrupts the batch so it ends at once; the session then raises BudgetExceeded.
+    - Every modal CLI call has a timeout, and the drain time is metered.
+    (2026-10-27 review: the cap was enforced by one stop attempt with no margin, and spend was only written at exit.)"""
+    import _thread
     import threading
 
     from glint.meter import BudgetExceeded
 
     meter.check_gpu()
-    budget_s = (meter.caps.gpu_usd - meter.gpu_usd) / GPU_USD_PER_HOUR * 3600
-    say(f"session start: GPU spent so far ${meter.gpu_usd:.3f} of cap ${meter.caps.gpu_usd:.2f}; "
-        f"the app is stopped after {budget_s / 60:.0f} min")
+    margin_s = check_s + STOP_WAIT_S + STOP_MARGIN_EXTRA_S
+    budget_s = (meter.caps.gpu_usd - meter.gpu_usd) / GPU_USD_PER_HOUR * 3600 - margin_s
+    if budget_s <= 0:
+        raise BudgetExceeded(f"GPU cap ${meter.caps.gpu_usd:.2f} leaves less than the {margin_s:.0f} s stop margin")
+    say(f"session start: GPU spent so far ${meter.gpu_usd:.3f} of cap ${meter.caps.gpu_usd:.2f}; the app is stopped "
+        f"after {budget_s / 60:.0f} min ({margin_s:.0f} s margin kept for stopping)")
     t0 = time.time()
+    recorded_s = [0.0]
+    record_lock = threading.Lock()
     done, tripped = threading.Event(), threading.Event()
 
-    def stop_app():
-        # --yes: without a TTY the stop command otherwise waits for a confirmation that never comes
-        out = subprocess.run([modal_cli, "app", "stop", APP_NAME, "--yes"], env=env, check=False, capture_output=True,
-                             text=True)
-        if out.returncode:
-            say(f"WARNING: app stop exited {out.returncode}: {(out.stderr or out.stdout).strip()[:300]}")
+    def record_until_now():
+        with record_lock:
+            elapsed = time.time() - t0
+            if elapsed > recorded_s[0]:
+                meter.record_gpu(elapsed - recorded_s[0], GPU_USD_PER_HOUR, GPU, tag=tag)
+                recorded_s[0] = elapsed
 
     def watch():
+        last_record = time.time()
         while not done.wait(check_s):
+            if time.time() - last_record >= RECORD_EVERY_S:
+                record_until_now()
+                last_record = time.time()
             if time.time() - t0 >= budget_s:
                 tripped.set()
-                say(f"GPU CAP REACHED: ${meter.gpu_usd + (time.time() - t0) * GPU_USD_PER_HOUR / 3600:.2f} of "
-                    f"${meter.caps.gpu_usd:.2f}; stopping {APP_NAME} now")
-                stop_app()
+                say(f"GPU CAP REACHED: ${meter.gpu_usd + (time.time() - t0 - recorded_s[0]) * GPU_USD_PER_HOUR / 3600:.2f}"
+                    f" of ${meter.caps.gpu_usd:.2f}; stopping {APP_NAME} now and ending the batch")
+                left = stop_until_stopped(modal_cli, env)
+                record_until_now()
+                if left:
+                    say(f"FAILED: {APP_NAME} still running after {STOP_TRIES} stop attempts: {left}")
+                _thread.interrupt_main()
                 return
 
     threading.Thread(target=watch, daemon=True).start()
     try:
         yield
+    except KeyboardInterrupt:
+        if not tripped.is_set():
+            raise
     finally:
         done.set()
         say(f"stopping {APP_NAME} after {time.time() - t0:.0f} s")
-        stop_app()
-        usd = meter.record_gpu(time.time() - t0, GPU_USD_PER_HOUR, GPU, tag=tag)
-        say(f"metered ${usd:.3f} ({time.time() - t0:.0f} s at ${GPU_USD_PER_HOUR}/h, upper bound)")
-        running = _wait_stopped(modal_cli, env)
-        if running:
-            say(f"FAILED: {APP_NAME} still has running containers {STOP_WAIT_S:.0f} s after stop: {running}")
-            raise RuntimeError(f"{APP_NAME} still has running containers after stop: {running}")
+        left = stop_until_stopped(modal_cli, env)
+        record_until_now()  # after the drain, so the drain time is metered
+        say(f"metered ${meter.gpu_usd:.3f} in this phase so far ({time.time() - t0:.0f} s this session at "
+            f"${GPU_USD_PER_HOUR}/h, upper bound)")
+        if left:
+            say(f"FAILED: {APP_NAME} still has running containers after {STOP_TRIES} stop attempts: {left}")
+            raise RuntimeError(f"{APP_NAME} still has running containers after stop: {left}")
         say(f"{APP_NAME} stopped, 0 containers running")
-        if tripped.is_set():
-            raise BudgetExceeded(f"GPU cap ${meter.caps.gpu_usd:.2f} reached during the session; the app was stopped")
-
-
-STOP_WAIT_S = 90.0
-
-
-def _wait_stopped(modal_cli: str, env: dict) -> list[dict]:
-    """`modal app stop` returns while the app is still "stopping..." with its container up (2026-10-27), so poll the
-    listing until no deployment of the app has a container; returns what is still running after STOP_WAIT_S."""
-    t0 = time.time()
-    while True:
-        listing = subprocess.run([modal_cli, "app", "list", "--json"], check=True, env=env, capture_output=True,
-                                 text=True)
-        running = [a for a in json.loads(listing.stdout)
-                   if a.get("description") == APP_NAME and a.get("state") != "stopped" and str(a.get("tasks")) != "0"]
-        if not running or time.time() - t0 > STOP_WAIT_S:
-            return running
-        say(f"{APP_NAME} is {running[0].get('state')} with {running[0].get('tasks')} container(s); checking again")
-        time.sleep(5)
+    if tripped.is_set():
+        raise BudgetExceeded(f"GPU cap ${meter.caps.gpu_usd:.2f} reached during the session; the app was stopped")

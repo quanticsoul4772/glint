@@ -115,6 +115,7 @@ def test_logwatch_restarts_an_ended_stream_and_drops_replayed_lines():
     watch = LogWatch.__new__(LogWatch)
     watch.history, watch.lines, watch.restarts, watch._seen = [], [], 0, set()
     watch._buf, watch._closed, watch._proc, watch._restart_s = watch.lines, False, None, 0.05
+    watch._lock = threading.Lock()
     watch._cmd = [sys.executable, "-c", "print('INFO Loading weights'); print('KV cache size: 950,814 tokens')"]
     watch._env = dict(os.environ)
     threading.Thread(target=watch._run, daemon=True).start()
@@ -144,7 +145,9 @@ def test_session_stops_the_app_when_the_gpu_cap_is_reached_mid_batch(monkeypatch
         return types.SimpleNamespace(returncode=0, stdout=out if cmd[1:3] == ["app", "list"] else "", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    # a $0.01 cap at $2.94/h is about 12 s of session
+    monkeypatch.setattr(glimmer_serve, "STOP_WAIT_S", 0.5)
+    monkeypatch.setattr(glimmer_serve, "STOP_MARGIN_EXTRA_S", 0.0)
+    # a $0.01 cap at $2.94/h is about 12 s of session, minus the 0.7 s stop margin
     meter = Meter(Caps(meta_usd=0.0, gpu_usd=0.01), ledger=tmp_path / "ledger.jsonl", phase="guard-test")
     t0 = time.time()
     with (pytest.raises(BudgetExceeded, match="reached during the session"),
@@ -153,3 +156,84 @@ def test_session_stops_the_app_when_the_gpu_cap_is_reached_mid_batch(monkeypatch
             time.sleep(0.1)
     assert ["app", "stop"] in calls and 10 < time.time() - t0 < 30
     assert meter.gpu_usd > 0
+
+
+def _fake_modal(calls, stop_codes=None):
+    """A stand-in for subprocess.run on the modal CLI: `app stop` exits with the next code in stop_codes (0 after),
+    `app list` shows the app stopped once a stop has succeeded."""
+    import json
+    import types
+
+    from glint import glimmer_serve
+
+    stop_codes = list(stop_codes or [])
+    state = {"stopped": False}
+
+    def run(cmd, **kwargs):
+        calls.append(cmd[1:3])
+        if cmd[1:3] == ["app", "stop"]:
+            code = stop_codes.pop(0) if stop_codes else 0
+            state["stopped"] = state["stopped"] or code == 0
+            return types.SimpleNamespace(returncode=code, stdout="", stderr="network error" if code else "")
+        if cmd[1:3] == ["app", "list"]:
+            rows = [{"description": glimmer_serve.APP_NAME, "state": "stopped" if state["stopped"] else "deployed",
+                     "tasks": "0" if state["stopped"] else "1"}]
+            return types.SimpleNamespace(returncode=0, stdout=json.dumps(rows), stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    return run
+
+
+def test_a_failed_stop_is_retried_until_no_container_is_left(monkeypatch):
+    import subprocess
+
+    from glint import glimmer_serve
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_modal(calls, stop_codes=[1, 1]))
+    monkeypatch.setattr(glimmer_serve, "STOP_WAIT_S", 0.2)
+    monkeypatch.setattr(glimmer_serve.time, "sleep", lambda s: None)
+    assert glimmer_serve.stop_until_stopped("modal", {}) == []
+    assert calls.count(["app", "stop"]) == 3
+
+
+def test_spend_reaches_the_ledger_during_the_session(monkeypatch, tmp_path):
+    import json
+    import subprocess
+    import time
+
+    from glint import glimmer_serve
+    from glint.meter import Caps, Meter
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_modal(calls))
+    monkeypatch.setattr(glimmer_serve, "RECORD_EVERY_S", 0.3)
+    ledger = tmp_path / "ledger.jsonl"
+    meter = Meter(Caps(meta_usd=0.0, gpu_usd=5.0), ledger=ledger, phase="record-test")
+    with glimmer_serve.session(meter, "modal", {}, tag="t", check_s=0.1):
+        time.sleep(1.2)
+        rows_mid = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert len(rows_mid) >= 2  # written while the batch ran, not only at the end
+    rows = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert 1.2 <= sum(r["seconds"] for r in rows) < 5
+
+
+def test_failure_finds_the_root_cause_after_a_log_prefix():
+    from glint.glimmer_serve import LogWatch
+
+    watch = LogWatch.__new__(LogWatch)
+    watch.history, watch.lines = [], [
+        "2026-10-27T18:09:30 ta-01 (EngineCore pid=25) RuntimeError: Could not find nvcc",
+        "2026-10-27T18:09:31 ta-01 RuntimeError: Engine core initialization failed. See root cause above.",
+    ]
+    assert watch.failure() == "RuntimeError: Could not find nvcc"
+
+
+def test_logwatch_streams_with_follow():
+    # the command is built in __init__; read it without starting a process
+    import inspect
+
+    from glint.glimmer_serve import LogWatch
+
+    src = inspect.getsource(LogWatch.__init__)
+    assert '"-f"' in src and "--timestamps" in src and "--show-container-id" in src
