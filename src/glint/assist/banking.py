@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+from glint.assist import as_flag
+
 TODAY = date(2025, 11, 14)
 CLI_TIERS = {  # account age days, cooldown days, utilization must be below, on-time payments, max increase share
     "entry": {"age": 120, "cooldown": 120, "utilization": 0.70, "on_time": 6, "max_increase": 0.25},
@@ -104,11 +106,13 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
 
     opened = _date(acc.get("date_of_account_open"))
     age = (TODAY - opened).days if opened else None
-    approved = [r for r in _rows(db.credit_limit_increase_requests, credit_card_account_id=credit_card_account_id)
-                if str(r.get("status", "")).upper() == "APPROVED"]
-    last_increase = max((d for r in approved
-                         if (d := _date(r.get("decision_date") or r.get("submitted_at") or r.get("submitted_date")))),
-                        default=None)
+    # Cooldown (logistics_005): counted from the submission date of the most recent request, and only when that
+    # request was approved ("Denied requests do not trigger a cooldown period")
+    dated = [(d, r) for r in _rows(db.credit_limit_increase_requests, credit_card_account_id=credit_card_account_id)
+             if str(r.get("status", "")).upper() in ("APPROVED", "DENIED")
+             and (d := _date(r.get("submitted_at") or r.get("submitted_date") or r.get("decision_date")))]
+    latest = max(dated, key=lambda x: x[0], default=None)
+    last_increase = latest[0] if latest and str(latest[1].get("status", "")).upper() == "APPROVED" else None
     disputes = [r["dispute_id"] for r in _rows(db.transaction_disputes, user_id=user_id)
                 if str(r.get("status", "")).upper() in OPEN_DISPUTE]
     orders = [r["order_id"] for r in _rows(db.credit_card_orders, credit_card_account_id=credit_card_account_id)
@@ -158,6 +162,9 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
         return {"ready": False, "reasons": [f"transaction {transaction_id} does not exist for user {user_id}"]}
     replaced_today = [r["order_id"] for r in _rows(db.credit_card_orders, credit_card_account_id=credit_card_account_id)
                       if _date(r.get("order_date")) == TODAY]
+    replacement_requested = as_flag(replacement_requested)
+    if contacted_merchant is not None:
+        contacted_merchant = as_flag(contacted_merchant)
     reissue = replacement_requested or bool(replaced_today)
     out = {"card_action": "cancel_and_reissue" if reissue else "keep_active",
            "card_action_reason": (f"a replacement is ordered or requested in this conversation {replaced_today}: "

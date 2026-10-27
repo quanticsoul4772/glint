@@ -5,6 +5,8 @@ a verdict, the policy rule it rests on (quoted from the retail policy), and the 
 """
 from __future__ import annotations
 
+from collections import Counter
+
 ACTIONS = ("cancel", "modify_address", "modify_payment", "modify_items", "return", "exchange")
 
 RULES = {
@@ -33,6 +35,9 @@ def _method(db, user_id: str, method_id: str):
     return db.users[user_id].payment_methods.get(method_id)
 
 
+PAYMENT_ACTIONS = ("modify_items", "exchange", "modify_payment", "return")
+
+
 def _covers(method, amount: float) -> bool:
     return getattr(method, "source", "") != "gift_card" or amount <= 0 or method.balance >= amount
 
@@ -54,6 +59,11 @@ def check_eligibility(db, order_id: str, action: str, payment_method_id: str | N
     details["original_payment_method"] = original
     methods = db.users[order.user_id].payment_methods
     order_items = {i.item_id: i for i in order.items}
+    in_order = Counter(i.item_id for i in order.items)
+    over = {i: n for i, n in Counter(item_ids or []).items() if i in in_order and n > in_order[i]}
+    if over:
+        reasons.append(f"items listed more times than the order holds them: {over} (order holds "
+                       f"{ {i: in_order[i] for i in over} })")
 
     amount = 0.0
     if action in ("modify_items", "exchange"):
@@ -101,8 +111,9 @@ def check_eligibility(db, order_id: str, action: str, payment_method_id: str | N
         details["after_this"] = (f"order status becomes '{action} requested'; no {other} (or second {action}) is "
                                  "possible on this order afterwards")
     details["allowed_payment_methods"] = allowed_methods
-    if payment_method_id is not None and allowed_methods and payment_method_id not in allowed_methods:
-        reasons.append(f"payment method {payment_method_id} is not allowed here; allowed: {allowed_methods}")
+    if payment_method_id is not None and action in PAYMENT_ACTIONS and payment_method_id not in allowed_methods:
+        reasons.append(f"payment method {payment_method_id} is not allowed here; allowed: {allowed_methods or 'none'}"
+                       + ("" if allowed_methods else " (no payment method covers it)"))
     return {"allowed": not reasons, "reasons": reasons, "rules": list(dict.fromkeys(rules)), "details": details}
 
 
