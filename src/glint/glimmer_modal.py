@@ -1,7 +1,7 @@
 """Glimmer activation capture on Modal at bf16 (Transformers), for the teacher-forced replay.
 
 `download` (CPU) puts the pinned Glimmer weights on a Modal Volume once. `capture` (A100-80GB) runs job lines built
-by measure/kaggle/build_jobs.py: {"traj", "ops": [{"append": ids, "read": [[rel, label]]} | {"truncate": abs_pos}]}.
+by scripts/build_jobs.py: {"traj", "ops": [{"append": ids, "read": [[rel, label]]} | {"truncate": abs_pos}]}.
 Each layer's output (the residual stream) is saved at the read positions; the last layer is skipped to match the
 llama.cpp layout. The cache is a config-less DynamicCache, so sliding-window layers keep every position and can be
 rolled back with `crop`; the sliding window itself is still applied by the attention mask. Prefill runs in chunks so
