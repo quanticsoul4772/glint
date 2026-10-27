@@ -1,6 +1,4 @@
-import pytest
-
-from glint.atem import AtemParseError, parse_turn
+from glint.atem import parse_turn
 
 TOOLS = [
     {"type": "function", "function": {"name": "find_user_id_by_name_zip", "parameters": {"type": "object", "properties": {
@@ -45,11 +43,19 @@ def test_reasoning_missing_eom_does_not_swallow_the_call():
     assert turn.tool_calls[0].arguments == {"zip": "80273"}
 
 
-def test_doubled_name_collapses_and_unknown_name_raises():
+def test_doubled_name_collapses():
     doubled = call("find_user_id_by_name_zip.find_user_id_by_name_zip", {"zip": "1"})
     assert parse_turn(doubled, TOOLS).tool_calls[0].name == "find_user_id_by_name_zip"
-    with pytest.raises(AtemParseError):
-        parse_turn(call("delete_everything", {}), TOOLS)
+
+
+def test_unregistered_name_passes_through_for_the_environment_to_reject():
+    # 2026-10-27, banking task_038 on Modal: Glimmer called a hidden (discoverable) tool directly by name. Raising
+    # ended the run as an infrastructure error; τ² should answer it as an unknown tool instead.
+    turn = parse_turn(call("get_user_dispute_history_7291", {"user_id": "890389b165"}), TOOLS)
+    # no schema, so values are JSON-decoded where they parse ("7" would become 7) and kept as text otherwise
+    assert [(c.name, c.arguments) for c in turn.tool_calls] == [("get_user_dispute_history_7291",
+                                                                  {"user_id": "890389b165"})]
+    assert parse_turn(call("x_1.x_1", {}), TOOLS).tool_calls[0].name == "x_1"
 
 
 def test_recorded_deepinfra_turn():
