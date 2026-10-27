@@ -24,8 +24,9 @@ Sets:
 Runs go domain by domain (base then tools), so a domain that finishes has both arms.
 
 - `banking-failures`: 038 and 054 only, run first; shares `banking`'s stamp and checkpoint.
+- `banking-other`: the other 10 banking tasks of `banking` (not tuned on), k=2.
 
-Usage: python tools_ab.py [design|heldout|banking|banking-failures] [--modal] [--analyze]
+Usage: python tools_ab.py [design|heldout|banking|banking-failures|banking-other] [--modal] [--analyze]
 """
 import json
 import os
@@ -91,6 +92,13 @@ SETS = {
     "banking": {"tasks": banking_tasks, "trials": 4, "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 6.0,
                 "data": MEASURE / "tools_ab_banking", "out": RESULTS / "tools-ab-banking.json",
                 "save": "tools-ab-banking"},
+    # The 10 banking tasks not tuned on (the banking tools were changed after reading 038 and 054 runs only); k=2 to
+    # keep Modal credit for activation capture
+    "banking-other": {"tasks": lambda: {"banking_knowledge": [t for t in banking_tasks()["banking_knowledge"]
+                                                              if t not in ("task_038", "task_054")]},
+                      "trials": 2, "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 5.0,
+                      "data": MEASURE / "tools_ab_banking_other", "out": RESULTS / "tools-ab-banking-other.json",
+                      "save": "tools-ab-banking-other"},
     # The two recorded failures first. Same stamp and τ² save_to as `banking`, so the full set later resumes these
     # simulations instead of running them again
     "banking-failures": {"tasks": lambda: {"banking_knowledge": ["task_038", "task_054"]}, "trials": 4,
