@@ -7,8 +7,11 @@ Sets:
 - `design` (default): the tasks the tools were built from (research/3-project/tool-offload-research.md): retail 20,
   93, 82 and airline 7; k=8; caps Glimmer $2, Meta $0.50.
 - `heldout`: 10 retail + 10 airline train tasks drawn at random (seed 2026) after excluding every task used to design
-  the tools or classified in the failure inventory; test-40 is never used; k=4; caps Glimmer $3.50, Meta $0.50
-  (size chosen with parallax `decide`).
+  the tools or classified in the failure inventory; test-40 is never used; caps Glimmer $3.50, Meta $0.50 (size
+  chosen with parallax `decide`). Retail k=4; airline k=2, because about $2 was left on DeepInfra: trials 0-1 of the
+  base arm were already done, and τ² derives trial seeds as a prefix-stable sequence, so k=2 reuses them unchanged.
+
+Runs go domain by domain (base then tools), so a domain that finishes has both arms.
 
 Usage: python tools_ab.py [design|heldout] [--analyze]
 """
@@ -52,10 +55,14 @@ def heldout_tasks(n: int = 10, seed: int = 2026) -> dict[str, list[str]]:
 SETS = {
     "design": {"tasks": lambda: {"retail": ["20", "93", "82"], "airline": ["7"]}, "trials": 8, "glimmer_usd": 2.0,
                "meta_usd": 0.5, "data": MEASURE / "tools_ab", "out": RESULTS / "tools-ab.json", "save": "tools-ab"},
-    "heldout": {"tasks": heldout_tasks, "trials": 4, "glimmer_usd": 3.5, "meta_usd": 0.5,
+    "heldout": {"tasks": heldout_tasks, "trials": 4, "airline_trials": 2, "glimmer_usd": 3.5, "meta_usd": 0.5,
                 "data": MEASURE / "tools_ab_heldout", "out": RESULTS / "tools-ab-heldout.json",
                 "save": "tools-ab-heldout"},
 }
+
+
+def _trials(cfg: dict, domain: str) -> int:
+    return cfg.get(f"{domain}_trials", cfg["trials"])
 
 
 def generate(cfg: dict) -> None:
@@ -80,8 +87,8 @@ def generate(cfg: dict) -> None:
     llm_utils.completion = guarded(guarded(route, glim, only=("Muse-Glimmer",)), meta, RateLimiter(per_minute=120),
                                    only=("muse-spark", "muse-wonder"))
     nl.DEFAULT_LLM_NL_ASSERTIONS, nl.DEFAULT_LLM_NL_ASSERTIONS_ARGS = SPARK, {**META, "temperature": 0.0}
-    for arm in ("base", "tools"):
-        for domain, ids in tasks.items():
+    for domain, ids in tasks.items():
+        for arm in ("base", "tools"):
             out = data / f"{arm}-{domain}.json"
             if out.exists():
                 continue
@@ -89,7 +96,7 @@ def generate(cfg: dict) -> None:
                 install(domain)
             config = TextRunConfig(domain=domain, task_split_name="train", task_ids=ids, agent="llm_agent",
                                    llm_agent=GLIMMER, llm_args_agent=glimmer_args("medium"), user="user_simulator",
-                                   llm_user=SPARK, llm_args_user=META, num_trials=cfg["trials"], max_concurrency=4,
+                                   llm_user=SPARK, llm_args_user=META, num_trials=_trials(cfg, domain), max_concurrency=4,
                                    seed=5000, save_to=f"glint-{cfg['save']}-{arm}-{domain}-{stamp}",
                                    auto_review=False, max_retries=0, auto_resume=True)
             results = run_domain(config)
@@ -106,6 +113,8 @@ def analyze(cfg: dict) -> None:
             if not path.exists():
                 continue
             for s in json.loads(path.read_text(encoding="utf-8"))["simulations"]:
+                if s["trial"] >= _trials(cfg, domain):  # a resumed checkpoint can hold trials beyond this k
+                    continue
                 key = f"{domain}-{s['task_id']}"
                 row = report.setdefault(key, {}).setdefault(arm, {"passes": 0, "runs": 0, "tool_calls": Counter(),
                                                                    "infra_errors": 0})
