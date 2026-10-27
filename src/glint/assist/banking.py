@@ -20,15 +20,20 @@ PROVISIONAL_REASONS = ("unauthorized_fraudulent_charge", "duplicate_charge", "go
 OPEN_DISPUTE = ("SUBMITTED", "UNDER_REVIEW", "PENDING")
 FINAL_ORDER = ("DELIVERED", "CANCELLED")
 BAD_STANDING = ("PAST_DUE", "DELINQUENT", "COLLECTIONS", "CLOSED")
+# The bank tools below are hidden (discoverable): each is unlocked once with unlock_discoverable_agent_tool, then
+# called through call_discoverable_agent_tool, never by its own name
 CLI_STEPS = [
+    ("Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it "
+     "with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name."),
     "1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)",
-    "2. get_user_dispute_history_7291",
-    "3. get_pending_replacement_orders_5765",
-    "4. get_credit_limit_increase_history_4829",
-    "5. get_payment_history_6183 with months = payment_months",
+    ("2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already "
+     "read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, "
+     "get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months"),
     ("6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with "
      "denial_reason, as this verdict says"),
 ]
+LIMIT_FIRST = ("Do the credit limit increase first (submit, the required lookups, approve or deny) before filing any "
+               "dispute or ordering a replacement card: a pending dispute or replacement makes the increase fail.")
 
 
 def _tier(card_type: str) -> str | None:
@@ -85,9 +90,11 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
            "steps": CLI_STEPS}
     others = [r.lower() for r in other_requests or []]
     if any("dispute" in r or "replace" in r or "reissue" in r for r in others):
-        out["sequencing"] = ("Finish the credit limit increase (all steps, through approve or deny) BEFORE filing any "
-                             "dispute or ordering a replacement card: a pending dispute or replacement makes the "
-                             "increase fail.")
+        out["sequencing"] = LIMIT_FIRST
+    if requested_increase_amount <= 0:
+        out |= {"verdict": "ask_amount", "reasons": [("ask the user how much increase they want (in dollars); then "
+                                                      "call this again with that amount")]}
+        return out
     if requested_increase_amount > max_increase:
         out |= {"verdict": "reduce_amount",
                 "reasons": [(f"requested increase ${requested_increase_amount:,.2f} exceeds the {tier}-tier maximum "
@@ -137,9 +144,12 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
 
 
 def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
-                  contacted_merchant: bool | None = None, replacement_requested: bool = False) -> dict:
+                  contacted_merchant: bool | None = None, replacement_requested: bool = False,
+                  other_requests: list[str] | None = None) -> dict:
     """The field values a credit card dispute must carry: `card_action`, `eligible_for_provisional_credit` (with each
-    criterion), the purchase date and card digits, and what still has to be asked of the user."""
+    criterion), the purchase date and card digits, and what still has to be asked of the user. When the user also
+    wants a credit limit increase, `sequencing` says to finish it before this dispute: Glimmer called this tool first
+    and filed the dispute before the increase, which then failed (task_054 on Modal, 2026-10-27)."""
     acc, error = _account(db, credit_card_account_id, user_id)
     if error:
         return {"ready": False, "reasons": [error]}
@@ -175,5 +185,10 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
     }
     out["provisional_credit_criteria"] = criteria
     out["eligible_for_provisional_credit"] = all(criteria.values())
-    out["ready"] = not out["ask_user"]
+    # `other_requests` are the user's requests not done yet. The database cannot show that an increase was decided:
+    # tau2's approve record reuses the submit request's id, so its insert is dropped and the request stays PENDING
+    others = " ".join(other_requests or []).lower()
+    if "limit" in others or "cli" in others.split():
+        out["sequencing"] = LIMIT_FIRST  # this dispute waits until the increase is approved or denied
+    out["ready"] = not out["ask_user"] and "sequencing" not in out
     return out

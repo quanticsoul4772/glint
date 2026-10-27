@@ -47,7 +47,7 @@ def serve():
         raise RuntimeError("Glimmer weights are missing on the glint-glimmer Volume")
     cmd = [
         "vllm", "serve", "/vol/weights", "--served-model-name", MODEL_NAME, "--host", "0.0.0.0", "--port", "8000",
-        "--max-model-len", "65536", "--gpu-memory-utilization", "0.92", "--max-num-seqs", "16",
+        "--max-model-len", "131072", "--gpu-memory-utilization", "0.92", "--max-num-seqs", "16",
         "--enable-auto-tool-choice", "--tool-call-parser", "muse_glimmer", "--reasoning-parser", "muse_glimmer",
         "--generation-config", "auto", "--limit-mm-per-prompt", '{"image": 0}',
     ]

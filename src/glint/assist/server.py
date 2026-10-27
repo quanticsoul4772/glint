@@ -88,10 +88,11 @@ def check_credit_limit_increase(user_id: str, credit_card_account_id: str, reque
 
 @server.tool()
 def check_card_dispute(user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
-                       contacted_merchant: bool | None = None, replacement_requested: bool = False) -> dict:
+                       contacted_merchant: bool | None = None, replacement_requested: bool = False,
+                       other_requests: list[str] | None = None) -> dict:
     """The card_action and provisional-credit values a credit card dispute must be filed with."""
     return banking.check_dispute(_banking_db(), user_id, credit_card_account_id, transaction_id, dispute_reason,
-                                 contacted_merchant, replacement_requested)
+                                 contacted_merchant, replacement_requested, other_requests)
 
 
 if __name__ == "__main__":
