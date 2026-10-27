@@ -100,3 +100,27 @@ def test_session_waits_for_stopping_to_finish(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(glimmer_serve.time, "sleep", lambda s: None)
     assert glimmer_serve._wait_stopped("modal", {}) == []
+
+
+def test_logwatch_restarts_an_ended_stream_and_drops_replayed_lines():
+    # `modal app logs` exited right after a deploy (2026-10-27) and the watch saw nothing; it must restart, and the
+    # replay a restart brings must not duplicate lines
+    import os
+    import sys
+    import threading
+    import time
+
+    from glint.glimmer_serve import LogWatch
+
+    watch = LogWatch.__new__(LogWatch)
+    watch.history, watch.lines, watch.restarts, watch._seen = [], [], 0, set()
+    watch._buf, watch._closed, watch._proc, watch._restart_s = watch.lines, False, None, 0.05
+    watch._cmd = [sys.executable, "-c", "print('INFO Loading weights'); print('KV cache size: 950,814 tokens')"]
+    watch._env = dict(os.environ)
+    threading.Thread(target=watch._run, daemon=True).start()
+    deadline = time.time() + 20
+    while watch.restarts < 3 and time.time() < deadline:
+        time.sleep(0.05)
+    watch._closed = True
+    assert watch.restarts >= 3
+    assert watch.lines == ["INFO Loading weights", "KV cache size: 950,814 tokens"]

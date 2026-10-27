@@ -21,6 +21,7 @@ from glint.meter import Caps, Meter
 ROOT = Path(__file__).resolve().parents[1]
 MODAL = str(ROOT / ".venv" / "Scripts" / "modal.exe")
 OUT = Path(r"<workspace>\research\5-measurements\modal-serve-smoke.json")
+RAW = Path(r"<workspace>\measure\data\modal-serve-smoke-response.json")  # for the glint.atem re-parse check
 TOOLS = [{"type": "function", "function": {
     "name": "get_order_details", "description": "Get the status and details of an order.",
     "parameters": {"type": "object", "properties": {"order_id": {"type": "string", "description": "Such as '#W0000000'"}},
@@ -38,7 +39,7 @@ def main():
     result = {"url": url, "vllm": "0.31.0"}
     with session(meter, MODAL, env, tag="smoke"), LogWatch(MODAL, env) as log:
         try:
-            result["ready_after_s"] = round(wait_ready(url, key, secret, failed=log.failure), 1)
+            result["ready_after_s"] = round(wait_ready(url, key, secret, failed=log.failure, log_lines=lambda: len(log.lines)), 1)
             say("sending one tool-call request")
             t0 = time.time()
             resp = litellm.completion(model=f"openai/{MODEL_NAME}", messages=MESSAGES, tools=TOOLS, max_tokens=2048,
@@ -69,11 +70,13 @@ def _record(result: dict, resp, log) -> None:
         "finish_reason": choice.finish_reason,
         "completion_tokens": resp.usage.completion_tokens,
         "logprob_tokens": len(content),
-        "token_ids": len(getattr(choice, "token_ids", None) or (choice.model_extra or {}).get("token_ids") or []),
+        # LiteLLM moves vLLM's extra choice field into provider_specific_fields
+        "token_ids": len((getattr(choice, "provider_specific_fields", None) or {}).get("token_ids") or []),
     }
     result["pass"] = bool(calls) and calls[0].function.name == "get_order_details" and \
         "#W2890441" in calls[0].function.arguments and result["logprob_tokens"] == result["completion_tokens"]
     OUT.write_text(json.dumps(result, indent=1), encoding="utf-8")
+    RAW.write_text(json.dumps(resp.model_dump(), indent=1, default=str), encoding="utf-8")
     say(f"recorded: tool calls {result['tool_calls']}, {result['logprob_tokens']}/{result['completion_tokens']} "
         f"tokens with logprobs, {result['token_ids']} token ids")
 
