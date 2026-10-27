@@ -1,17 +1,17 @@
-"""Adds the decision tools to τ²'s retail and airline toolkits, so Glimmer can call them in a run.
+"""Adds the decision tools to τ²'s retail, airline and banking_knowledge toolkits, so Glimmer can call them in a run.
 
-`install("retail")` / `install("airline")` wraps the registered environment constructor: every environment it builds
-gets the domain toolkit subclass below on the same live database, so the tools see the episode's current state. The
+`install(domain)` wraps the registered environment constructor: every environment it builds gets the domain toolkit
+subclass below on the same live database, so the tools see the episode's current state. The
 tools are READ tools: they never change the database and are skipped when τ² replays an episode for evaluation.
 """
 from __future__ import annotations
 
 from tau2.domains.airline.tools import AirlineTools
 from tau2.domains.retail.tools import RetailTools
-from tau2.environment.toolkit import ToolType, is_tool
+from tau2.environment.toolkit import ToolKitBase, ToolType, is_tool
 from tau2.registry import registry
 
-from glint.assist import airline, retail
+from glint.assist import airline, banking, retail
 
 
 class AssistedRetailTools(RetailTools):
@@ -69,7 +69,9 @@ class AssistedRetailTools(RetailTools):
             sort_by_price: 'desc' (most expensive first) or 'asc' (cheapest first).
 
         Returns:
-            dict: product, current_item, variants (item_id, options, price, available), count.
+            dict: product, current_item, variants (item_id, options, price, available), count. When no variant
+            matches, 'closest' lists the variants that break the fewest constraints and which ones each breaks: show
+            those to the user and let the user choose which constraint to give up.
         """
         return retail.find_variants(self.db, item_id, require, keep_same, True, sort_by_price)
 
@@ -93,6 +95,74 @@ class AssistedAirlineTools(AirlineTools):
         """
         return airline.check_eligibility(self.db, reservation_id, action, reason or None)
 
+    @is_tool(ToolType.READ)
+    def get_upcoming_trips_cost(self, user_id: str) -> dict:
+        """Upcoming trips calculator: call this whenever the user asks about their upcoming flights or what they cost
+        in total, instead of adding up prices yourself. It returns every reservation of the user whose flights are
+        all still ahead (not cancelled, nothing flown), the amount paid for each, and the exact total. Quote its
+        total_cost to the user.
+
+        Args:
+            user_id: The user id, such as 'sara_doe_496'.
+
+        Returns:
+            dict: reservations (reservation_id, cabin, passengers, flights, amount_paid), count, total_cost.
+        """
+        return airline.upcoming_trips(self.db, user_id)
+
+
+class BankingDecisionTools(ToolKitBase):
+    """Mixed in ahead of the banking toolkit class τ² composes per retrieval variant (see `install`)."""
+
+    @is_tool(ToolType.READ)
+    def check_credit_limit_increase(self, user_id: str, credit_card_account_id: str, requested_increase_amount: float,
+                                    other_requests: list[str] | None = None) -> dict:
+        """Credit limit increase decision tool: call this as soon as the user asks for a credit limit increase,
+        BEFORE submitting it, and again before approving or denying it. It applies the knowledge base's credit limit
+        increase procedure to the account's current state and returns the authoritative verdict: 'reduce_amount'
+        (with max_increase; do not submit more than that), 'approve' (with new_credit_limit) or 'deny' (with
+        denial_reason), every required check with its value, the exact steps to follow in order, and whether the
+        increase must be done before the user's other requests. Follow its verdict and its step order.
+
+        Args:
+            user_id: The user's id.
+            credit_card_account_id: The credit card account id, such as 'cc_584f9c5d00_gold'.
+            requested_increase_amount: The dollar amount of the increase the user asks for (not the new limit).
+            other_requests: The user's other requests in this conversation, such as ['dispute a charge',
+                'replacement card'].
+
+        Returns:
+            dict: verdict, new_credit_limit or denial_reason, max_increase, payment_months, checks, steps, sequencing.
+        """
+        return banking.check_credit_limit_increase(self.db, user_id, credit_card_account_id,
+                                                   requested_increase_amount, other_requests)
+
+    @is_tool(ToolType.READ)
+    def check_card_dispute(self, user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
+                           contacted_merchant: bool | None = None, replacement_requested: bool = False) -> dict:
+        """Credit card dispute decision tool: call this BEFORE filing each credit card transaction dispute. It
+        returns the authoritative values to file with: card_action ('keep_active' or 'cancel_and_reissue', the same
+        for every dispute on a card being replaced), eligible_for_provisional_credit with each criterion, the
+        purchase date and card digits, and any question still to ask the user. Use its values in the dispute call.
+
+        Args:
+            user_id: The user's id.
+            credit_card_account_id: The credit card account the transaction was charged to.
+            transaction_id: The transaction to dispute.
+            dispute_reason: One of 'unauthorized_fraudulent_charge', 'duplicate_charge', 'incorrect_amount',
+                'goods_services_not_received', 'goods_services_not_as_described',
+                'canceled_subscription_still_charging', 'refund_never_processed'.
+            contacted_merchant: The user's answer to "did you try to resolve this with the merchant first?" for this
+                transaction; leave empty if not asked yet.
+            replacement_requested: True if the user wants this card replaced or cancelled in this conversation.
+
+        Returns:
+            dict: card_action, eligible_for_provisional_credit, provisional_credit_criteria, purchase_date,
+            card_last_4_digits, amount, ask_user, ready.
+        """
+        return banking.check_dispute(self.db, user_id, credit_card_account_id, transaction_id, dispute_reason,
+                                     contacted_merchant, replacement_requested)
+
 
 _ASSISTED = {"retail": AssistedRetailTools, "airline": AssistedAirlineTools}
 
@@ -102,11 +172,16 @@ def install(domain: str) -> None:
     base = registry.get_env_constructor(domain)
     if getattr(base, "glint_assisted", False):
         return
-    toolkit_cls = _ASSISTED[domain]
 
     def constructor(*args, **kwargs):
         env = base(*args, **kwargs)
-        env.tools = toolkit_cls(env.tools.db)
+        if domain == "banking_knowledge":
+            # The banking toolkit class is composed per retrieval variant and holds per-episode state, so keep the
+            # instance and put the decision tools ahead of its class in the MRO
+            cls = type(env.tools)
+            env.tools.__class__ = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
+        else:
+            env.tools = _ASSISTED[domain](env.tools.db)
         return env
 
     constructor.glint_assisted = True

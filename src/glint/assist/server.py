@@ -1,7 +1,8 @@
-"""MCP server exposing Glint's decision tools over the τ² retail and airline databases.
+"""MCP server exposing Glint's decision tools over the τ² retail, airline and banking_knowledge databases.
 
 Run: python -m glint.assist.server   (stdio transport). Each tool loads its domain database once, from the vendored
-τ²-bench data, and answers with the same verdicts the in-run tools give (`glint.assist.retail` / `.airline`).
+τ²-bench data, and answers with the same verdicts the in-run tools give (`glint.assist.retail` / `.airline` /
+`.banking`).
 """
 from __future__ import annotations
 
@@ -9,12 +10,13 @@ from functools import cache
 
 from mcp.server.mcpserver import MCPServer
 
-from glint.assist import airline, retail
+from glint.assist import airline, banking, retail
 
 server = MCPServer(
     name="glint-assist",
-    instructions="Decision tools for retail orders and airline reservations. Call them before deciding what policy "
-                 "allows or which item a customer means; their verdicts are deterministic and authoritative.",
+    instructions="Decision tools for retail orders, airline reservations, and bank credit limit increases and card "
+                 "disputes. Call them before deciding what policy allows or which item a customer means; their "
+                 "verdicts are deterministic and authoritative.",
 )
 
 
@@ -32,6 +34,14 @@ def _airline_db():
     from tau2.domains.airline.utils import AIRLINE_DB_PATH
 
     return FlightDB.load(AIRLINE_DB_PATH)
+
+
+@cache
+def _banking_db():
+    from tau2.domains.banking_knowledge.data_model import TransactionalDB
+    from tau2.domains.banking_knowledge.environment import KNOWLEDGE_DB_PATH
+
+    return TransactionalDB.load(str(KNOWLEDGE_DB_PATH))
 
 
 @server.tool()
@@ -59,6 +69,28 @@ def find_variants(item_id: str, require: dict | None = None, keep_same: list[str
 def check_reservation_action(reservation_id: str, action: str, reason: str = "") -> dict:
     """Airline policy verdict for an action on a reservation, with any allowed change that would make it allowed."""
     return airline.check_eligibility(_airline_db(), reservation_id, action, reason or None)
+
+
+@server.tool()
+def get_upcoming_trips_cost(user_id: str) -> dict:
+    """A user's reservations with every flight still ahead, the amount paid for each, and the total."""
+    return airline.upcoming_trips(_airline_db(), user_id)
+
+
+@server.tool()
+def check_credit_limit_increase(user_id: str, credit_card_account_id: str, requested_increase_amount: float,
+                                other_requests: list[str] | None = None) -> dict:
+    """Credit limit increase verdict (reduce_amount / approve / deny), every required check, and the step order."""
+    return banking.check_credit_limit_increase(_banking_db(), user_id, credit_card_account_id,
+                                               requested_increase_amount, other_requests)
+
+
+@server.tool()
+def check_card_dispute(user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
+                       contacted_merchant: bool | None = None, replacement_requested: bool = False) -> dict:
+    """The card_action and provisional-credit values a credit card dispute must be filed with."""
+    return banking.check_dispute(_banking_db(), user_id, credit_card_account_id, transaction_id, dispute_reason,
+                                 contacted_merchant, replacement_requested)
 
 
 if __name__ == "__main__":

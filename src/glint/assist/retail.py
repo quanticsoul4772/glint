@@ -136,5 +136,32 @@ def find_variants(db, item_id: str, require: dict | None = None, keep_same: list
             continue
         out.append({"item_id": vid, "options": v.options, "price": v.price, "available": v.available})
     out.sort(key=lambda x: x["price"], reverse=sort_by_price == "desc")
-    return {"product": product.name, "current_item": {"item_id": item_id, "options": current}, "variants": out,
-            "count": len(out)}
+    result = {"product": product.name, "current_item": {"item_id": item_id, "options": current}, "variants": out,
+              "count": len(out)}
+    if not out and (require or keep_same):
+        result["closest"] = _closest(product, item_id, current, require or {}, keep_same or [], available_only)
+    return result
+
+
+def _closest(product, item_id: str, current: dict, require: dict, keep_same: list[str], available_only: bool) -> dict:
+    """When nothing matches: the variants that break the fewest constraints, and which constraints each one breaks,
+    so the constraint to relax is the one the user cares least about, not a guess."""
+    scored = []
+    for vid, v in product.variants.items():
+        if vid == item_id or (available_only and not v.available):
+            continue
+        wanted = [f"{k}={v.options.get(k)} (wanted {val})" for k, val in require.items()
+                  if str(v.options.get(k, "")).lower() != str(val).lower()]
+        same = [f"{k}={v.options.get(k)} (wanted same as current: {current.get(k)})" for k in keep_same
+                if v.options.get(k) != current.get(k)]
+        scored.append((len(wanted) + len(same), len(wanted),
+                       {"item_id": vid, "options": v.options, "price": v.price, "breaks": wanted + same}))
+    if not scored:
+        return {"variants": [], "note": "no available variant of this product"}
+    fewest = min(n for n, _, _ in scored)
+    # Among the closest, the ones that keep every explicitly required value come first
+    variants = [v for n, _, v in sorted((s for s in scored if s[0] == fewest), key=lambda s: s[1])]
+    return {"variants": variants, "constraints_broken": fewest,
+            "note": "No variant meets every constraint. Each of these breaks only the constraints listed in 'breaks'. "
+                    "Tell the user exactly which constraint each option breaks and let the user choose; do not drop "
+                    "a constraint the user asked for without asking."}

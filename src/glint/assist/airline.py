@@ -43,6 +43,23 @@ def _flown(db, reservation) -> list[str]:
     return out
 
 
+def upcoming_trips(db, user_id: str) -> dict:
+    """The user's reservations whose flights are all still ahead (not cancelled, nothing flown), each with the amount
+    paid, and the total. Answers "what are my upcoming flights and what do they cost in total"."""
+    user = db.users.get(user_id)
+    if user is None:
+        return {"reservations": [], "reasons": [f"user {user_id} does not exist"]}
+    out = []
+    for rid in user.reservations:
+        res = db.reservations.get(rid)
+        if res is None or res.status == "cancelled" or _flown(db, res):
+            continue
+        out.append({"reservation_id": rid, "cabin": res.cabin, "passengers": len(res.passengers),
+                    "flights": [f"{f.flight_number} {f.date}" for f in res.flights],
+                    "amount_paid": sum(p.amount for p in res.payment_history)})
+    return {"reservations": out, "count": len(out), "total_cost": sum(r["amount_paid"] for r in out)}
+
+
 def check_eligibility(db, reservation_id: str, action: str, reason: str | None = None) -> dict:
     """Whether `action` is allowed on `reservation_id` under the airline policy, the rule it rests on, and (when it is
     not allowed) any allowed change that would make it allowed."""
