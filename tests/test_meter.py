@@ -79,6 +79,7 @@ def _fake_openai_server():
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
+            self.server.requests += 1  # counted, so a test can prove a blocked call never reached the endpoint
             self.rfile.read(int(self.headers.get("content-length") or 0))
             body = json.dumps({"id": "x", "object": "chat.completion", "created": 0, "model": "m",
                                "choices": [{"index": 0, "finish_reason": "stop",
@@ -94,6 +95,7 @@ def _fake_openai_server():
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.requests = 0
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -122,3 +124,50 @@ def test_every_pool_records_through_litellm_registration(tmp_path):
         server.shutdown()
     assert glim.meta_usd == pytest.approx(meta_cost("Muse-Glimmer-30B", 1000, 0, 100))
     assert meta.meta_usd == pytest.approx(meta_cost("muse-wonder-1.0", 1000, 0, 100))
+
+
+def _wait_for(meter, usd, timeout=10):
+    """LiteLLM records success callbacks on a worker thread; wait until the meter shows `usd`."""
+    deadline = time.monotonic() + timeout
+    while meter.meta_usd < usd - 1e-12 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert meter.meta_usd == pytest.approx(usd)
+
+
+def test_cap_blocks_the_call_before_it_reaches_the_endpoint(tmp_path):
+    """The path that failed: litellm.callbacks + stacked guards + real HTTP. Once a pool reaches its cap, the next
+    call to that pool raises BudgetExceeded and the endpoint receives no request; the other pool keeps working
+    until its own cap."""
+    import litellm
+
+    server = _fake_openai_server()
+    base = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    per_glimmer = meta_cost("Muse-Glimmer-30B", 1000, 0, 100)   # $0.00042 per fake call
+    per_wonder = meta_cost("muse-wonder-1.0", 1000, 0, 100)     # $0.006 per fake call
+    glim = Meter(Caps(meta_usd=2 * per_glimmer, gpu_usd=0.0), tmp_path / "ledger.jsonl", phase="glimmer")
+    meta = Meter(Caps(meta_usd=1 * per_wonder, gpu_usd=0.0), tmp_path / "ledger.jsonl", phase="meta")
+    saved = litellm.callbacks
+    litellm.callbacks = [litellm_callback((glim, ("Muse-Glimmer",)), (meta, ("muse-spark", "muse-wonder")))]
+    call = guarded(guarded(litellm.completion, glim, only=("Muse-Glimmer",)), meta,
+                   only=("muse-spark", "muse-wonder"))
+    msgs = [{"role": "user", "content": "hi"}]
+    glimmer, wonder = "openai/meta-models/Muse-Glimmer-30B", "openai/muse-wonder-1.0"
+    try:
+        call(model=glimmer, messages=msgs, api_base=base, api_key="test")
+        _wait_for(glim, per_glimmer)
+        call(model=glimmer, messages=msgs, api_base=base, api_key="test")
+        _wait_for(glim, 2 * per_glimmer)                       # Glimmer pool now at its cap
+        assert server.requests == 2
+        with pytest.raises(BudgetExceeded):
+            call(model=glimmer, messages=msgs, api_base=base, api_key="test")
+        assert server.requests == 2                            # the blocked call never left the process
+
+        call(model=wonder, messages=msgs, api_base=base, api_key="test")   # Meta pool still open
+        _wait_for(meta, per_wonder)                            # Meta pool now at its cap
+        assert server.requests == 3
+        with pytest.raises(BudgetExceeded):
+            call(model=wonder, messages=msgs, api_base=base, api_key="test")
+        assert server.requests == 3
+    finally:
+        litellm.callbacks = saved
+        server.shutdown()

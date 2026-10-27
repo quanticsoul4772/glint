@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -142,6 +143,13 @@ def litellm_callback(*pools):
         raise ValueError("litellm_callback needs at least one meter")
 
     class _MeterLogger(CustomLogger):
+        def __init__(self):
+            super().__init__()
+            # LiteLLM de-duplicates loggers by class name + public str/bool/int attributes. Without a unique public
+            # attribute, a second meter logger (in the same list, or registered later in the same process) is
+            # silently dropped and its pool is never metered.
+            self.glint_logger_id = uuid.uuid4().hex
+
         def _record(self, kwargs, response_obj):
             usage = getattr(response_obj, "usage", None)
             if usage is None:
