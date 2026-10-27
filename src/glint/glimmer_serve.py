@@ -211,21 +211,48 @@ class LogWatch:
 
 
 @contextmanager
-def session(meter, modal_cli: str, env: dict, tag: str):
+def session(meter, modal_cli: str, env: dict, tag: str, check_s: float = 15.0):
     """Wrap a batch that uses the endpoint. Checks the GPU cap first; afterwards stops the app (so no container idles
-    on) and records the elapsed wall time at the A100 rate, an upper bound on the billed container time."""
+    on) and records the elapsed wall time at the A100 rate, an upper bound on the billed container time.
+
+    The cap also holds during the batch: a watcher stops the app as soon as the session's wall time at the A100 rate
+    would take spend past the cap (requests then fail and the batch ends), and the session raises BudgetExceeded.
+    Before this, the cap was only checked at the start, so a long run could pass it unnoticed (2026-10-27: a banking
+    run reached $4.82 of a $5 cap with nothing able to stop it)."""
+    import threading
+
+    from glint.meter import BudgetExceeded
+
     meter.check_gpu()
-    say(f"session start: GPU spent so far ${meter.gpu_usd:.3f} of cap ${meter.caps.gpu_usd:.2f}")
+    budget_s = (meter.caps.gpu_usd - meter.gpu_usd) / GPU_USD_PER_HOUR * 3600
+    say(f"session start: GPU spent so far ${meter.gpu_usd:.3f} of cap ${meter.caps.gpu_usd:.2f}; "
+        f"the app is stopped after {budget_s / 60:.0f} min")
     t0 = time.time()
+    done, tripped = threading.Event(), threading.Event()
+
+    def stop_app():
+        # --yes: without a TTY the stop command otherwise waits for a confirmation that never comes
+        out = subprocess.run([modal_cli, "app", "stop", APP_NAME, "--yes"], env=env, check=False, capture_output=True,
+                             text=True)
+        if out.returncode:
+            say(f"WARNING: app stop exited {out.returncode}: {(out.stderr or out.stdout).strip()[:300]}")
+
+    def watch():
+        while not done.wait(check_s):
+            if time.time() - t0 >= budget_s:
+                tripped.set()
+                say(f"GPU CAP REACHED: ${meter.gpu_usd + (time.time() - t0) * GPU_USD_PER_HOUR / 3600:.2f} of "
+                    f"${meter.caps.gpu_usd:.2f}; stopping {APP_NAME} now")
+                stop_app()
+                return
+
+    threading.Thread(target=watch, daemon=True).start()
     try:
         yield
     finally:
+        done.set()
         say(f"stopping {APP_NAME} after {time.time() - t0:.0f} s")
-        # --yes: without a TTY the stop command otherwise waits for a confirmation that never comes
-        stop = subprocess.run([modal_cli, "app", "stop", APP_NAME, "--yes"], env=env, check=False, capture_output=True,
-                              text=True)
-        if stop.returncode:
-            say(f"WARNING: app stop exited {stop.returncode}: {(stop.stderr or stop.stdout).strip()[:300]}")
+        stop_app()
         usd = meter.record_gpu(time.time() - t0, GPU_USD_PER_HOUR, GPU, tag=tag)
         say(f"metered ${usd:.3f} ({time.time() - t0:.0f} s at ${GPU_USD_PER_HOUR}/h, upper bound)")
         running = _wait_stopped(modal_cli, env)
@@ -233,6 +260,8 @@ def session(meter, modal_cli: str, env: dict, tag: str):
             say(f"FAILED: {APP_NAME} still has running containers {STOP_WAIT_S:.0f} s after stop: {running}")
             raise RuntimeError(f"{APP_NAME} still has running containers after stop: {running}")
         say(f"{APP_NAME} stopped, 0 containers running")
+        if tripped.is_set():
+            raise BudgetExceeded(f"GPU cap ${meter.caps.gpu_usd:.2f} reached during the session; the app was stopped")
 
 
 STOP_WAIT_S = 90.0
