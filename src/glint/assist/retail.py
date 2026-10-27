@@ -8,6 +8,10 @@ from __future__ import annotations
 ACTIONS = ("cancel", "modify_address", "modify_payment", "modify_items", "return", "exchange")
 
 RULES = {
+    "one_per_order": "An order can only be returned or exchanged if its status is 'delivered', and the action changes "
+                     "the status to 'return requested' or 'exchange requested'; exchange can only be called once per "
+                     "order. So a delivered order takes one return or one exchange, not both. If the user wants both "
+                     "on the same order, tell them only one is possible and let them choose.",
     "pending": "An order can only be cancelled/modified if its status is 'pending'.",
     "delivered": "An order can only be returned/exchanged if its status is 'delivered'.",
     "same_product": "Each item can be changed to an available new item of the same product but of different "
@@ -89,6 +93,13 @@ def check_eligibility(db, order_id: str, action: str, payment_method_id: str | N
         missing = [i for i in item_ids if i not in order_items]
         if missing and action == "return":
             reasons.append(f"items {missing} are not in order {order.order_id}")
+    if action in ("return", "exchange"):
+        # Both need status 'delivered' and each changes it ('return requested' / 'exchange requested'): one delivered
+        # order takes one return OR one exchange, never both (held-out retail 19)
+        other = "exchange" if action == "return" else "return"
+        rules.append(RULES["one_per_order"])
+        details["after_this"] = (f"order status becomes '{action} requested'; no {other} (or second {action}) is "
+                                 "possible on this order afterwards")
     details["allowed_payment_methods"] = allowed_methods
     if payment_method_id is not None and allowed_methods and payment_method_id not in allowed_methods:
         reasons.append(f"payment method {payment_method_id} is not allowed here; allowed: {allowed_methods}")

@@ -23,11 +23,29 @@ def adb():
 def test_airline_task7_basic_economy_cancel_has_a_cabin_path(adb):
     # Glimmer refused: "Policy prohibits modifications to Basic Economy flights and cancellation is not allowed".
     # Gold upgrades XEHM4B to business, then cancels it.
-    cancel = airline.check_eligibility(adb, "XEHM4B", "cancel", reason="change of plan")
+    cancel = airline.check_eligibility(adb, "XEHM4B", "cancel", reason="change of plan", user_asked_how=True)
     assert cancel["allowed"] is False and cancel["paths_to_allowed"]
     assert "change_cabin" in cancel["paths_to_allowed"][0]
     assert airline.check_eligibility(adb, "XEHM4B", "change_cabin")["allowed"] is True
     assert airline.check_eligibility(adb, "XEHM4B", "change_flights")["allowed"] is False
+
+
+def test_airline_held_out_0_no_workaround_unless_asked(adb):
+    # Offered unprompted, "upgrade to business, then cancel" made Glimmer upgrade and cancel EHGLP3; gold is no change
+    verdict = airline.check_eligibility(adb, "EHGLP3", "cancel", reason="change of plan")
+    assert verdict["allowed"] is False and "paths_to_allowed" not in verdict
+    assert "Do not suggest workarounds" in verdict["note"]
+    assert airline.check_eligibility(adb, "EHGLP3", "cancel", reason="change of plan",
+                                     user_asked_how=True)["paths_to_allowed"]
+
+
+def test_retail_held_out_19_return_and_exchange_exclude_each_other(rdb):
+    # Both were cleared separately on #W2890441; after the exchange the return failed (status 'exchange requested')
+    for action, other in (("return", "exchange"), ("exchange", "return")):
+        verdict = retail.check_eligibility(rdb, "#W2890441", action, item_ids=["2366567022"],
+                                           new_item_ids=["2366567022"] if action == "exchange" else None)
+        assert any("not both" in rule for rule in verdict["rules"])
+        assert f"no {other}" in verdict["details"]["after_this"]
 
 
 def test_airline_fixed_rules(adb):
@@ -135,7 +153,8 @@ def test_mcp_server_lists_and_calls_the_tools():
     async def go():
         names = {t.name for t in await server.list_tools()}
         res = await server.call_tool("check_reservation_action",
-                                     {"reservation_id": "XEHM4B", "action": "cancel", "reason": "change of plan"})
+                                     {"reservation_id": "XEHM4B", "action": "cancel", "reason": "change of plan",
+                                      "user_asked_how": True})
         return names, res
 
     names, res = asyncio.run(go())

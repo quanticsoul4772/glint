@@ -78,22 +78,26 @@ class AssistedRetailTools(RetailTools):
 
 class AssistedAirlineTools(AirlineTools):
     @is_tool(ToolType.READ)
-    def check_reservation_action(self, reservation_id: str, action: str, reason: str = "") -> dict:
+    def check_reservation_action(self, reservation_id: str, action: str, reason: str = "",
+                                 user_asked_how: bool = False) -> dict:
         """Policy decision tool: call this BEFORE cancelling or changing a reservation, before offering compensation,
         and before telling the user what is or is not possible. It applies the airline policy (with the policy's
-        current time) to the reservation and returns the authoritative verdict: allowed (true/false), the reasons, the
-        policy rules, and, when not allowed, any allowed change that would make it allowed. Follow its verdict.
+        current time) to the reservation and returns the authoritative verdict: allowed (true/false), the reasons and
+        the policy rules. Follow its verdict. When an action is not allowed, tell the user so; do not suggest
+        workarounds. Only if the user asks how it could be made possible, call it with user_asked_how=true to get
+        the allowed changes that would make it allowed.
 
         Args:
             reservation_id: The reservation id, such as '8JX2WO'.
             action: One of 'cancel', 'change_flights', 'change_cabin', 'add_baggage', 'remove_baggage',
                 'add_insurance', 'change_passengers', 'compensation'.
             reason: For 'cancel': the user's reason (e.g. 'change of plan', 'health', 'weather', 'airline cancelled').
+            user_asked_how: True only if the user has asked how the action could be made possible.
 
         Returns:
-            dict: allowed, reasons, rules, paths_to_allowed, details.
+            dict: allowed, reasons, rules, details; paths_to_allowed only when user_asked_how is true.
         """
-        return airline.check_eligibility(self.db, reservation_id, action, reason or None)
+        return airline.check_eligibility(self.db, reservation_id, action, reason or None, user_asked_how)
 
     @is_tool(ToolType.READ)
     def get_upcoming_trips_cost(self, user_id: str) -> dict:

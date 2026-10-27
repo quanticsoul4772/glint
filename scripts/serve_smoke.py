@@ -10,14 +10,12 @@ Usage: python serve_smoke.py
 import json
 import os
 import re
-import subprocess
-import sys
 import time
 from pathlib import Path
 
 import litellm
 
-from glint.glimmer_serve import MODEL_NAME, LogWatch, litellm_args, say, session, wait_ready
+from glint.glimmer_serve import MODEL_NAME, LogWatch, deploy, litellm_args, say, session, wait_ready
 from glint.meter import Caps, Meter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,15 +32,7 @@ MESSAGES = [{"role": "system", "content": "You are a retail support agent. Use t
 def main():
     env = os.environ | {"MODAL_CONFIG_PATH": r"<workspace>\.modal.toml", "MODAL_PROFILE": "quanticsoul4772",
                         "PYTHONIOENCODING": "utf-8"}
-    say("deploying glint-serve (builds the image on first deploy)")
-    deploy = subprocess.run([MODAL, "deploy", str(ROOT / "src" / "glint" / "glimmer_serve.py")], env=env,
-                            capture_output=True, text=True, check=False)
-    if deploy.returncode:
-        say(f"FAILED: modal deploy exited {deploy.returncode}")
-        print((deploy.stdout + deploy.stderr)[-4000:], file=sys.stderr, flush=True)
-        raise SystemExit(deploy.returncode)
-    url = re.search(r"https://\S+\.modal\.run", deploy.stdout).group(0)
-    say(f"deployed: {url}")
+    url = deploy(MODAL, env)
     key, secret = os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"]
     meter = Meter(Caps(meta_usd=0.0, gpu_usd=1.0), phase=f"modal-serve-smoke-{time.strftime('%Y%m%d-%H%M%S')}")
     result = {"url": url, "vllm": "0.31.0"}
