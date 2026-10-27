@@ -39,7 +39,7 @@ def main():
     result = {"url": url, "vllm": "0.31.0"}
     with session(meter, MODAL, env, tag="smoke"), LogWatch(MODAL, env) as log:
         try:
-            result["ready_after_s"] = round(wait_ready(url, key, secret, failed=log.failure), 1)
+            result["ready_after_s"] = round(wait_ready(url, key, secret, failed=log.failure, log_lines=lambda: len(log.lines)), 1)
             say("sending one tool-call request")
             t0 = time.time()
             resp = litellm.completion(model=f"openai/{MODEL_NAME}", messages=MESSAGES, tools=TOOLS, max_tokens=2048,

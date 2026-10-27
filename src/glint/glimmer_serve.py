@@ -86,7 +86,7 @@ def say(msg: str) -> None:
 
 
 def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 900.0, poll_s: float = 10.0,
-               failed=None, request_timeout_s: float = 30.0) -> float:
+               failed=None, request_timeout_s: float = 30.0, log_lines=None) -> float:
     """Block until the endpoint's vLLM answers GET /health with 200; returns the seconds waited.
 
     Modal cuts every web request at 150 s and answers with a 303 redirect to a result URL. A request sent while the
@@ -96,7 +96,8 @@ def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 90
     Each poll gives up after `request_timeout_s` and redirects are not followed, so `timeout_s` holds (following
     Modal's redirects could chain 150 s waits). `failed`, if given, is called between polls and returns a reason when
     the container has crashed (see `LogWatch`), which raises at once instead of waiting out `timeout_s`. Every poll
-    and its outcome is reported through `say`.
+    and its outcome is reported through `say`, with the count from `log_lines()` if given (0 while the container
+    boots means the log watch is blind).
     """
     import httpx
 
@@ -113,7 +114,8 @@ def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 90
                     return time.time() - t0
             except httpx.HTTPError as e:  # booting: refused or reset, or still queued past this poll's timeout
                 outcome = type(e).__name__
-            say(f"+{time.time() - t0:4.0f} s  /health -> {outcome}")
+            seen = f", container log lines {log_lines()}" if log_lines is not None else ""
+            say(f"+{time.time() - t0:4.0f} s  /health -> {outcome}{seen}")
             if failed is not None and (reason := failed()):
                 say(f"FAILED: {reason}")
                 raise RuntimeError(f"{url} failed to start: {reason}")
@@ -137,27 +139,50 @@ class LogWatch:
 
     `modal app logs` first replays the previous container's log (which may hold an old crash), so whatever arrives in
     the first `history_s` seconds is set aside in `history` and never counts as a failure. Start it before the first
-    request wakes a container."""
+    request wakes a container.
 
-    def __init__(self, modal_cli: str, env: dict, app_name: str = APP_NAME, history_s: float = 10.0):
+    `modal app logs` can exit (2026-10-27: right after a deploy it streamed nothing while the container booted and
+    served). The stream is restarted whenever it ends, loudly; a restart replays earlier lines, so lines already seen
+    are dropped."""
+
+    def __init__(self, modal_cli: str, env: dict, app_name: str = APP_NAME, history_s: float = 10.0,
+                 restart_s: float = 5.0):
         import threading
 
         self.history: list[str] = []
         self.lines: list[str] = []
+        self.restarts = 0
+        self._seen: set[str] = set()
         self._buf = self.history
-        self._proc = subprocess.Popen([modal_cli, "app", "logs", app_name], env=env, stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-        threading.Thread(target=self._read, daemon=True).start()
+        self._cmd, self._env, self._restart_s = [modal_cli, "app", "logs", app_name], env, restart_s
+        self._closed = False
+        self._proc = None
+        threading.Thread(target=self._run, daemon=True).start()
         time.sleep(history_s)
         self._buf = self.lines
         say(f"watching {app_name} logs ({len(self.history)} replayed lines from the previous container ignored)")
 
-    def _read(self):
-        for line in self._proc.stdout:
-            line = line.rstrip("\n")
-            self._buf.append(line)
-            if self._buf is self.lines and any(m in line for m in STAGE_MARKERS + FAILURE_MARKERS):
-                say(f"[vllm] {line.strip()[:240]}")
+    def _run(self):
+        while not self._closed:
+            self._proc = subprocess.Popen(self._cmd, env=self._env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                          text=True, encoding="utf-8", errors="replace")
+            for line in self._proc.stdout:
+                self._take(line.rstrip("\n"))
+            code = self._proc.wait()
+            if self._closed:
+                return
+            self.restarts += 1
+            say(f"WARNING: `modal app logs` ended (exit {code}) with {len(self.lines)} new lines so far; "
+                f"restarting it (restart {self.restarts})")
+            time.sleep(self._restart_s)
+
+    def _take(self, line: str) -> None:
+        if line in self._seen:  # replayed by a restart
+            return
+        self._seen.add(line)
+        self._buf.append(line)
+        if self._buf is self.lines and any(m in line for m in STAGE_MARKERS + FAILURE_MARKERS):
+            say(f"[vllm] {line.strip()[:240]}")
 
     def failure(self) -> str | None:
         """The crash as its root cause: the last exception line before the first failure marker (for example
@@ -179,8 +204,10 @@ class LogWatch:
         return self
 
     def __exit__(self, *exc):
-        self._proc.terminate()
-        self._proc.wait(timeout=10)
+        self._closed = True
+        if self._proc is not None:
+            self._proc.terminate()
+            self._proc.wait(timeout=10)
 
 
 @contextmanager
