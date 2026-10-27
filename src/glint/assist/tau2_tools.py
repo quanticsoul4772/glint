@@ -143,7 +143,8 @@ class BankingDecisionTools(ToolKitBase):
 
     @is_tool(ToolType.READ)
     def check_card_dispute(self, user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
-                           contacted_merchant: bool | None = None, replacement_requested: bool = False) -> dict:
+                           contacted_merchant: bool | None = None, replacement_requested: bool = False,
+                           other_requests: list[str] | None = None) -> dict:
         """Credit card dispute decision tool: call this BEFORE filing each credit card transaction dispute. It
         returns the authoritative values to file with: card_action ('keep_active' or 'cancel_and_reissue', the same
         for every dispute on a card being replaced), eligible_for_provisional_credit with each criterion, the
@@ -159,13 +160,15 @@ class BankingDecisionTools(ToolKitBase):
             contacted_merchant: The user's answer to "did you try to resolve this with the merchant first?" for this
                 transaction; leave empty if not asked yet.
             replacement_requested: True if the user wants this card replaced or cancelled in this conversation.
+            other_requests: The user's other requests in this conversation that are not done yet, such as
+                ['credit limit increase', 'replacement card']. If one is a credit limit increase, do that first.
 
         Returns:
             dict: card_action, eligible_for_provisional_credit, provisional_credit_criteria, purchase_date,
             card_last_4_digits, amount, ask_user, ready.
         """
         return banking.check_dispute(self.db, user_id, credit_card_account_id, transaction_id, dispute_reason,
-                                     contacted_merchant, replacement_requested)
+                                     contacted_merchant, replacement_requested, other_requests)
 
 
 _ASSISTED = {"retail": AssistedRetailTools, "airline": AssistedAirlineTools}

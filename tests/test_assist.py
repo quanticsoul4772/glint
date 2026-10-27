@@ -236,7 +236,7 @@ def test_banking_task054_amount_and_order():
     tools, _ = _banking_episode("task_054")
     args = ("584f9c5d00", "cc_584f9c5d00_gold")
     first = banking.check_credit_limit_increase(tools.db, *args, 4000, ["dispute a charge", "replacement card"])
-    assert first["verdict"] == "reduce_amount" and first["max_increase"] == 2500 and "BEFORE" in first["sequencing"]
+    assert first["verdict"] == "reduce_amount" and first["max_increase"] == 2500 and "credit limit increase first" in first["sequencing"]
     assert banking.check_credit_limit_increase(tools.db, *args, 2500)["verdict"] == "approve"
     tools.order_replacement_credit_card_7291("cc_584f9c5d00_gold", "584f9c5d00", "1456 Astoria Boulevard", "fraud_suspected")
     after = banking.check_credit_limit_increase(tools.db, *args, 2500)
@@ -293,3 +293,34 @@ def test_tau2_banking_environment_exposes_and_runs_the_tools():
         "transaction_id": "txn_e45e7acb56a0", "dispute_reason": "unauthorized_fraudulent_charge",
         "contacted_merchant": False, "replacement_requested": True}))
     assert not out.error and json.loads(out.content)["card_action"] == "cancel_and_reissue"
+
+
+def test_banking_task054_dispute_tool_holds_the_dispute_until_the_increase_is_decided():
+    # On Modal (2026-10-27) Glimmer called check_card_dispute first and filed the dispute and the replacement before
+    # the credit limit increase, which then failed; the dispute tool now carries the order
+    from glint.assist import banking
+
+    tools, _ = _banking_episode("task_054")
+    args = ("584f9c5d00", "cc_584f9c5d00_gold", "txn_584f9c5d00_001", "unauthorized_fraudulent_charge", False, True)
+    first = banking.check_dispute(tools.db, *args, other_requests=["credit limit increase", "replacement card"])
+    assert "credit limit increase first" in first["sequencing"] and first["ready"] is False
+    # once the increase is done it is no longer among the requests still to do
+    after = banking.check_dispute(tools.db, *args, other_requests=["replacement card"])
+    assert "sequencing" not in after and after["ready"] is True
+
+
+def test_banking_increase_of_zero_asks_for_the_amount():
+    # Glimmer passed requested_increase_amount=0 and got "approve" with the limit unchanged
+    from glint.assist import banking
+
+    tools, _ = _banking_episode("task_054")
+    res = banking.check_credit_limit_increase(tools.db, "584f9c5d00", "cc_584f9c5d00_gold", 0)
+    assert res["verdict"] == "ask_amount"
+
+
+def test_banking_steps_say_hidden_tools_go_through_the_discoverable_wrapper():
+    from glint.assist import banking
+
+    steps = " ".join(banking.CLI_STEPS)
+    assert "unlock_discoverable_agent_tool" in steps and "call_discoverable_agent_tool" in steps
+    assert "Never call it by its own name" in steps
