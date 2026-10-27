@@ -75,6 +75,9 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
     if tier not in CLI_TIERS:
         return {"verdict": "unknown", "reasons": [(f"the knowledge base defines no CLI tier for "
                                                    f"{acc.get('card_type')}; search it before deciding")]}
+    if not acc.get("credit_limit"):
+        return {"verdict": "unknown", "reasons": [(f"no credit limit is on record for {credit_card_account_id}, so the "
+                                                   "maximum increase and utilization cannot be computed")]}
     rules = CLI_TIERS[tier]
     limit, balance = _money(acc.get("credit_limit")), _money(acc.get("current_balance"))
     max_increase = round(limit * rules["max_increase"], 2)
@@ -154,11 +157,8 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
            "ask_user": []}
     fraud = dispute_reason == "unauthorized_fraudulent_charge"
     if contacted_merchant is None:
-        if fraud:
-            out["ask_user"].append("Did you try to resolve this with the merchant first? (ask for every transaction)")
-        else:
-            out["ask_user"].append("Did you try to resolve this with the merchant first? (needed for this "
-                                   "transaction before filing; ask for every transaction)")
+        # contacted_merchant is filed as the user's own answer, for every transaction, fraud included
+        out["ask_user"].append("Did you try to resolve this with the merchant first? (ask for every transaction)")
     tier = _tier(acc.get("card_type", ""))
     opened, purchased = _date(acc.get("date_of_account_open")), _date(txn.get("transaction_date"))
     year_ago = TODAY.replace(year=TODAY.year - 1)
@@ -175,5 +175,5 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
     }
     out["provisional_credit_criteria"] = criteria
     out["eligible_for_provisional_credit"] = all(criteria.values())
-    out["ready"] = not out["ask_user"] or fraud
+    out["ready"] = not out["ask_user"]
     return out

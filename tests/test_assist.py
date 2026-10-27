@@ -235,9 +235,24 @@ def test_banking_task038_every_dispute_on_a_reissued_card():
                         ("txn_28cb62125078", "goods_services_not_as_described")):
         assert banking.check_dispute(tools.db, "890389b165", "cc_890389b165_silver", txn, reason,
                                      False)["card_action"] == "cancel_and_reissue"
-    ask = banking.check_dispute(tools.db, "890389b165", "cc_890389b165_silver", "txn_28cb62125078",
-                                "goods_services_not_as_described")
-    assert ask["ask_user"] and not ask["ready"]
+    for txn, reason in (("txn_e45e7acb56a0", "unauthorized_fraudulent_charge"),
+                        ("txn_28cb62125078", "goods_services_not_as_described")):
+        # The merchant answer is filed for every transaction, fraud included, so it must be asked first
+        ask = banking.check_dispute(tools.db, "890389b165", "cc_890389b165_silver", txn, reason)
+        assert ask["ask_user"] and ask["ready"] is False
+
+
+def test_banking_missing_credit_limit_gives_no_verdict():
+    # Most base-database cards have no credit_limit; a $0 limit must not turn into "reduce_amount, max $0".
+    from tau2.domains.banking_knowledge.data_model import TransactionalDB
+
+    from glint.assist import banking
+
+    db = TransactionalDB.load(str(DOMAINS / "banking_knowledge" / "db.json"))
+    acc_id, acc = next((k, v) for k, v in db.credit_card_accounts.data.items()
+                       if not v.get("credit_limit") and "gold" in v.get("card_type", "").lower())
+    res = banking.check_credit_limit_increase(db, acc["user_id"], acc_id, 1000)
+    assert res["verdict"] == "unknown" and "no credit limit" in res["reasons"][0]
 
 
 def test_tau2_banking_environment_exposes_and_runs_the_tools():
@@ -249,10 +264,11 @@ def test_tau2_banking_environment_exposes_and_runs_the_tools():
     from glint.assist.tau2_tools import install
 
     install("banking_knowledge")
-    env = registry.get_env_constructor("banking_knowledge")(retrieval_variant="bm25_grep")
+    constructor = registry.get_env_constructor("banking_knowledge")
+    env = constructor(retrieval_variant="bm25_grep")
     names = {t.name for t in env.get_tools()}
-    assert {"check_credit_limit_increase", "check_card_dispute", "KB_search"} <= names or \
-        {"check_credit_limit_increase", "check_card_dispute"} <= names
+    assert {"check_credit_limit_increase", "check_card_dispute"} <= names
+    assert type(constructor(retrieval_variant="bm25_grep").tools) is type(env.tools)  # one class, reused
     out = env.get_response(ToolCall(id="1", name="check_card_dispute", arguments={
         "user_id": "890389b165", "credit_card_account_id": "cc_890389b165_silver",
         "transaction_id": "txn_e45e7acb56a0", "dispute_reason": "unauthorized_fraudulent_charge",
