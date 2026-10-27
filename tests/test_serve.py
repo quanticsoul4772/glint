@@ -124,3 +124,32 @@ def test_logwatch_restarts_an_ended_stream_and_drops_replayed_lines():
     watch._closed = True
     assert watch.restarts >= 3
     assert watch.lines == ["INFO Loading weights", "KV cache size: 950,814 tokens"]
+
+
+def test_session_stops_the_app_when_the_gpu_cap_is_reached_mid_batch(monkeypatch, tmp_path):
+    # The cap was only checked at session start; a long batch could run past it (2026-10-27: $4.82 of $5)
+    import json
+    import subprocess
+    import time
+    import types
+
+    from glint import glimmer_serve
+    from glint.meter import BudgetExceeded, Caps, Meter
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd[1:3])
+        out = json.dumps([{"description": glimmer_serve.APP_NAME, "state": "stopped", "tasks": "0"}])
+        return types.SimpleNamespace(returncode=0, stdout=out if cmd[1:3] == ["app", "list"] else "", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # a $0.01 cap at $2.94/h is about 12 s of session
+    meter = Meter(Caps(meta_usd=0.0, gpu_usd=0.01), ledger=tmp_path / "ledger.jsonl", phase="guard-test")
+    t0 = time.time()
+    with (pytest.raises(BudgetExceeded, match="reached during the session"),
+          glimmer_serve.session(meter, "modal", {}, tag="t", check_s=0.2)):
+        while ["app", "stop"] not in calls and time.time() - t0 < 30:  # the batch, until the watcher stops it
+            time.sleep(0.1)
+    assert ["app", "stop"] in calls and 10 < time.time() - t0 < 30
+    assert meter.gpu_usd > 0
