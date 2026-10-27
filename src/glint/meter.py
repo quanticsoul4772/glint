@@ -105,40 +105,57 @@ class Meter:
         self.check_gpu()
 
 
-def guarded(completion_fn, meter: Meter, limiter=None):
+def _matches(model: str, only: tuple[str, ...] | None) -> bool:
+    return only is None or any(s in model for s in only)
+
+
+def guarded(completion_fn, meter: Meter, limiter=None, only: tuple[str, ...] | None = None):
     """Wrap a completion function so the Meta cap and the rate limiter are enforced before every call.
 
     This cannot live in a LiteLLM callback: LiteLLM catches exceptions raised in `log_pre_api_call` and sends
     the request anyway. Install with e.g. `tau2.utils.llm_utils.completion = guarded(completion, meter, limiter)`.
+    With `only`, the cap and limiter apply only to models whose name contains one of the substrings, so separate
+    credit pools can be capped by stacking guards.
     """
     def _call(*args, **kwargs):
-        meter.check_meta()
-        if limiter is not None:
-            limiter.acquire()
+        if _matches(kwargs.get("model", ""), only):
+            meter.check_meta()
+            if limiter is not None:
+                limiter.acquire()
         return completion_fn(*args, **kwargs)
 
     return _call
 
 
-def litellm_callback(meter: Meter):
-    """A LiteLLM CustomLogger that meters usage after each call (enforcement is `guarded`).
+def litellm_callback(*pools):
+    """One LiteLLM CustomLogger that meters usage after each call (enforcement is `guarded`).
 
+    Each pool is a Meter, or (Meter, only) to record just the models whose name contains one of the substrings.
+    All pools must go through this single logger: LiteLLM keeps only one instance per logger class in
+    `litellm.callbacks`, so a second `litellm_callback(...)` would be silently dropped and its pool never metered.
     Aborted / failed calls are metered too when the provider returned usage.
     """
     from litellm.integrations.custom_logger import CustomLogger
+
+    routed = [(p, None) if isinstance(p, Meter) else p for p in pools]
+    if not routed:
+        raise ValueError("litellm_callback needs at least one meter")
 
     class _MeterLogger(CustomLogger):
         def _record(self, kwargs, response_obj):
             usage = getattr(response_obj, "usage", None)
             if usage is None:
                 return
+            model = kwargs.get("model", "")
             details = getattr(usage, "prompt_tokens_details", None)
             cached = getattr(details, "cached_tokens", 0) or 0
             out_details = getattr(usage, "completion_tokens_details", None)
             reasoning = getattr(out_details, "reasoning_tokens", 0) or 0
-            meter.record_meta(kwargs.get("model", ""), usage.prompt_tokens or 0, cached,
-                              usage.completion_tokens or 0, reasoning,
-                              tag=str((kwargs.get("litellm_params") or {}).get("metadata", {}).get("tag", "")))
+            tag = str((kwargs.get("litellm_params") or {}).get("metadata", {}).get("tag", ""))
+            for meter, only in routed:
+                if _matches(model, only):
+                    meter.record_meta(model, usage.prompt_tokens or 0, cached, usage.completion_tokens or 0,
+                                      reasoning, tag=tag)
 
         def log_success_event(self, kwargs, response_obj, start_time, end_time):
             self._record(kwargs, response_obj)

@@ -1,8 +1,9 @@
+import json
 import time
 
 import pytest
 
-from glint.meter import BudgetExceeded, Caps, Meter, guarded, meta_cost
+from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, meta_cost
 from glint.ratelimit import RateLimiter
 
 
@@ -56,3 +57,68 @@ def test_rate_limiter_paces():
     for _ in range(6):
         rl.acquire()
     assert time.monotonic() - t0 >= 0.45
+
+
+def test_stacked_guards_cap_each_pool_separately(tmp_path):
+    glimmer = Meter(Caps(meta_usd=0.05, gpu_usd=0.0), tmp_path / "a.jsonl", phase="g")
+    meta = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), tmp_path / "b.jsonl", phase="m")
+    calls = []
+    fn = guarded(guarded(lambda **kw: calls.append(kw["model"]) or "ok", glimmer, only=("Glimmer",)),
+                 meta, only=("muse-spark", "muse-wonder"))
+    glimmer.record_meta("muse-wonder-1.0", 10_000, 0, 2_000)  # $0.08 recorded in the Glimmer pool: over its cap
+    with pytest.raises(BudgetExceeded):
+        fn(model="openai/meta-models/Muse-Glimmer-30B")
+    assert fn(model="openai/muse-wonder-1.0") == "ok"  # the Meta pool is still under its cap
+    assert calls == ["openai/muse-wonder-1.0"]
+
+
+def _fake_openai_server():
+    """A localhost OpenAI-compatible endpoint returning one fixed completion with usage (no network, no cost)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("content-length") or 0))
+            body = json.dumps({"id": "x", "object": "chat.completion", "created": 0, "model": "m",
+                               "choices": [{"index": 0, "finish_reason": "stop",
+                                            "message": {"role": "assistant", "content": "ok"}}],
+                               "usage": {"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}})
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_every_pool_records_through_litellm_registration(tmp_path):
+    """Regression: two litellm_callback() instances in litellm.callbacks left the second pool unmetered (LiteLLM
+    keeps one logger per class), so the Meta cap never fired and Wonder spent $55.88 against a $20 cap.
+    Goes through litellm.callbacks and a real HTTP completion, the path the scripts use."""
+    import litellm
+
+    server = _fake_openai_server()
+    base = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    glim = Meter(Caps(meta_usd=5.0, gpu_usd=0.0), tmp_path / "ledger.jsonl", phase="glimmer")
+    meta = Meter(Caps(meta_usd=5.0, gpu_usd=0.0), tmp_path / "ledger.jsonl", phase="meta")
+    saved = litellm.callbacks
+    litellm.callbacks = [litellm_callback((glim, ("Muse-Glimmer",)), (meta, ("muse-spark", "muse-wonder")))]
+    try:
+        for model in ("openai/meta-models/Muse-Glimmer-30B", "openai/muse-wonder-1.0"):
+            litellm.completion(model=model, messages=[{"role": "user", "content": "hi"}], api_base=base,
+                               api_key="test")
+        deadline = time.monotonic() + 10  # LiteLLM runs sync success callbacks on a worker thread
+        while (glim.meta_usd == 0 or meta.meta_usd == 0) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        litellm.callbacks = saved
+        server.shutdown()
+    assert glim.meta_usd == pytest.approx(meta_cost("Muse-Glimmer-30B", 1000, 0, 100))
+    assert meta.meta_usd == pytest.approx(meta_cost("muse-wonder-1.0", 1000, 0, 100))
