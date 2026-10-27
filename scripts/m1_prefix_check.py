@@ -6,6 +6,7 @@ C5a (history as τ² sends it, reasoning dropped): is step k's prompt an exact t
 C5b (history with each turn's reasoning kept): is prompt_k + Glimmer's generated text for step k an exact prefix
      of step k+1's prompt? If yes, one prefill of the final transcript covers every step's read positions.
 """
+import importlib
 import json
 from pathlib import Path
 
@@ -13,7 +14,6 @@ from jinja2.ext import loopcontrols
 from jinja2.sandbox import ImmutableSandboxedEnvironment
 from tau2.agent.llm_agent import AGENT_INSTRUCTION, SYSTEM_PROMPT
 from tau2.data_model.simulation import Results
-from tau2.domains.retail.environment import get_environment
 from tau2.utils.llm_utils import to_litellm_messages
 from tokenizers import Tokenizer
 
@@ -40,10 +40,19 @@ bos = json.loads((SNAP / "tokenizer_config.json").read_text(encoding="utf-8")).g
 bos = bos["content"] if isinstance(bos, dict) else bos
 tok = Tokenizer.from_file(str(SNAP / "tokenizer.json"))
 
-env = get_environment()
-tools = [t.openai_schema for t in env.get_tools()]
-system = {"role": "system", "content": SYSTEM_PROMPT.format(domain_policy=env.get_policy(),
-                                                            agent_instruction=AGENT_INSTRUCTION)}
+_contexts = {}
+
+
+def domain_context(domain):
+    """(tools, system message) exactly as τ²'s LLMAgent sends them for `domain`."""
+    if domain not in _contexts:
+        env = importlib.import_module(f"tau2.domains.{domain}.environment").get_environment()
+        _contexts[domain] = (
+            [t.openai_schema for t in env.get_tools()],
+            {"role": "system", "content": SYSTEM_PROMPT.format(domain_policy=env.get_policy(),
+                                                               agent_instruction=AGENT_INSTRUCTION)},
+        )
+    return _contexts[domain]
 
 
 def to_template_messages(messages, keep_reasoning):
@@ -60,9 +69,10 @@ def to_template_messages(messages, keep_reasoning):
     return out
 
 
-def render(messages):
+def render(messages, domain="retail", strength="medium"):
+    tools, system = domain_context(domain)
     return template.render(messages=[system, *messages], tools=tools, add_generation_prompt=True,
-                           bos_token=bos, reasoning_strength="medium")
+                           bos_token=bos, reasoning_strength=strength)
 
 
 def ids(text):
