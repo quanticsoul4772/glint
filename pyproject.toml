@@ -19,6 +19,7 @@ dependencies = [
     "statsmodels",
     "python-dotenv",
     "kaggle>=2.2.5",
+    "mcp==2.3.0",
 ]
 
 [project.optional-dependencies]
