@@ -66,6 +66,20 @@ def litellm_args(url: str, token_id: str, token_secret: str, strength: str = "me
                            "return_token_ids": True, "stop_token_ids": STOP_TOKEN_IDS}}
 
 
+def deploy(modal_cli: str, env: dict) -> str:
+    """`modal deploy` this module (builds the image on first deploy; starts no GPU) and return the endpoint URL."""
+    say(f"deploying {APP_NAME} (builds the image on first deploy)")
+    out = subprocess.run([modal_cli, "deploy", str(Path(__file__).resolve())], env=env, capture_output=True,
+                         text=True, check=False)
+    if out.returncode:
+        say(f"FAILED: modal deploy exited {out.returncode}")
+        print((out.stdout + out.stderr)[-4000:], file=sys.stderr, flush=True)
+        raise RuntimeError(f"modal deploy exited {out.returncode}")
+    url = re.search(r"https://\S+\.modal\.run", out.stdout).group(0)
+    say(f"deployed: {url}")
+    return url
+
+
 def say(msg: str) -> None:
     """Every serving step reports here, to stderr at once, so a stuck or failing boot is visible while it happens."""
     print(f"[serve {time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)

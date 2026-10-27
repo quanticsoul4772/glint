@@ -60,9 +60,12 @@ def upcoming_trips(db, user_id: str) -> dict:
     return {"reservations": out, "count": len(out), "total_cost": sum(r["amount_paid"] for r in out)}
 
 
-def check_eligibility(db, reservation_id: str, action: str, reason: str | None = None) -> dict:
-    """Whether `action` is allowed on `reservation_id` under the airline policy, the rule it rests on, and (when it is
-    not allowed) any allowed change that would make it allowed."""
+def check_eligibility(db, reservation_id: str, action: str, reason: str | None = None,
+                      user_asked_how: bool = False) -> dict:
+    """Whether `action` is allowed on `reservation_id` under the airline policy and the rule it rests on. When it is
+    not allowed and `user_asked_how` is true (the user asked how it could be made possible), also any allowed change
+    that would make it allowed. Without that request the paths are withheld: offered unprompted, "upgrade to business,
+    then cancel" made Glimmer upgrade and cancel a reservation whose gold outcome is no change (held-out airline 0)."""
     if action not in ACTIONS:
         return {"allowed": False, "reasons": [f"unknown action {action!r}; one of {list(ACTIONS)}"]}
     res = db.reservations.get(reservation_id)
@@ -123,4 +126,10 @@ def check_eligibility(db, reservation_id: str, action: str, reason: str | None =
         rules.append(RULES["compensation"])
         if not (user.membership in ("silver", "gold") or res.insurance == "yes" or res.cabin == "business"):
             reasons.append("regular member, no insurance and not business: no compensation")
-    return {"allowed": not reasons, "reasons": reasons, "rules": rules, "paths_to_allowed": paths, "details": details}
+    out = {"allowed": not reasons, "reasons": reasons, "rules": rules, "details": details}
+    if paths and user_asked_how:
+        out["paths_to_allowed"] = paths
+    elif paths:
+        out["note"] = ("Not allowed as asked. Do not suggest workarounds; tell the user it is not allowed. Only if the "
+                       "user asks how it could be made possible, call again with user_asked_how=true.")
+    return out

@@ -66,9 +66,10 @@ def find_variants(item_id: str, require: dict | None = None, keep_same: list[str
 
 
 @server.tool()
-def check_reservation_action(reservation_id: str, action: str, reason: str = "") -> dict:
-    """Airline policy verdict for an action on a reservation, with any allowed change that would make it allowed."""
-    return airline.check_eligibility(_airline_db(), reservation_id, action, reason or None)
+def check_reservation_action(reservation_id: str, action: str, reason: str = "", user_asked_how: bool = False) -> dict:
+    """Airline policy verdict for an action on a reservation. With user_asked_how (the user asked how it could be made
+    possible), also the allowed changes that would make it allowed."""
+    return airline.check_eligibility(_airline_db(), reservation_id, action, reason or None, user_asked_how)
 
 
 @server.tool()
