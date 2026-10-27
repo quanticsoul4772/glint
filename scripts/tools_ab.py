@@ -25,8 +25,9 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 
 - `banking-failures`: 038 and 054 only, run first; shares `banking`'s stamp and checkpoint.
 - `banking-other`: the other 10 banking tasks of `banking` (not tuned on), k=2.
+- `gate-banking`: activation-gate training data, no-tools arm only: the 12 banking tasks x 25 trials, concurrency 12.
 
-Usage: python tools_ab.py [design|heldout|banking|banking-failures|banking-other] [--modal] [--analyze]
+Usage: python tools_ab.py [design|heldout|banking|banking-failures|banking-other|gate-banking] [--modal] [--analyze]
 """
 import json
 import os
@@ -99,6 +100,11 @@ SETS = {
                       "trials": 2, "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 5.0,
                       "data": MEASURE / "tools_ab_banking_other", "out": RESULTS / "tools-ab-banking-other.json",
                       "save": "tools-ab-banking-other"},
+    # Activation-gate data (research/3-project/activation-gate-design.md): no-tools runs only, labelled afterwards by
+    # glint.decisions; 12 tasks x 25 trials
+    "gate-banking": {"tasks": banking_tasks, "trials": 25, "arms": ("base",), "concurrency": 12, "glimmer_usd": 3.0,
+                     "meta_usd": 3.0, "gpu_usd": 30.0, "data": MEASURE / "gate_banking",
+                     "out": RESULTS / "gate-banking-runs.json", "save": "gate-banking"},
     # The two recorded failures first. Same stamp and τ² save_to as `banking`, so the full set later resumes these
     # simulations instead of running them again
     "banking-failures": {"tasks": lambda: {"banking_knowledge": ["task_038", "task_054"]}, "trials": 4,
@@ -136,7 +142,7 @@ def _run(cfg: dict, domain: str, ids: list[str], arm: str, stamp: str, endpoint:
     model, args = _agent(cfg, domain, endpoint)
     common = {"domain": domain, "agent": "llm_agent", "llm_agent": model, "llm_args_agent": args,
               "user": "user_simulator", "llm_user": SPARK, "llm_args_user": META, "num_trials": _trials(cfg, domain),
-              "max_concurrency": 8 if endpoint else 4, "seed": 5000,
+              "max_concurrency": cfg.get("concurrency", 8) if endpoint else 4, "seed": 5000,
               "save_to": f"glint-{cfg['save']}-{arm}-{domain}-{stamp}", "auto_review": False, "max_retries": 0,
               "auto_resume": True}
     if domain == "banking_knowledge":
@@ -159,7 +165,7 @@ def generate(cfg: dict) -> None:
     stamp = stamp_file.read_text(encoding="utf-8").strip()
     tasks = cfg["tasks"]()
     (data / "tasks.json").write_text(json.dumps(tasks), encoding="utf-8")
-    pending = [(d, ids, arm) for d, ids in tasks.items() for arm in ("base", "tools")
+    pending = [(d, ids, arm) for d, ids in tasks.items() for arm in cfg.get("arms", ("base", "tools"))
                if not (data / f"{arm}-{d}.json").exists()]
     if not pending:
         return
