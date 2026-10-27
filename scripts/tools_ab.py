@@ -23,7 +23,9 @@ Sets:
 
 Runs go domain by domain (base then tools), so a domain that finishes has both arms.
 
-Usage: python tools_ab.py [design|heldout|banking] [--modal] [--analyze]
+- `banking-failures`: 038 and 054 only, run first; shares `banking`'s stamp and checkpoint.
+
+Usage: python tools_ab.py [design|heldout|banking|banking-failures] [--modal] [--analyze]
 """
 import json
 import os
@@ -89,13 +91,21 @@ SETS = {
     "banking": {"tasks": banking_tasks, "trials": 4, "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 6.0,
                 "data": MEASURE / "tools_ab_banking", "out": RESULTS / "tools-ab-banking.json",
                 "save": "tools-ab-banking"},
+    # The two recorded failures first. Same stamp and τ² save_to as `banking`, so the full set later resumes these
+    # simulations instead of running them again
+    "banking-failures": {"tasks": lambda: {"banking_knowledge": ["task_038", "task_054"]}, "trials": 4,
+                         "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 6.0,
+                         "data": MEASURE / "tools_ab_banking_failures", "stamp_dir": MEASURE / "tools_ab_banking",
+                         "out": RESULTS / "tools-ab-banking-failures.json", "save": "tools-ab-banking"},
 }
 
 
 def for_backend(cfg: dict, modal: bool) -> dict:
     if not modal:
         return cfg
+    stamp_dir = cfg.get("stamp_dir", cfg["data"])
     return cfg | {"modal": True, "data": cfg["data"].with_name(cfg["data"].name + "_modal"),
+                  "stamp_dir": stamp_dir.with_name(stamp_dir.name + "_modal"),
                   "out": cfg["out"].with_name(cfg["out"].stem + "-modal.json"), "save": cfg["save"] + "-modal"}
 
 
@@ -133,7 +143,9 @@ def generate(cfg: dict) -> None:
     # same τ² save_to (so finished simulations are resumed, not paid for again)
     data = cfg["data"]
     data.mkdir(parents=True, exist_ok=True)
-    stamp_file = data / "stamp.txt"
+    stamp_dir = cfg.get("stamp_dir", data)
+    stamp_dir.mkdir(parents=True, exist_ok=True)
+    stamp_file = stamp_dir / "stamp.txt"
     if not stamp_file.exists():
         stamp_file.write_text(time.strftime("%Y%m%d-%H%M%S"), encoding="utf-8")
     stamp = stamp_file.read_text(encoding="utf-8").strip()
