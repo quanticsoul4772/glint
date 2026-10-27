@@ -16,7 +16,14 @@ from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
 
 from glint.meter import Caps, Meter
-from glint.twins import ChoicePoint, at_choice_point, contradicts, find_choice_points, make_twins, stated_phrases
+from glint.twins import (
+    ChoicePoint,
+    at_choice_point,
+    contradicts,
+    find_choice_points,
+    make_twins,
+    stated_phrases,
+)
 
 RETAIL = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains\retail")
 DATA = Path(r"<workspace>\measure\data\twins")
