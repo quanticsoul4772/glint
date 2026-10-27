@@ -83,13 +83,17 @@ def _schemas(tools: list[dict]) -> dict[str, dict]:
 
 
 def _normalize_name(emitted: str, registered: set[str]) -> str:
-    """Collapse the doubled form `get_x.get_x` the template's `"get_x.*"` recipient invites; nothing else."""
+    """Collapse the doubled form `get_x.get_x` the template's `"get_x.*"` recipient invites; nothing else.
+
+    A name that is not registered passes through as Glimmer wrote it: the environment answers it as an unknown tool
+    and Glimmer can recover. Raising here turned such a call into an infrastructure error that ended the whole run
+    (2026-10-27: Glimmer called the hidden banking tool get_user_dispute_history_7291 by name, in 2 of 8 runs)."""
     if emitted in registered:
         return emitted
     head, sep, tail = emitted.partition(".")
-    if sep and head == tail and head in registered:
+    if sep and head == tail:
         return head
-    raise AtemParseError(f"emitted tool name {emitted!r} is not a registered tool")
+    return emitted
 
 
 def parse_turn(text: str, tools: list[dict]) -> ParsedTurn:
@@ -109,7 +113,7 @@ def parse_turn(text: str, tools: list[dict]) -> ParsedTurn:
         if not name_m:
             raise AtemParseError(f"invoke without a name: {invoke[:120]!r}")
         name = _normalize_name(name_m.group(1), set(schemas))
-        props = schemas[name].get("properties", {})
+        props = schemas.get(name, {}).get("properties", {})  # unregistered: no schema, every value JSON-decoded
         strings = {k for k, s in props.items() if isinstance(s, dict) and s.get("type") == "string"}
         args = {}
         for pm in _PARAM_RE.finditer(invoke):
