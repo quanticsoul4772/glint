@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import litellm
+import openai
 from dotenv import dotenv_values
 from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
@@ -93,7 +94,7 @@ def one(_):
         call(model=GLIMMER, messages=[{"role": "user", "content": "Reply with one word: ok"}], max_tokens=300,
              **GLIMMER_ARGS)
         return "ok"
-    except Exception as e:  # recorded, not hidden: the point of C7 is to count failures by type
+    except openai.APIError as e:  # provider errors are what C7 counts; anything else propagates
         return type(e).__name__ + ": " + str(e)[:120]
 
 
