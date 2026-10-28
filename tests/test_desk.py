@@ -627,11 +627,11 @@ def test_the_customer_switches_to_spark_open_when_meta_cannot_serve_it(monkeypat
 
 
 @pytest.mark.parametrize("error", [_ApiError(500), _ApiError(400, "bad request"), ValueError("parse"), None],
-                         ids=["500", "400", "other", "our-cap"])
+                         ids=["500", "400", "other", "glint-cap"])
 def test_other_customer_errors_fail_as_before_without_a_switch(monkeypatch, error):
     from glint.desk import live
 
-    error = error or live.BudgetExceeded("Meta API spend reached cap")  # our own cap is not Meta failing
+    error = error or live.BudgetExceeded("Meta API spend reached cap")  # Glint's own cap is not Meta failing
     session, call, meta_sent, open_sent = _customer_on_a_session(monkeypatch, error)
     with pytest.raises(type(error)):
         call(model=live.SPARK, messages=[])

@@ -1,7 +1,7 @@
 """M1 checks C5 (token-prefix property) and C6 (tokenization fidelity) on the C2 Glimmer trajectories.
 
 Renders each agent step's prompt with Glimmer's own chat template (pinned revision) and tokenizer, no weights.
-C6: our prompt token count vs DeepInfra's usage.prompt_tokens, per step.
+C6: the locally counted prompt tokens vs DeepInfra's usage.prompt_tokens, per step.
 C5a (history as τ² sends it, reasoning dropped): is step k's prompt an exact token prefix of step k+1's?
 C5b (history with each turn's reasoning kept): is prompt_k + Glimmer's generated text for step k an exact prefix
      of step k+1's prompt? If yes, one prefill of the final transcript covers every step's read positions.

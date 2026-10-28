@@ -50,7 +50,7 @@ Seven tools, served as an **MCP server** (`python -m glint.assist.server`, stdio
 - **Muse Code** loads Glint's MCP server as a client: in a check on 2026-10-28, Muse Code 1.4.14 loaded the 7 tools and Spark called `check_credit_limit_increase` end to end.
 - `glint.atem` re-parses Glimmer's tool calls from its raw token stream: the hosted parser turned string arguments such as zip codes into numbers.
 
-## What we measured
+## What was measured
 τ²-bench v1.0.1, Glimmer at medium reasoning, both arms with the same seeds on the same backend. Reported **by task** (runs of one task are not independent); tuned and untuned tasks apart. Full detail: [docs/results.md](docs/results.md).
 
 - **Banking, current tools: the only domain with a gain, not significant** (12 tasks with a dispute or credit-limit step, k=4).
@@ -81,7 +81,7 @@ uv run pytest -q
 ```
 
 - **Bank Desk, replay mode** (no GPU, no keys): `uv run python -m glint.desk.app`, then open http://127.0.0.1:8765.
-- **Bank Desk, live mode:** needs a deployed Glimmer endpoint (`modal deploy src/glint/glimmer_serve.py`) and `GLINT_GLIMMER_URL`, `MODAL_PROXY_KEY`, `MODAL_PROXY_SECRET` and `MODEL_API_KEY` set.
+- **Bank Desk, live mode:** needs a deployed Glimmer endpoint (`modal deploy src/glint/glimmer_serve.py`) and `GLINT_GLIMMER_URL`, `MODAL_PROXY_KEY`, `MODAL_PROXY_SECRET` and `MODEL_API_KEY` set; `BASETEN_API_KEY` enables the Spark Open customer fallback.
 - **MCP server:** `uv run python -m glint.assist.server` (stdio).
 - **With/without comparisons:** `scripts/tools_ab.py` (checkpointed; both arms on the same backend); `scripts/export_results.py` and `scripts/export_scenarios.py` regenerate the desk's data from the runs.
 - **Workspace:** working files (run data, ledger, results, `.env`) live outside the repo, under `GLINT_HOME`, which defaults to the repo's parent folder.

@@ -1,6 +1,6 @@
 # Glint test strategy
 
-## Why we test, and what matters most
+## Why the tests exist, and what matters most
 Glint makes two kinds of claims a bug can break: what it **spends** (Modal GPU time, Meta and DeepInfra credit) and what it **measured** (the numbers in the README and on the Results tab). The tests protect those first. On 2026-10-27 a refactor moved the tool-call count inside the wrong block of `tools_ab.analyze`, and only a new pipeline test caught it.
 
 ## Coverage goal
@@ -19,7 +19,7 @@ Glint makes two kinds of claims a bug can break: what it **spends** (Modal GPU t
 ## What a test may and may not touch
 - **Never the real workspace.** `tests/conftest.py` gives each run its own `GLINT_HOME` under `.pytest_home/` (on D:, gitignored) before any glint module is imported. That workspace is deleted at exit. pytest's `tmp_path` folders go to `.pytest_tmp/`.
 
-  Rule: no test writes to `<workspace>`. The desk tests once wrote 12 live-run rows into the real `desk_sessions.jsonl`.
+  Rule: no test writes to the real workspace (`GLINT_HOME`). The desk tests once wrote 12 live-run rows into the real `desk_sessions.jsonl`.
 - **Never a paid or remote service.**
   - No Modal, GPU, DeepInfra, Meta API or Baseten calls.
   - The modal CLI is a stand-in for `subprocess.run`; HTTP goes through `httpx.MockTransport`; τ²'s batch is a stand-in `_run`; LiteLLM loggers are called directly.
@@ -36,7 +36,7 @@ Glint makes two kinds of claims a bug can break: what it **spends** (Modal GPU t
    - the runner's `generate` with a fake τ² batch.
 
    These carry the fail-fast checks. Each failure path asserts that it fails loudly: the exception, the message, and the state left behind (for example, no arm file after a cap stop).
-3. **Pipeline.** The measurement path from saved τ² runs to the numbers we publish: `tools_ab.analyze` → `export_results` / `export_scenarios`, and `gate_labels`.
+3. **Pipeline.** The measurement path from saved τ² runs to the published numbers: `tools_ab.analyze` → `export_results` / `export_scenarios`, and `gate_labels`.
    - Inputs come from the `make_sim` and `run_set` fixtures, one simulation per outcome kind.
    - Every counting rule in the project rules has a test: report by task; context overflows are failures; infrastructure, evaluation and cap stops are excluded and counted; Glint errors count against the tools; trials beyond k are left out and noted.
 4. **Tool correctness.** The decision tools are checked against τ²'s gold actions on recorded tasks (`test_assist`, `test_decisions`). A tool fix comes with the task that exposed it. Tools are frozen after 2026-10-27; a held-out defect is reported in the notes, not fixed in place.

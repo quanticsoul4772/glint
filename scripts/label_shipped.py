@@ -36,7 +36,7 @@ def run(path: Path) -> dict:
                                       "modify_pending_order_items", "modify_pending_order_payment",
                                       "modify_pending_order_address", "return_delivered_order_items",
                                       "modify_user_address"}
-        # replay fidelity: our executed error flags vs recorded ones, by call order
+        # replay fidelity: the replay's executed error flags vs recorded ones, by call order
         calls = [tc for m in sim["messages"] if m.get("role") == "assistant" for tc in (m.get("tool_calls") or [])]
         ours = [Label.TOOL_ERROR in r.labels for r in rows]
         theirs = [recorded_err.get(tc.get("id"), False) for tc in calls]
