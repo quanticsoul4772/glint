@@ -105,3 +105,61 @@ def test_live_endpoints_run_one_pair_at_a_time(monkeypatch):
     for s in desk_app._sessions.values():
         for pane in s.panes.values():
             pane.orchestrator.gate.set()
+
+
+def test_desk_budget_records_gpu_and_refuses_past_the_caps(tmp_path):
+    import json
+    import types
+
+    import pytest
+
+    from glint.desk.live import BudgetExceeded, DeskBudget
+
+    log, ledger = tmp_path / "sessions.jsonl", tmp_path / "ledger.jsonl"
+    budget = DeskBudget(gpu_usd_per_day=0.25, pairs_per_day=2, ledger=ledger, log_path=log)
+    budget.check()
+    snap = {"alone": {"elapsed_s": 60}, "tools": {"elapsed_s": 70, "outcome": {"passed": True}}}
+    session = types.SimpleNamespace(id="s1", task_id="task_054", started=0.0, ended=180.0, wake_error=None,
+                                    snapshot=lambda: snap)
+    budget.record(session)  # 180 s + 120 s scale-down = 300 s at $2.94/h = $0.245
+    row = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+    assert row["gpu_seconds"] == 300 and row["tools_outcome"] is True and row["alone_outcome"] is None
+    budget.check()  # $0.245 < $0.25, 1 pair < 2
+    budget.record(session)
+    with pytest.raises(BudgetExceeded):
+        budget.check()
+
+
+def test_a_failed_wake_ends_both_panes_with_the_error():
+    import time
+
+    from glint.desk.live import LiveSession
+
+    done = []
+
+    def wake():
+        raise TimeoutError("not ready after 900 s")
+
+    session = LiveSession("task_x", _fake_build, wake=wake, on_done=done.append).start()
+    deadline = time.time() + 5
+    while not session.done and time.time() < deadline:
+        time.sleep(0.05)
+    snap = session.snapshot()
+    assert snap["done"] and done == [session]
+    assert all("did not start" in snap[p]["error"] for p in ("alone", "tools"))
+
+
+def test_live_start_is_refused_when_the_budget_is_spent(monkeypatch):
+    from glint.desk import app as desk_app
+    from glint.desk.live import BudgetExceeded
+
+    for k in desk_app.LIVE_ENV:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(desk_app, "_sessions", {})
+
+    def spent():
+        raise BudgetExceeded("GPU spend $3.00 reached cap $3")
+
+    monkeypatch.setattr(desk_app.budget, "check", spent)
+    r = client.post("/api/live/start", json={"task_id": "task_054"})
+    assert r.status_code == 429 and "Replay mode still works" in r.json()["detail"]

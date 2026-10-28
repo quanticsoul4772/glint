@@ -49,6 +49,10 @@ def get_scenario(scenario_id: str):
 
 
 LIVE_ENV = ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY")
+# Live mode wakes the Glimmer GPU ($2.94/h while up): a daily GPU cap and pair limit, kept in the meter ledger
+budget = live.DeskBudget(gpu_usd_per_day=float(os.environ.get("GLINT_DESK_GPU_USD_PER_DAY", "3")),
+                         pairs_per_day=int(os.environ.get("GLINT_DESK_PAIRS_PER_DAY", "12")),
+                         log_path=os.environ.get("GLINT_DESK_LOG", "desk_sessions.jsonl"))
 _sessions: dict[str, live.LiveSession] = {}
 _lock = threading.Lock()
 
@@ -64,19 +68,29 @@ def banking_tasks() -> dict:
     return {t.id: t for t in registry.get_tasks_loader("banking_knowledge")()}
 
 
+def _wake(settings: dict):
+    from glint import glimmer_serve
+
+    def wake():
+        glimmer_serve.wait_ready(settings["url"], os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"])
+
+    return wake
+
+
 def _new_session(task_id: str) -> live.LiveSession:
     settings = live.configure()
     task = banking_tasks()[task_id]
     build = live.tau2_builder(task, settings["glimmer_args"], settings["glimmer_model"], settings["user_args"],
                               seed=int.from_bytes(os.urandom(2), "big"))
-    return live.LiveSession(task_id, build, live.tau2_labeler(task))
+    return live.LiveSession(task_id, build, live.tau2_labeler(task), wake=_wake(settings), on_done=budget.record)
 
 
 @app.get("/api/live/status")
 def live_status():
     missing = [k for k in LIVE_ENV if not os.environ.get(k)]
     running = [s.id for s in _sessions.values() if not s.done]
-    return {"available": not missing, "missing": missing, "running": running}
+    return {"available": not missing, "missing": missing, "running": running,
+            "pairs_today": budget.pairs_today(), "pairs_per_day": budget.pairs_per_day}
 
 
 @app.post("/api/live/start")
@@ -89,6 +103,10 @@ def live_start(body: StartLive):
     with _lock:  # one live pair at a time: each holds two conversations on the one Glimmer endpoint
         if any(not s.done for s in _sessions.values()):
             raise HTTPException(409, "a live run is already in progress; watch it or wait for it to finish")
+        try:
+            budget.check()
+        except live.BudgetExceeded as e:
+            raise HTTPException(429, f"live mode is paused: {e}. Replay mode still works.") from e
         session = _new_session(body.task_id).start()
         _sessions[session.id] = session
     return {"id": session.id}
