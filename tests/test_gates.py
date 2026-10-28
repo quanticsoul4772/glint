@@ -7,6 +7,7 @@ import pytest
 from loguru import logger
 from tau2.data_model.message import ToolCall
 from tau2.data_model.tasks import Task
+from tau2.environment.toolkit import ToolType
 from tau2.registry import registry
 
 from glint import paths
@@ -124,13 +125,14 @@ def test_retail_exchange():
     assert not reply.error and env.tools.db.orders["#W4817420"].status == "exchange requested"
 
 
-def test_retail_user_address_has_no_rule_yet_and_is_logged():
-    env, events = _gated("retail")
-    reply = _call(env, "modify_user_address", user_id="sofia_rossi_8776", address1="1 Main St", address2="",
-                  city="Austin", state="TX", country="USA", zip="78701")
-    assert not reply.error
-    assert [(e["tool"], e["rule_id"], e["decision"]) for e in _fired(events)] == [
-        ("modify_user_address", NO_RULE, "allow")]
+def test_a_write_with_no_rule_yet_is_allowed_and_logged():
+    """Phase 2 gave retail's modify_user_address a rule; a banking write with no rule yet is still allowed and
+    logged under no_rule_yet (with the procedure gates' verdicts beside it)."""
+    env, events, _ = _banking("task_001")
+    reply = _call(env, "example_agent_tool_0000")
+    assert "was NOT executed" not in reply.content
+    assert [(e["rule_id"], e["decision"]) for e in _fired(events) if e["tool"] == "example_agent_tool_0000"] == [
+        (NO_RULE, "allow")]
 
 
 # ---- airline ------------------------------------------------------------------------------------------------------
@@ -218,6 +220,15 @@ def _banking(task_id: str):
     env, events = _gated("banking_knowledge", task)
     gold = [(a.arguments["agent_tool_name"], json.loads(a.arguments["arguments"]))
             for a in task.evaluation_criteria.actions if a.name == "call_discoverable_agent_tool"]
+    # phase 2 gates banking writes on the user's verification and on the lookups each procedure names: do them as
+    # the gold conversation does (the hidden lookups are reads; they change nothing the phase-1 gates judge)
+    for a in task.evaluation_criteria.actions:
+        if a.name == "log_verification":
+            env.get_response(ToolCall(id="v", name=a.name, arguments=a.arguments, requestor="assistant"))
+    for tool, args in gold:
+        if env.tools.tool_type(tool) == ToolType.READ:
+            _call(env, "unlock_discoverable_agent_tool", agent_tool_name=tool)
+            _call(env, "call_discoverable_agent_tool", agent_tool_name=tool, arguments=json.dumps(args))
     return env, events, gold
 
 
@@ -352,14 +363,21 @@ def test_boot_check_raises_when_a_required_write_has_no_gate(monkeypatch):
     reg.register(Gate("g", ("a",), "p", lambda db, a: allow("r", "s")))
     with pytest.raises(RuntimeError, match=r"write tools without a gate: \['b'\]"):
         assert_required(reg, {"a", "b"}, "test")
-    monkeypatch.setitem(rules.NO_RULE_YET, "retail", ())  # modify_user_address loses its gate
-    with pytest.raises(RuntimeError, match="modify_user_address"):
-        Enforcer("retail", EventLog(":memory:"))
+    monkeypatch.setitem(rules.NO_RULE_YET, "banking_knowledge", ())  # example_agent_tool_0000 loses its gate
+    with pytest.raises(RuntimeError, match="example_agent_tool_0000"):
+        Enforcer("banking_knowledge", EventLog(":memory:"))
 
 
 def test_attach_raises_when_the_toolkit_has_a_write_no_gate_covers(monkeypatch):
     monkeypatch.setitem(rules.REQUIRED_GATES, "airline", rules.REQUIRED_GATES["airline"] - {"send_certificate"})
-    monkeypatch.setitem(rules.NO_RULE_YET, "airline", ("book_reservation",))
+    monkeypatch.setattr(rules.travel, "send_certificate", None)
+    real = rules.build_registry
+
+    def without_certificate(domain):
+        reg = real(domain)
+        reg._gates.pop("airline_send_certificate_gate", None)
+        return reg
+    monkeypatch.setattr("glint.gates.enforce.build_registry", without_certificate)
     enforcer = Enforcer("airline", EventLog(":memory:"))
     with pytest.raises(RuntimeError, match="send_certificate"):
         enforcer.attach(registry.get_env_constructor("airline")())
@@ -441,7 +459,8 @@ def test_every_decision_and_the_manifest_are_logged(tmp_path):
     _call(env, "cancel_pending_order", order_id="#W4817420", reason="no longer needed")
     _call(env, "get_order_details", order_id="#W4817420")  # a read: not gated, not logged
     manifest = events.events("gates.manifest")
-    assert len(manifest) == 1 and "modify_user_address" in manifest[0]["payload"]["no_rule_yet"]
+    assert len(manifest) == 1 and manifest[0]["payload"]["no_rule_yet"] == []
+    assert "modify_user_address" in manifest[0]["payload"]["required"]
     (fired,) = _fired(events)
     assert {k: fired[k] for k in ("tool", "decision", "rule_id", "task_id", "trial", "replay")} == {
         "tool": "cancel_pending_order", "decision": "deny", "rule_id": "retail.cancel", "task_id": "7",
@@ -551,8 +570,8 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
 # ---- false refusals on gold ----------------------------------------------------------------------------------------
 
 def test_no_gold_write_is_refused():
-    """Every gold action of every retail, airline and banking task through the gates: a deny of a gold write that
-    τ²'s own tool would run is a false refusal; there must be none."""
+    """Every gold action of every TRAIN task (retail, airline, banking) through the gates: a deny of a gold write that
+    τ²'s own tool would run is a false refusal; there must be none. τ²'s test splits stay unread."""
     import gate_replay
 
     events = EventLog(":memory:")
@@ -560,21 +579,27 @@ def test_no_gold_write_is_refused():
     refusals = [f for r in reports for f in r["false_refusals"]]
     assert refusals == [], "\n".join(f"{f['domain']} {f['task_id']} {f['tool']} {f['rule_id']}: {f['reason']}"
                                      for f in refusals)
-    # the two gold writes τ²'s tool rejects anyway (retail 64: exchange on a pending order; 105: gift card balance)
-    assert sorted(f["task_id"] for r in reports for f in r["also_rejected"]) == ["105", "64"]
-    assert sum(r["gold_writes"] for r in reports) == 568 and events.verify() > 568
+    # the gold write τ²'s tool rejects anyway (retail 105: gift card balance)
+    assert sorted(f["task_id"] for r in reports for f in r["also_rejected"]) == ["105"]
+    assert [r["tasks"] for r in reports] == [74, 30, 77]
+    assert not {t.id for t in gate_replay.tasks_of("banking_knowledge")} & set(json.loads(
+        (paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))["test_untouched"])
+    # task_005's gold verifies a placeholder user and changes an unverified user's email: denied by policy, listed
+    assert sorted((f["task_id"], f["tool"]) for r in reports for f in r["placeholder_gold"]) == [
+        ("task_005", "change_user_email"), ("task_005", "log_verification")]
+    assert sum(r["gold_writes"] for r in reports) == 418 and events.verify() > 418
 
 
 def test_gate_replay_main_reports_and_exits_by_the_count(tmp_path, monkeypatch, capsys):
     import gate_replay
 
-    retail = [t for t in gate_replay.tasks_of("retail") if t.id in ("64", "0")]
+    retail = [t for t in gate_replay.tasks_of("retail") if t.id in ("105", "0")]
     monkeypatch.setattr(gate_replay, "DOMAINS", ("retail",))
     monkeypatch.setattr(gate_replay, "tasks_of", lambda d: retail)
     out = tmp_path / "r.json"
     assert gate_replay.main(["--json", str(out), "--log", str(tmp_path / "g.sqlite")]) == 0
     text = capsys.readouterr().out
-    assert "TOTAL false refusals on gold: 0" in text and "also rejected by τ² 64" in text
+    assert "TOTAL false refusals on gold: 0" in text and "also rejected by τ² 105" in text
     assert json.loads(out.read_text(encoding="utf-8"))[0]["tasks"] == 2
     monkeypatch.setattr(rules, "_retail_gate", lambda action: lambda db, a: deny("x", "s", "no", "fix"))
     assert gate_replay.main([]) == 1

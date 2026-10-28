@@ -19,7 +19,9 @@ from typing import Any, Literal
 log = logging.getLogger("glint.gates")
 
 Decision = Literal["allow", "deny"]
-DEFAULT_TIMEOUT_S = 5.0
+# A gate reads a few database rows; 60 s is far beyond any real evaluation. A live timeout is the one way a live
+# decision can differ from τ²'s replay (which waits without a clock, see run_gate), so it is logged as an ERROR.
+DEFAULT_TIMEOUT_S = 60.0
 NO_RULE = "no_rule_yet"  # rule_id of the allow-and-log gate on a write no rule covers yet
 
 
@@ -59,11 +61,14 @@ GateFn = Callable[[Any, dict], GateResult]
 
 @dataclass(frozen=True)
 class Gate:
+    """One gate. `fn(db, args)` judges the write; with `toolkit=True` it gets the environment's toolkit instead of its
+    database (a procedure gate reads `toolkit.db` and which hidden reads that environment records)."""
     name: str
     tools: tuple[str, ...]
     purpose: str
     fn: GateFn
     timeout_s: float = DEFAULT_TIMEOUT_S
+    toolkit: bool = False
 
 
 class GateRegistry:
@@ -101,15 +106,17 @@ def assert_required(registry: GateRegistry, required: set[str], where: str) -> N
 _POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="glint-gate")
 
 
-def run_gate(gate: Gate, db, args: dict) -> tuple[GateResult, float]:
+def run_gate(gate: Gate, db, args: dict, wait: bool = False) -> tuple[GateResult, float]:
     """Run one gate, failing CLOSED: an exception, a timeout or a malformed result becomes a deny whose reason names
-    the error. Returns the result and the duration in milliseconds."""
+    the error. Returns the result and the duration in milliseconds. With `wait=True` (τ²'s evaluator replay) there is
+    no wall-clock timeout, so the replayed decision depends only on the database and the arguments."""
     start = time.perf_counter()
     future = _POOL.submit(gate.fn, db, args)
     try:
-        result = future.result(timeout=gate.timeout_s)
+        result = future.result(timeout=None if wait else gate.timeout_s)
     except FutureTimeout:
-        log.warning("gate %s timed out after %ss: failing closed", gate.name, gate.timeout_s)
+        log.error("gate %s timed out after %ss: failing closed; τ²'s replay of this call waits and may decide "
+                  "differently", gate.name, gate.timeout_s)
         result = deny("gate_timeout", gate.name, f"gate {gate.name!r} timed out after {gate.timeout_s}s",
                       "Retry later or report it; a gate that cannot decide blocks the write by design.")
     except Exception as exc:

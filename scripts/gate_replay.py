@@ -1,11 +1,12 @@
 """False-refusal replay: τ²'s GOLD actions through gated environments. Every deny of a gold write is a false refusal.
 
-For every task of retail and airline (train and test splits) and banking_knowledge (all tasks; τ² does not split
-them), a fresh environment is set to the task's initial state and gated with glint.gates; each gold action
+For every TRAIN task of retail, airline and banking_knowledge (`tasks_of`; τ²'s test splits stay unread), a fresh
+environment is set to the task's initial state and gated with glint.gates; each gold action
 (`evaluation_criteria.actions`) is sent through `get_response` the way an agent's call would be. An ungated twin of
 the environment takes the same calls in step: a denied gold write that τ²'s own tool also rejects on the twin (gold
 data with an action the environment refuses, such as an exchange on a pending order) changes nothing either way and
-is counted as `also_rejected`, not as a false refusal. The target is 0 false refusals. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
+is counted as `also_rejected`, not as a false refusal; a denied gold write of PLACEHOLDER_GOLD is listed apart. The
+target is 0 false refusals. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
 
 Usage: python scripts/gate_replay.py [--log PATH] [--json OUT]
 """
@@ -19,16 +20,26 @@ from loguru import logger
 from tau2.data_model.message import ToolCall
 from tau2.registry import registry
 
+from glint import paths
 from glint.gates import Enforcer, EventLog
 
 DOMAINS = ("retail", "airline", "banking_knowledge")
+BANKING_SPLIT = paths.RESULTS / "split-partition-banking.json"
+# Gold data the gates deny by policy, listed and reported on its own, never silently: task_005's gold logs a
+# verification whose every field is the placeholder '9K2X7M4P1N8Q3R5T6A' (no such user) and then changes the email of
+# a user who was never verified (the user simulator is told to fail verification)
+PLACEHOLDER_GOLD = {("banking_knowledge", "task_005"): "placeholder verification; email change of an unverified user"}
 
 
 def tasks_of(domain: str) -> list:
+    """The TRAIN tasks only: τ²'s test splits stay unread (research/00-decisions.md). Retail and airline use τ²'s
+    train split; banking_knowledge has none, so its test tasks are the `test_untouched` 20 of
+    split-partition-banking.json and the rest (pilot + rest, 77 tasks) are replayed."""
     loader = registry.get_tasks_loader(domain)
     if domain == "banking_knowledge":
-        return list(loader(None))
-    return [t for split in ("train", "test") for t in loader(split)]
+        untouched = set(json.loads(BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
+        return [t for t in loader(None) if t.id not in untouched]
+    return list(loader("train"))
 
 
 def _env(domain: str, task):
@@ -42,7 +53,7 @@ def replay(domain: str, tasks: list, events: EventLog) -> dict:
     """Replay each task's gold actions; returns counts and the false refusals."""
     current = {"task_id": None}
     enforcer = Enforcer(domain, events, context=lambda: dict(current))
-    refusals, also_rejected, writes, allowed, rules = [], [], 0, 0, Counter()
+    refusals, also_rejected, placeholder, writes, allowed, rules = [], [], [], 0, 0, Counter()
     for task in tasks:
         current["task_id"] = task.id
         env, twin = enforcer.attach(_env(domain, task)), _env(domain, task)
@@ -71,6 +82,8 @@ def replay(domain: str, tasks: list, events: EventLog) -> dict:
                        "rule_id": d["rule_id"], "reason": d["reason"]}
                 if ungated.error:
                     also_rejected.append(row | {"environment": str(ungated.content)})
+                elif (domain, task.id) in PLACEHOLDER_GOLD:
+                    placeholder.append(row | {"why": PLACEHOLDER_GOLD[(domain, task.id)]})
                 else:
                     refusals.append(row)
             else:
@@ -78,7 +91,8 @@ def replay(domain: str, tasks: list, events: EventLog) -> dict:
                 if reply.error:
                     logger.warning(f"{domain} {task.id} gold {write[0]} was allowed but errored: {reply.content}")
     return {"domain": domain, "tasks": len(tasks), "gold_writes": writes, "allowed": allowed,
-            "false_refusals": refusals, "also_rejected": also_rejected, "rules": dict(rules)}
+            "false_refusals": refusals, "also_rejected": also_rejected, "placeholder_gold": placeholder,
+            "rules": dict(rules)}
 
 
 def main(argv: list[str]) -> int:
@@ -96,6 +110,8 @@ def main(argv: list[str]) -> int:
             print(f"  {rule}: {n}")
         for f in r["false_refusals"]:
             print(f"  FALSE REFUSAL {f['task_id']} {f['tool']} [{f['gate']} {f['rule_id']}]: {f['reason']}")
+        for f in r["placeholder_gold"]:
+            print(f"  placeholder gold {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['why']}")
         for f in r["also_rejected"]:
             print(f"  also rejected by τ² {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['reason']} | "
                   f"{f['environment']}")
