@@ -117,6 +117,7 @@ def test_logwatch_dumps_its_lines_and_stops_its_stream(capsys):
     watch = glimmer_serve.LogWatch.__new__(glimmer_serve.LogWatch)
     watch.history, watch.lines, watch.restarts, watch._seen, watch.error = [], [], 0, set(), None
     watch._buf, watch._closed, watch._proc, watch._restart_s = watch.lines, False, None, 0.05
+    watch.suppressed, watch.last_periodic = 0, None
     import threading
 
     watch._lock, watch._cmd, watch._env = threading.Lock(), cmd, None

@@ -261,3 +261,33 @@ def test_generate_refuses_a_rerun_with_nothing_to_rerun(run_set, monkeypatch, tm
     monkeypatch.setattr("sys.argv", ["tools_ab.py", "x", "--rerun-infrastructure-errors"])
     with pytest.raises(SystemExit, match="no infrastructure-error runs to rerun"):
         tools_ab.generate(cfg)
+
+
+def test_a_set_with_connections_gets_its_own_pool_and_others_keep_taus_client(stand_in, make_sim, monkeypatch,
+                                                                                 tmp_path):
+    # τ²'s pool has 10 connections for 12 simulations and their user simulator: requests queued silently. A set with
+    # `connections` gets a pool that size, still following Modal's redirects and logging; a set without keeps τ²'s
+    import litellm
+
+    from glint import glimmer_serve
+
+    monkeypatch.setattr(litellm, "client_session", litellm.client_session)  # restored after the test
+    monkeypatch.setattr(litellm, "aclient_session", litellm.aclient_session)
+    taus = litellm.client_session
+    cfg, outcomes = stand_in
+    outcomes["base"] = outcomes["tools"] = [make_sim("1", 0, "pass"), make_sim("1", 1, "pass")]
+    tools_ab.generate(cfg)
+    assert litellm.client_session is taus  # no key: τ²'s client object, untouched
+
+    tools_ab.generate(cfg | {"connections": 24, "data": tmp_path / "bigger"})
+    sync, async_ = litellm.client_session, litellm.aclient_session
+    assert sync is not taus
+    for client in (sync, async_):
+        assert client._transport._pool._max_connections == 24 and client.follow_redirects
+    assert sync.event_hooks["request"] == [glimmer_serve._stamp]
+    assert sync.event_hooks["response"] == [glimmer_serve._report_unfollowed, glimmer_serve._report_pool_wait]
+
+
+def test_no_existing_set_changes_its_pool():
+    # existing sets keep τ²'s client so their runs stay comparable with the runs already made
+    assert not [name for name, cfg in tools_ab.SETS.items() if "connections" in cfg]
