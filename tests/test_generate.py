@@ -214,3 +214,50 @@ def test_the_modal_path_deploys_waits_and_routes_glimmer_through_the_session(sta
     assert (cfg["data"] / "base-retail.json").exists() and not (cfg["data"] / "tools-retail.json").exists()
     with pytest.raises(BudgetExceeded, match="session was halted"):  # Glimmer calls are refused once halted
         llm_utils.completion(model="openai/Muse-Glimmer-30B-modal", messages=[])
+
+
+@pytest.fixture
+def dropped_set(run_set, make_sim, monkeypatch, tmp_path):
+    """A finished banking arm pair whose checkpoints hold two infrastructure errors (base) and none (tools)."""
+    base = [make_sim("task_1", 0), make_sim("task_1", 1, "infrastructure_error"),
+            make_sim("task_2", 0, "fail"), make_sim("task_2", 1, "infrastructure_error")]
+    tools = [make_sim("task_1", 0), make_sim("task_1", 1), make_sim("task_2", 0), make_sim("task_2", 1, "fail")]
+    cfg = run_set({("base", "banking_knowledge"): base, ("tools", "banking_knowledge"): tools}, k=2)
+    data = cfg["data"]
+    (data / "tasks.json").write_text(json.dumps({"banking_knowledge": ["task_1", "task_2"]}), encoding="utf-8")
+    monkeypatch.setattr(tools_ab, "_save_dir", lambda c, arm, d, stamp: tmp_path / "ckpt" / arm)
+    for arm, sims in (("base", base), ("tools", tools)):
+        (tmp_path / "ckpt" / arm).mkdir(parents=True)
+        (tmp_path / "ckpt" / arm / "results.json").write_text(json.dumps({"info": {"x": 1}, "simulations": sims}),
+                                                               encoding="utf-8")
+    events = [{"label": f"{arm} banking_knowledge", "task_id": s["task_id"], "trial": s["trial"],
+               "outcome": "infrastructure_error" if s["termination_reason"] == "infrastructure_error" else "pass"}
+              for arm, sims in (("base", base), ("tools", tools)) for s in sims]
+    (data / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+    return cfg, tmp_path / "ckpt"
+
+
+def test_release_takes_only_the_dropped_runs_out_and_keeps_them(dropped_set, capsys):
+    cfg, ckpt = dropped_set
+    data = cfg["data"]
+    assert tools_ab.release_infrastructure_errors(cfg, "s", "abc1234") == 2
+    kept = json.loads((ckpt / "base" / "results.json").read_text(encoding="utf-8"))
+    assert [(s["task_id"], s["trial"]) for s in kept["simulations"]] == [("task_1", 0), ("task_2", 0)]
+    assert kept["info"] == {"x": 1}  # τ²'s resume compares the saved config: it must be untouched
+    side = json.loads(next(data.glob("released-base-banking_knowledge-*.json")).read_text(encoding="utf-8"))
+    assert side["released_on_commit"] == "abc1234" and len(side["simulations"]) == 2  # nothing is lost
+    assert not (data / "base-banking_knowledge.json").exists()  # the base arm runs again
+    assert (data / "tools-banking_knowledge.json").exists()  # the tools arm had no drops and is not rerun
+    assert len(json.loads((ckpt / "tools" / "results.json").read_text(encoding="utf-8"))["simulations"]) == 4
+    events = [json.loads(x) for x in (data / "events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert len(events) == 6 and not any(e["outcome"] == "infrastructure_error" for e in events)
+    assert "RELEASED 2 infrastructure-error runs of base banking_knowledge" in capsys.readouterr().out
+
+
+def test_generate_refuses_a_rerun_with_nothing_to_rerun(run_set, monkeypatch, tmp_path):
+    cfg = run_set({("base", "retail"): []}, k=1) | {"tasks": lambda: {"retail": ["0"]}}
+    monkeypatch.setattr(tools_ab, "_commit", lambda: "abc1234")
+    monkeypatch.setattr(tools_ab, "_save_dir", lambda c, arm, d, stamp: tmp_path / "none" / arm)
+    monkeypatch.setattr("sys.argv", ["tools_ab.py", "x", "--rerun-infrastructure-errors"])
+    with pytest.raises(SystemExit, match="no infrastructure-error runs to rerun"):
+        tools_ab.generate(cfg)

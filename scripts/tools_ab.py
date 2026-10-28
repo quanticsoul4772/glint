@@ -30,7 +30,12 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 - `gate-banking`: activation-gate training data, no-tools arm only: the 12 banking tasks x 25 trials, concurrency 12.
 
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking]
-       [--modal] [--analyze] [--allow-mixed-code]
+       [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
+
+`--rerun-infrastructure-errors` (needs `--allow-mixed-code` when the code changed): the runs that ended in an
+infrastructure error are taken out of τ²'s checkpoint, the arm file and events.jsonl, and kept in
+`released-<arm>-<domain>-<time>.json` with the commit that releases them; the resume then reruns exactly those
+(task, trial) pairs with their own seeds.
 """
 import json
 import os
@@ -213,6 +218,38 @@ def _commit() -> str:
     return out + ("-dirty" if dirty else "")
 
 
+def release_infrastructure_errors(cfg: dict, stamp: str, commit: str) -> int:
+    """Take the infrastructure-error runs out of each arm's checkpoint so a resume reruns them (see the docstring
+    above). Nothing is deleted: the released runs are written to a file first. Returns how many were released."""
+    data, released = cfg["data"], 0
+    tasks = json.loads((data / "tasks.json").read_text(encoding="utf-8")) if (data / "tasks.json").exists() else {}
+    for domain in tasks:
+        for arm in cfg.get("arms", ("base", "tools")):
+            checkpoint = _save_dir(cfg, arm, domain, stamp) / "results.json"
+            if not checkpoint.exists():
+                continue
+            results = json.loads(checkpoint.read_text(encoding="utf-8"))
+            drop = [s for s in results["simulations"] if outcome(s) == "infrastructure_error"]
+            if not drop:
+                continue
+            keys = {(s["task_id"], s["trial"]) for s in drop}
+            side = data / f"released-{arm}-{domain}-{time.strftime('%Y%m%d-%H%M%S')}.json"
+            side.write_text(json.dumps({"released_on_commit": commit, "simulations": drop}), encoding="utf-8")
+            results["simulations"] = [s for s in results["simulations"] if (s["task_id"], s["trial"]) not in keys]
+            checkpoint.write_text(json.dumps(results), encoding="utf-8")
+            (data / f"{arm}-{domain}.json").unlink(missing_ok=True)  # the arm runs again; τ² skips the kept runs
+            events = data / "events.jsonl"
+            if events.exists():
+                rows = [json.loads(x) for x in events.read_text(encoding="utf-8").splitlines()]
+                events.write_text("".join(json.dumps(r) + "\n" for r in rows if not (
+                    r["label"] == f"{arm} {domain}" and r["outcome"] == "infrastructure_error"
+                    and (r["task_id"], r["trial"]) in keys)), encoding="utf-8")
+            print(f"RELEASED {len(drop)} infrastructure-error runs of {arm} {domain} for a rerun on {commit}: "
+                  f"{sorted(keys)}; kept in {side.name}", flush=True)
+            released += len(drop)
+    return released
+
+
 def generate(cfg: dict) -> None:
     # One stamp per comparison: a resumed run keeps the same meter phases (so the caps count earlier spend) and the
     # same τ² save_to (so finished simulations are resumed, not paid for again)
@@ -236,6 +273,8 @@ def generate(cfg: dict) -> None:
     if started and started != commit and "--allow-mixed-code" not in sys.argv:
         raise SystemExit(f"this comparison started on commit {started}, the code is now {commit}; resuming would mix "
                          "versions. Start a fresh stamp, or pass --allow-mixed-code.")
+    if "--rerun-infrastructure-errors" in sys.argv and not release_infrastructure_errors(cfg, stamp, commit):
+        raise SystemExit("--rerun-infrastructure-errors: no infrastructure-error runs to rerun")
     tasks = cfg["tasks"]()
     (data / "tasks.json").write_text(json.dumps(tasks), encoding="utf-8")
     pending = [(d, ids, arm) for d, ids in tasks.items() for arm in cfg.get("arms", ("base", "tools"))
