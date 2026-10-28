@@ -348,3 +348,42 @@ def test_a_release_records_its_commit_next_to_the_run(dropped_set):
     tools_ab.release_infrastructure_errors(cfg, "s", "abc1234")
     rec = json.loads((cfg["data"] / "reruns.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert rec["commit"] == "abc1234" and rec["arm"] == "base" and rec["runs"] == [["task_1", 1], ["task_2", 1]]
+
+
+def test_a_locked_checkpoint_save_is_retried_loudly_then_raised(monkeypatch, capsys):
+    from tau2.runner import batch
+
+    calls = {"n": 0}
+
+    def flaky(sim):
+        calls["n"] += 1
+        if calls["n"] <= limit:
+            raise PermissionError(5, "Access is denied", "results.json")
+        return "saved"
+
+    monkeypatch.setattr(batch, "create_checkpoint_fns", lambda save_path, lock: (flaky, flaky))
+    monkeypatch.setattr(tools_ab, "SAVE_WAIT_S", 0.0)
+    tools_ab.retry_locked_checkpoint_saves()
+    tools_ab.retry_locked_checkpoint_saves()  # installed once
+    save, _ = batch.create_checkpoint_fns("x", None)
+    limit = 2
+    assert save("sim") == "saved" and calls["n"] == 3  # two refusals, then the save lands
+    assert capsys.readouterr().out.count("CHECKPOINT LOCKED") == 2
+    calls["n"], limit = 0, 99
+    with pytest.raises(PermissionError):
+        save("sim")
+    assert calls["n"] == tools_ab.SAVE_TRIES  # a lock that outlasts the retries still fails, as before
+
+
+def test_generate_installs_the_save_retry(run_set, monkeypatch, tmp_path):
+    from tau2.runner import batch
+
+    cfg = run_set({("base", "retail"): []}, k=1) | {"tasks": lambda: {"retail": ["0"]}}
+    monkeypatch.setattr(tools_ab, "_commit", lambda: "abc1234")
+    monkeypatch.setattr(tools_ab, "_save_dir", lambda c, arm, d, stamp: tmp_path / "none" / arm)
+    monkeypatch.setattr("sys.argv", ["tools_ab.py", "x", "--rerun-infrastructure-errors"])
+    monkeypatch.setattr(batch, "create_checkpoint_fns", batch.create_checkpoint_fns)
+    monkeypatch.setattr(batch, "try_resume", batch.try_resume)
+    with pytest.raises(SystemExit):
+        tools_ab.generate(cfg)
+    assert batch.create_checkpoint_fns.glint_retries_saves

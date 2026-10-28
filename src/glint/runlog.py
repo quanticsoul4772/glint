@@ -54,6 +54,13 @@ def event(sim: dict, label: str) -> dict:
             "duration_s": round(sim.get("duration") or 0.0, 1), "messages": len(sim.get("messages") or [])}
 
 
+# Repeated outcomes worth a loud line while the arm runs: a count reached (then each doubling), or for context
+# overflows a share of the finished runs. 2026-10-28, banking-test: 10 runs were lost to one HTTP 303 bug and about
+# one run in six overflowed the context, and each showed only as its own line.
+ALERT_COUNTS = {"infrastructure_error": 3, "glint_error": 1, "budget_stop": 1, "eval_error": 3}
+ALERT_SHARES = {"context_overflow": (0.15, 10)}  # share of finished runs, after at least this many runs
+
+
 class RunEvents:
     """Context manager: watch `results_path` (τ²'s checkpoint) and, for every simulation that appears, print one line
     to stderr and append one JSON record to `events_path`. Warns once per `stall_s` with no new simulation."""
@@ -64,6 +71,8 @@ class RunEvents:
         self.poll_s, self.stall_s = poll_s, stall_s
         self.seen: set[tuple] = set()
         self.counts: dict[str, int] = {}
+        self.tasks_by_outcome: dict[str, dict[str, int]] = {}  # outcome -> task -> runs, for alerts and the summary
+        self._next_alert: dict[str, int] = {}
         self.read_errors = 0  # checkpoint reads refused or caught mid-write (retried at the next poll)
         self._bad_reads_in_a_row = 0
         self._done = threading.Event()
@@ -83,6 +92,31 @@ class RunEvents:
         self.poll()  # whatever landed since the last poll
         self._say(f"done: {self.counts}" + (f"; {self.read_errors} checkpoint reads retried" if self.read_errors
                                             else ""))
+        for kind, tasks in sorted(self.tasks_by_outcome.items()):
+            if kind not in ("pass", "fail"):
+                self._say(f"{kind} by task: {dict(sorted(tasks.items()))}")
+
+    def _alert(self, latest: dict | None) -> None:
+        """One ALERT line when an outcome repeats past its threshold, again at each doubling, with its tasks and the
+        latest cause; so a pattern is one loud line, not a run of separate ones."""
+        finished = sum(self.counts.values())
+        for kind, n in self.counts.items():
+            if kind in ALERT_COUNTS:
+                due = n >= self._next_alert.get(kind, ALERT_COUNTS[kind])
+            elif kind in ALERT_SHARES:
+                share, least = ALERT_SHARES[kind]
+                due = finished >= least and n / finished >= share and n >= self._next_alert.get(kind, 1)
+            else:
+                continue
+            if not due:
+                continue
+            self._next_alert[kind] = 2 * n
+            cause = ""
+            if latest is not None:
+                e = event(latest, self.label)
+                cause = f"; latest: {e['error'][:140]}" if e["outcome"] == kind and e["error"] else ""
+            self._say(f"ALERT: {n} {kind} runs of {finished} finished ({n / finished:.0%}), tasks "
+                      f"{dict(sorted(self.tasks_by_outcome[kind].items()))}{cause}")
 
     def _say(self, msg: str) -> None:
         print(f"[runs {time.strftime('%H:%M:%S')} {self.label}] {msg}", file=sys.stderr, flush=True)
@@ -114,11 +148,14 @@ class RunEvents:
                     self.seen.add((s.get("task_id"), s.get("trial")))
                     e = event(s, self.label)
                     self.counts[e["outcome"]] = self.counts.get(e["outcome"], 0) + 1
+                    by_task = self.tasks_by_outcome.setdefault(e["outcome"], {})
+                    by_task[str(e["task_id"])] = by_task.get(str(e["task_id"]), 0) + 1
                     fh.write(json.dumps(e) + "\n")
                     loud = "  <-- " + e["error"][:160] if e["outcome"] not in ("pass", "fail") else ""
                     self._say(f"{e['task_id']} trial {e['trial']}: {e['outcome'].upper()} ({e['termination']}, "
                               f"{e['duration_s']:.0f} s, {e['messages']} msgs){loud}")
             self._say(f"totals {self.counts}")
+            self._alert(new[-1] if new else None)
         elif time.time() - self._last_new > self.stall_s:
             self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({len(self.seen)} so far)")
             self._last_new = time.time()

@@ -4,6 +4,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from glint.runlog import RunEvents, outcome
 
 
@@ -103,3 +105,66 @@ def test_a_locked_checkpoint_is_retried_not_fatal(tmp_path, monkeypatch, capsys)
                                                     "reward_info": {"reward": 1.0}, "messages": []}]}),
                        encoding="utf-8")
     assert len(events.poll()) == 1  # back to normal once the file reads again
+
+
+def _watch(tmp_path, sims):
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({"simulations": sims}), encoding="utf-8")
+    return RunEvents(results, tmp_path / "events.jsonl", label="tools banking", poll_s=60)
+
+
+def test_repeated_infrastructure_errors_raise_one_alert_then_one_per_doubling(tmp_path, capsys):
+    drop = lambda task, trial: _sim(task, trial, term="infrastructure_error", error="APIError: Error code: 303")
+    w = _watch(tmp_path, [drop("t1", 0), drop("t2", 0)])
+    w.poll()
+    assert "ALERT" not in capsys.readouterr().err  # 2 is below the threshold of 3
+    (tmp_path / "results.json").write_text(json.dumps({"simulations": [drop("t1", 0), drop("t2", 0), drop("t2", 1)]}),
+                                          encoding="utf-8")
+    w.poll()
+    err = capsys.readouterr().err
+    assert "ALERT: 3 infrastructure_error runs of 3 finished (100%), tasks {'t1': 1, 't2': 2}" in err
+    assert "latest: APIError: Error code: 303" in err
+    (tmp_path / "results.json").write_text(json.dumps({"simulations": [
+        drop("t1", 0), drop("t2", 0), drop("t2", 1), drop("t3", 0), _sim("t4", 0, 1.0)]}), encoding="utf-8")
+    w.poll()
+    assert "ALERT" not in capsys.readouterr().err  # 4 is not yet double 3
+    (tmp_path / "results.json").write_text(json.dumps({"simulations": [
+        drop("t1", 0), drop("t2", 0), drop("t2", 1), drop("t3", 0), _sim("t4", 0, 1.0), drop("t5", 0),
+        drop("t6", 0)]}), encoding="utf-8")
+    w.poll()
+    assert "ALERT: 6 infrastructure_error runs" in capsys.readouterr().err
+
+
+def test_context_overflows_alert_on_their_share_not_their_count(tmp_path, capsys):
+    over = lambda task: _sim(task, 0, term="infrastructure_error", error="ContextWindowExceededError")
+    w = _watch(tmp_path, [over("t0")] + [_sim(f"p{i}", 0, 0.0) for i in range(8)])
+    w.poll()
+    assert "ALERT" not in capsys.readouterr().err  # 9 finished: below the 10-run minimum
+    (tmp_path / "results.json").write_text(json.dumps({"simulations": [over("t0")] + [
+        _sim(f"p{i}", 0, 0.0) for i in range(8)] + [over("t1"), _sim("p9", 0, 0.0)]}), encoding="utf-8")
+    w.poll()
+    err = capsys.readouterr().err
+    assert "ALERT: 2 context_overflow runs of 11 finished (18%)" in err and "'t0': 1, 't1': 1" in err
+
+
+def test_the_end_of_arm_summary_lists_failures_by_task(tmp_path, capsys):
+    over = _sim("t1", 2, term="infrastructure_error", error="ContextWindowExceededError")
+    with _watch(tmp_path, []) as w:
+        (tmp_path / "results.json").write_text(json.dumps({"simulations": [over, _sim("t2", 0, 1.0)]}),
+                                              encoding="utf-8")
+    err = capsys.readouterr().err
+    assert "context_overflow by task: {'t1': 1}" in err and "pass by task" not in err
+    assert w.tasks_by_outcome == {"context_overflow": {"t1": 1}, "pass": {"t2": 1}}
+
+
+def test_a_plain_read_would_block_the_save(tmp_path):
+    # the cause, pinned: if this stops failing, Windows or Python changed and read_shared may not be needed
+    import os
+
+    target, temp = tmp_path / "results.json", tmp_path / ".results_tmp.json"
+    target.write_text("{}", encoding="utf-8")
+    temp.write_text("{}", encoding="utf-8")
+    if sys.platform != "win32":
+        pytest.skip("Windows-only behavior")
+    with open(target, encoding="utf-8"), pytest.raises(PermissionError):
+        os.replace(temp, target)
