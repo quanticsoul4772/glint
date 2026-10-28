@@ -55,3 +55,33 @@ def test_a_vllm_response_without_token_ids_is_a_named_glint_error(tmp_path):
     # a hosted API returns no ids: without require_ids the call is recorded as before
     recording(completion, tmp_path / "calls.jsonl")(model="openai/Muse-Glimmer-30B", messages=[])
     assert (tmp_path / "calls.jsonl").read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_any_other_recording_failure_is_a_named_glint_error(tmp_path):
+    import pytest
+
+    from glint.calllog import CallLogError
+
+    path = tmp_path / "calls.jsonl"
+    wrapped = recording(lambda **kwargs: object(), path)  # a response that cannot be read as a dict
+    with pytest.raises(CallLogError, match="recording a openai/Muse-Glimmer-30B-modal call failed: TypeError") as e:
+        wrapped(model="openai/Muse-Glimmer-30B-modal", messages=[])
+    assert str(e.value).startswith("CallLogError: ")  # runlog charges it to Glint by this prefix
+    assert isinstance(e.value.__cause__, TypeError)
+    assert not path.exists() or path.read_text(encoding="utf-8") == ""  # nothing half-written
+
+
+def test_load_keeps_the_last_call_of_a_retried_request(tmp_path, capsys):
+    def completion(**kwargs):
+        return {"prompt_token_ids": [1], "choices": [{"token_ids": [kwargs["attempt"]]}]}
+
+    path = tmp_path / "calls.jsonl"
+    call = recording(completion, path)
+    msgs = [{"role": "user", "content": "x"}]
+    for attempt in (1, 2, 3):
+        call(model="openai/Muse-Glimmer-30B", messages=msgs, attempt=attempt)
+    call(model="openai/Muse-Glimmer-30B", messages=[{"role": "user", "content": "y"}], attempt=9)
+    rows = load(path)
+    assert len(rows) == 2
+    assert [unpack(r["completion_ids"]) for r in rows.values()] == [[3], [9]]  # the last retry wins
+    assert "2 of 4 recorded calls repeat an earlier request" in capsys.readouterr().err

@@ -76,3 +76,13 @@ def _restore_tau2_registry():
     yield
     registry._domains.clear()
     registry._domains.update(saved)
+
+
+@pytest.fixture(autouse=True)
+def _paths_stay_in_the_test_home():
+    """After every test glint.paths still points at the test workspace: a test that reloads it without GLINT_HOME
+    and does not reload it back would send every later test to the real workspace."""
+    yield
+    paths = sys.modules.get("glint.paths")
+    if paths is not None:
+        assert paths.HOME == _HOME, f"glint.paths.HOME is {paths.HOME}, not the test workspace {_HOME}"

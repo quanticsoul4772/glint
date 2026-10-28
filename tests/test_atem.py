@@ -1,4 +1,9 @@
-from glint.atem import parse_turn
+import json
+import types
+
+import pytest
+
+from glint.atem import AtemParseError, parse_turn, reparse_response, reparsing
 
 TOOLS = [
     {"type": "function", "function": {"name": "find_user_id_by_name_zip", "parameters": {"type": "object", "properties": {
@@ -66,3 +71,62 @@ def test_recorded_deepinfra_turn():
             "</atem:parameter>\n<atem:parameter name=\"zip\">80273</atem:parameter>\n</atem:invoke>\n"
             "</atem:function_calls><|eot|>")
     assert parse_turn(text, TOOLS).tool_calls[0].arguments["zip"] == "80273"
+
+
+def response(text, host_calls, content="host content"):
+    """A LiteLLM-shaped response: the host's parsed tool calls, plus the generated text as a logprob token stream (cut
+    into short tokens, as the server returns it)."""
+    tokens = [{"token": text[i:i + 7]} for i in range(0, len(text), 7)]
+    message = types.SimpleNamespace(content=content, reasoning_content=None, tool_calls=[
+        types.SimpleNamespace(id=f"call_{i}", function=types.SimpleNamespace(name=name, arguments=json.dumps(args)))
+        for i, (name, args) in enumerate(host_calls)])
+    choice = types.SimpleNamespace(message=message, model_dump=lambda: {"logprobs": {"content": tokens}})
+    return types.SimpleNamespace(choices=[choice])
+
+
+ZIP_TURN = " to=self<|message|>Look up the user.<|eom|>" + call(
+    "find_user_id_by_name_zip", {"first_name": "Chen", "last_name": "Silva", "zip": "02134"})
+
+
+def test_reparsing_rewrites_arguments_from_the_generated_text():
+    # the hosted parser json.loads every value: "02134" arrived as the number 2134
+    host = response(ZIP_TURN, [("find_user_id_by_name_zip", {"first_name": "Chen", "last_name": "Silva", "zip": 2134})])
+    out = reparsing(lambda **kw: host)(model="m", messages=[], tools=TOOLS)
+    (tc,) = out.choices[0].message.tool_calls
+    assert tc.id == "call_0"  # the host's call id is kept
+    assert json.loads(tc.function.arguments) == {"first_name": "Chen", "last_name": "Silva", "zip": "02134"}
+    assert out.choices[0].message.reasoning_content == "Look up the user."
+    assert out.choices[0].message.content is None  # no message to the user in this turn
+
+
+def test_reparsing_leaves_a_call_without_tools_alone():
+    host = response("", [])  # no token stream: re-parsing it would raise
+    assert reparsing(lambda **kw: host)(model="m", messages=[]).choices[0].message.content == "host content"
+
+
+def test_a_response_that_cannot_be_reparsed_raises():
+    with pytest.raises(AtemParseError, match="no logprob token stream"):
+        reparse_response(response("", [("find_user_id_by_name_zip", {"zip": 1})]), TOOLS)
+    # the host found a call the generated text does not hold
+    with pytest.raises(AtemParseError, match="host calls"):
+        reparse_response(response(" to=user<|message|>Done.<|eot|>", [("find_user_id_by_name_zip", {})]), TOOLS)
+    nameless = '<|start|>assistant to=x<|message|><atem:invoke><atem:parameter name="a">1</atem:parameter></atem:invoke>'
+    with pytest.raises(AtemParseError, match="invoke without a name"):
+        reparse_response(response(nameless, [("x", {})]), TOOLS)
+    assert str(AtemParseError("x")).startswith("AtemParseError: ")  # runlog charges it to Glint by this prefix
+
+
+def test_doubled_generated_name_matches_a_normalized_host_name():
+    text = call("find_user_id_by_name_zip.find_user_id_by_name_zip", {"zip": "02134"})
+    host = response(text, [("find_user_id_by_name_zip", {"zip": 2134})])
+    reparse_response(host, TOOLS)
+    assert json.loads(host.choices[0].message.tool_calls[0].function.arguments) == {"zip": "02134"}
+
+
+@pytest.mark.xfail(strict=True, reason="BUG: reparse_response compares the host's raw call name with the normalized "
+                   "generated name, so a doubled name the host passes through unnormalized raises AtemParseError")
+def test_doubled_name_from_both_host_and_text_is_not_a_parse_error():
+    text = call("find_user_id_by_name_zip.find_user_id_by_name_zip", {"zip": "02134"})
+    host = response(text, [("find_user_id_by_name_zip.find_user_id_by_name_zip", {"zip": 2134})])
+    reparse_response(host, TOOLS)
+    assert json.loads(host.choices[0].message.tool_calls[0].function.arguments) == {"zip": "02134"}
