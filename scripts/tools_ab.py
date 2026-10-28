@@ -262,6 +262,42 @@ def keep_failed_runs_on_resume() -> None:
     batch.try_resume = wrapped
 
 
+SAVE_TRIES, SAVE_WAIT_S = 6, 0.5
+
+
+def retry_locked_checkpoint_saves() -> None:
+    """τ² saves its checkpoint by renaming a temp file over results.json, once. On Windows the rename fails with
+    "[WinError 5] Access is denied" while another process has results.json open (the event watcher reads it every
+    30 s; antivirus and indexers also open files), and τ² then drops the finished run as an infrastructure error
+    (2026-10-28, banking-test task_022 trial 3). This wraps the save τ²'s batch runner uses: a refused save is
+    retried a few times, each refusal printed; if the lock outlasts the retries the error is raised as before."""
+    from tau2.runner import batch
+
+    if getattr(batch.create_checkpoint_fns, "glint_retries_saves", False):
+        return
+    create = batch.create_checkpoint_fns
+
+    def retrying(fn, what):
+        def call(*args, **kwargs):
+            for attempt in range(1, SAVE_TRIES + 1):
+                try:
+                    return fn(*args, **kwargs)
+                except PermissionError as e:
+                    print(f"CHECKPOINT LOCKED: τ²'s {what} was refused (attempt {attempt}/{SAVE_TRIES}): {e}",
+                          flush=True)
+                    if attempt == SAVE_TRIES:
+                        raise
+                    time.sleep(SAVE_WAIT_S)
+        return call
+
+    def wrapped(save_path, lock):
+        save_fn, replace_fn = create(save_path, lock)
+        return retrying(save_fn, "checkpoint save"), retrying(replace_fn, "checkpoint replace")
+
+    wrapped.glint_retries_saves = True
+    batch.create_checkpoint_fns = wrapped
+
+
 def release_infrastructure_errors(cfg: dict, stamp: str, commit: str) -> int:
     """Take the infrastructure-error runs out of each arm's checkpoint so a resume reruns them (see the docstring
     above). Nothing is deleted: the released runs are written to a file first. Returns how many were released."""
@@ -321,6 +357,7 @@ def generate(cfg: dict) -> None:
         raise SystemExit(f"this comparison started on commit {started}, the code is now {commit}; resuming would mix "
                          "versions. Start a fresh stamp, or pass --allow-mixed-code.")
     keep_failed_runs_on_resume()
+    retry_locked_checkpoint_saves()
     if "--rerun-infrastructure-errors" in sys.argv and not release_infrastructure_errors(cfg, stamp, commit):
         raise SystemExit("--rerun-infrastructure-errors: no infrastructure-error runs to rerun")
     tasks = cfg["tasks"]()
