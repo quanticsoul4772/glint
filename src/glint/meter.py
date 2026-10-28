@@ -33,6 +33,20 @@ META_PRICES = {
 DEFAULT_LEDGER = Path(r"<workspace>\measure\meter\ledger.jsonl")
 
 
+def register_litellm_prices() -> None:
+    """Give LiteLLM the per-token prices of the models in META_PRICES. Without them every call logs "This model isn't
+    mapped yet" at ERROR level (one line per call in a run log) and τ²'s cost fields read 0. The meter does not use
+    LiteLLM's cost; this is for clean logs and τ²'s own bookkeeping."""
+    import litellm
+
+    entries = {}
+    for name, p in META_PRICES.items():
+        entry = {"input_cost_per_token": p["input"] / 1e6, "output_cost_per_token": p["output"] / 1e6,
+                 "cache_read_input_token_cost": p["cached"] / 1e6, "litellm_provider": "openai", "mode": "chat"}
+        entries[name] = entries[f"openai/{name}"] = entries[f"openai/meta-models/{name}"] = entry
+    litellm.register_model(entries)
+
+
 class BudgetExceeded(RuntimeError):
     pass
 

@@ -171,3 +171,15 @@ def test_cap_blocks_the_call_before_it_reaches_the_endpoint(tmp_path):
     finally:
         litellm.callbacks = saved
         server.shutdown()
+
+
+def test_litellm_knows_the_meta_prices():
+    # Without these, every Spark call logged "This model isn't mapped yet" at ERROR level
+    import litellm
+
+    from glint.meter import meta_cost, register_litellm_prices
+
+    register_litellm_prices()
+    for model in ("openai/muse-spark-1.3-contributor", "openai/meta-models/Muse-Glimmer-30B"):
+        p, c = litellm.cost_per_token(model=model, prompt_tokens=1000, completion_tokens=500)
+        assert abs((p + c) - meta_cost(model, 1000, 0, 500)) < 1e-12

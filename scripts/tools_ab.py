@@ -54,7 +54,7 @@ from glint import glimmer_serve
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import recording
-from glint.meter import Caps, Meter, guarded, litellm_callback
+from glint.meter import Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
 from glint.runlog import RunEvents, outcome
 
@@ -174,7 +174,10 @@ def _run(cfg: dict, domain: str, ids: list[str], arm: str, stamp: str, endpoint:
               "user": "user_simulator", "llm_user": SPARK, "llm_args_user": META, "num_trials": _trials(cfg, domain),
               "max_concurrency": cfg.get("concurrency", 8) if endpoint else 4, "seed": 5000,
               "save_to": f"glint-{cfg['save']}-{arm}-{domain}-{stamp}", "auto_review": False, "max_retries": 0,
-              "auto_resume": True}
+              "auto_resume": True,
+              # the run log gets only τ²'s warnings and errors; each simulation's full debug log goes to its own
+              # artifacts/task_<id>/sim_<id>/task.log in the checkpoint folder (95% of the run log was τ² debug)
+              "log_level": "WARNING", "verbose_logs": True}
     if domain == "banking_knowledge":
         by_id = {t["id"]: t for t in json.loads(BANKING_TASKS.read_text(encoding="utf-8"))}
         config = TextRunConfig(**common, retrieval_config="bm25_grep")
@@ -225,6 +228,7 @@ def generate(cfg: dict) -> None:
     glim = Meter(Caps(meta_usd=cfg["glimmer_usd"], gpu_usd=0.0), phase=f"{cfg['save']}-glimmer-{stamp}")
     meta = Meter(Caps(meta_usd=cfg["meta_usd"], gpu_usd=0.0), phase=f"{cfg['save']}-meta-{stamp}")
     gpu = Meter(Caps(meta_usd=0.0, gpu_usd=cfg["gpu_usd"]), phase=f"{cfg['save']}-gpu-{stamp}")
+    register_litellm_prices()
     litellm.callbacks = [litellm_callback((glim, ("Muse-Glimmer",)), (meta, ("muse-spark", "muse-wonder")))]
     base, glimmer = llm_utils.completion, reparsing(llm_utils.completion)
 
