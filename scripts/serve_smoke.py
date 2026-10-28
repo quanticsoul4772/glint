@@ -15,13 +15,14 @@ from pathlib import Path
 
 import litellm
 
+from glint import paths
 from glint.glimmer_serve import MODEL_NAME, LogWatch, deploy, litellm_args, say, session, wait_ready
 from glint.meter import Caps, Meter
 
 ROOT = Path(__file__).resolve().parents[1]
 MODAL = str(ROOT / ".venv" / "Scripts" / "modal.exe")
-OUT = Path(r"<workspace>\research\5-measurements\modal-serve-smoke.json")
-RAW = Path(r"<workspace>\measure\data\modal-serve-smoke-response.json")  # for the glint.atem re-parse check
+OUT = paths.RESULTS / "modal-serve-smoke.json"
+RAW = paths.MEASURE / "modal-serve-smoke-response.json"  # for the glint.atem re-parse check
 TOOLS = [{"type": "function", "function": {
     "name": "get_order_details", "description": "Get the status and details of an order.",
     "parameters": {"type": "object", "properties": {"order_id": {"type": "string", "description": "Such as '#W0000000'"}},
@@ -31,7 +32,7 @@ MESSAGES = [{"role": "system", "content": "You are a retail support agent. Use t
 
 
 def main():
-    env = os.environ | {"MODAL_CONFIG_PATH": r"<workspace>\.modal.toml", "MODAL_PROFILE": "quanticsoul4772",
+    env = os.environ | {"MODAL_CONFIG_PATH": str(paths.MODAL_CONFIG), "MODAL_PROFILE": "quanticsoul4772",
                         "PYTHONIOENCODING": "utf-8"}
     url = deploy(MODAL, env)
     key, secret = os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"]

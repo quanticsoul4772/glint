@@ -9,7 +9,6 @@ import json
 import statistics
 import sys
 from collections import Counter, defaultdict
-from pathlib import Path
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
@@ -19,13 +18,14 @@ from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
 from tau2.utils import llm_utils
 
+from glint import paths
 from glint.atem import reparsing
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
 
-DOMAINS = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains")
-DATA = Path(r"<workspace>\measure\data\headroom")
-RESULTS = Path(r"<workspace>\research\5-measurements")
+DOMAINS = paths.tau2_data() / "tau2" / "domains"
+DATA = paths.MEASURE / "headroom"
+RESULTS = paths.RESULTS
 SEED = "glint-headroom-2026-10-26"
 META_MODELS, GLIMMER_MODELS = ("muse-spark", "muse-wonder"), ("Muse-Glimmer",)
 
@@ -120,7 +120,7 @@ def analyze():
             per["tasks_glimmer_fails_some_wonder_passes"] = headroom
             per["tasks_both_fail"] = both_fail
         report[domain] = per
-    ledger = [json.loads(line) for line in Path(r"<workspace>\measure\meter\ledger.jsonl").read_text().splitlines()]
+    ledger = [json.loads(line) for line in paths.LEDGER.read_text().splitlines()]
     spend = Counter()
     for r in ledger:
         if r.get("phase", "").startswith("headroom"):

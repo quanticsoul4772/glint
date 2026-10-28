@@ -8,7 +8,6 @@ C5b (history with each turn's reasoning kept): is prompt_k + Glimmer's generated
 """
 import importlib
 import json
-from pathlib import Path
 
 from jinja2.ext import loopcontrols
 from jinja2.sandbox import ImmutableSandboxedEnvironment
@@ -17,10 +16,12 @@ from tau2.data_model.simulation import Results
 from tau2.utils.llm_utils import to_litellm_messages
 from tokenizers import Tokenizer
 
-SNAP = Path(r"<workspace>\.cache\hf\hub\models--meta-models--Muse-Glimmer-30B\snapshots"
-            r"\cec94fcfd6512f2cfe708138c32533b346ea4f69")
-SIMS = Path(r"<workspace>\measure\data\m1-c2-simulations.json")
-OUT = Path(r"<workspace>\research\5-measurements\M1-prefix-check.json")
+from glint import paths
+
+SNAP = paths.HF_CACHE / "hub" / "models--meta-models--Muse-Glimmer-30B" / "snapshots" / \
+    "cec94fcfd6512f2cfe708138c32533b346ea4f69"
+SIMS = paths.MEASURE / "m1-c2-simulations.json"
+OUT = paths.RESULTS / "M1-prefix-check.json"
 
 
 def raise_exception(msg):

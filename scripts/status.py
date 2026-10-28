@@ -14,13 +14,15 @@ from pathlib import Path
 
 from loguru import logger
 
+from glint import paths
+
 # τ² logs its whole registry at DEBUG when imported; this command prints only its own report
 logger.remove()
 logger.add(sys.stderr, level="WARNING")
 
 import tools_ab  # after the log setup above
 
-LEDGER = Path(r"<workspace>\measure\meter\ledger.jsonl")
+LEDGER = paths.LEDGER
 MODAL = str(Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "modal.exe")
 
 
@@ -35,7 +37,7 @@ def _spend(save: str, stamp: str) -> dict[str, float]:
 
 
 def _modal_state() -> str:
-    env = os.environ | {"MODAL_CONFIG_PATH": r"<workspace>\.modal.toml", "MODAL_PROFILE": "quanticsoul4772"}
+    env = os.environ | {"MODAL_CONFIG_PATH": str(paths.MODAL_CONFIG), "MODAL_PROFILE": "quanticsoul4772"}
     try:
         out = subprocess.run([MODAL, "app", "list", "--json"], env=env, capture_output=True, text=True, timeout=60,
                              check=False)

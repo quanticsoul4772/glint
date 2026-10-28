@@ -5,7 +5,6 @@ Usage: python unedited_rerun.py
 """
 import json
 import time
-from pathlib import Path
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
@@ -14,6 +13,7 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+from glint import paths
 from glint.atem import reparsing
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
@@ -38,7 +38,7 @@ config = TextRunConfig(domain="retail", task_split_name="train", task_ids=TASKS,
                        llm_args_user=META, num_trials=4, max_concurrency=4, seed=4000,
                        save_to=f"glint-unedited-{stamp}", auto_review=False, max_retries=0)
 results = run_domain(config)
-out = Path(r"<workspace>\measure\data") / f"unedited-20-93-{stamp}.json"
+out = paths.MEASURE / f"unedited-20-93-{stamp}.json"
 out.write_text(results.model_dump_json(), encoding="utf-8")
 report = {"tasks": TASKS, "glimmer_usd": round(glim.meta_usd, 4), "meta_usd": round(meta.meta_usd, 4), "by_task": {}}
 for s in results.simulations:
@@ -47,6 +47,6 @@ for s in results.simulations:
     report["by_task"].setdefault(str(s.task_id), []).append(
         {"trial": s.trial, "reward": s.reward_info.reward if s.reward_info else None,
          "termination": str(s.termination_reason), "writes": writes})
-Path(r"<workspace>\research\5-measurements\unedited-20-93.json").write_text(json.dumps(report, indent=1))
+(paths.RESULTS / "unedited-20-93.json").write_text(json.dumps(report, indent=1))
 print(json.dumps({k: v for k, v in report.items() if k != "by_task"}),
       {t: [x["reward"] for x in v] for t, v in report["by_task"].items()})

@@ -1,14 +1,14 @@
 """glint.decisions on the recorded failure cases: each write the decision tool would overrule is a positive."""
 import json
-from pathlib import Path
 
 from tau2.data_model.tasks import Task
 from tau2.domains.banking_knowledge.environment import get_environment as banking_env
 from tau2.registry import registry
 
+from glint import paths
 from glint.decisions import label_run
 
-DOMAINS = Path(__file__).resolve().parents[2] / "vendor" / "tau2-bench" / "data" / "tau2" / "domains"
+DOMAINS = paths.tau2_data() / "tau2" / "domains"
 
 
 def _task(domain, task_id):

@@ -8,10 +8,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from glint import paths
 from glint.labeler import Labeler
 from glint.labels import FAB, VIOL, Label, is_resid_positive
 
-RESULTS = Path(r"<workspace>\vendor\tau2-bench\data\tau2\results\final")
+RESULTS = paths.tau2_data() / "tau2" / "results" / "final"
 
 
 def run(path: Path) -> dict:

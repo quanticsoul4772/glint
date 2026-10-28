@@ -6,16 +6,16 @@ Usage: python planb_k16.py
 """
 import json
 import time
-from pathlib import Path
 
 from m2_pilot import GLIMMER, META, SPARK, glimmer_args, install
 from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 
+from glint import paths
 from glint.meter import Caps, Meter
 
-PARTITION = json.loads(Path(r"<workspace>\research\5-measurements\split-partition.json").read_text())
-DATA = Path(r"<workspace>\measure\data\planb")
+PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
+DATA = paths.MEASURE / "planb"
 SPLITS = ("pilot", "fit", "cert_reserve")
 BATCHES, K = 4, 4
 

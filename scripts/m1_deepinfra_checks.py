@@ -8,7 +8,6 @@ C7: 16 concurrent requests; count 429s and other errors.
 import json
 import statistics
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import litellm
 import openai
@@ -17,20 +16,21 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+from glint import paths
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
 
-ENV = dotenv_values(r"<workspace>\.env")
+ENV = dotenv_values(str(paths.ENV_FILE))
 GLIMMER = "openai/meta-models/Muse-Glimmer-30B"
 GLIMMER_ARGS = {"api_base": "https://api.deepinfra.com/v1/openai", "api_key": ENV["DEEPINFRA_API_KEY"],
                 "temperature": 1.0, "top_p": 0.95, "logprobs": True, "top_logprobs": 5,
                 "extra_body": {"top_k": 64, "chat_template_kwargs": {"reasoning_strength": "medium"}}}
 USER = "openai/muse-spark-1.3-contributor"
 USER_ARGS = {"api_base": "https://api.meta.ai/v1", "api_key": ENV["MODEL_API_KEY"], "temperature": 1.0}
-PARTITION = json.loads(Path(r"<workspace>\research\5-measurements\split-partition.json").read_text())
+PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
 TASKS = PARTITION["retail"]["pilot"][:3]
-OUT = Path(r"<workspace>\research\5-measurements\M1-deepinfra-checks.json")
-SIMS = Path(r"<workspace>\measure\data\m1-c2-simulations.json")
+OUT = paths.RESULTS / "M1-deepinfra-checks.json"
+SIMS = paths.MEASURE / "m1-c2-simulations.json"
 
 meter = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), phase="m1-deepinfra")
 litellm.callbacks = [litellm_callback(meter)]

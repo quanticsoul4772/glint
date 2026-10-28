@@ -17,6 +17,8 @@ from pathlib import Path
 
 import modal
 
+from glint import paths
+
 REPO, REVISION = "meta-models/Muse-Glimmer-30B", "cec94fcfd6512f2cfe708138c32533b346ea4f69"
 WEIGHTS = "/vol/weights"
 GPU, GPU_USD_PER_HOUR = "A100-80GB", 2.94  # A100-80GB $2.50/h + ~$0.44/h for 4 cores and 32 GiB
@@ -163,6 +165,6 @@ def main(jobs: str, run: str, gpu_cap_usd: float = 1.0):
         elapsed = time.time() - t0
         meter.record_gpu(max(elapsed, result["wall_s"]) if result else elapsed, GPU_USD_PER_HOUR, GPU, tag=run)
     result["gpu_usd_metered"] = round(meter.gpu_usd, 4)
-    out = Path(r"<workspace>\research\5-measurements") / f"M1-modal-{run}.json"
+    out = paths.RESULTS / f"M1-modal-{run}.json"
     out.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "trajectories"}, indent=1))

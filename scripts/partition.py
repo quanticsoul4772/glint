@@ -5,11 +5,12 @@ The test splits are never read. Deterministic: tasks are ordered by sha256(SEED 
 """
 import hashlib
 import json
-from pathlib import Path
+
+from glint import paths
 
 SEED = "glint-measurement-2026-10-26"
-DOMAINS = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains")
-OUT = Path(r"<workspace>\research\5-measurements\split-partition.json")
+DOMAINS = paths.tau2_data() / "tau2" / "domains"
+OUT = paths.RESULTS / "split-partition.json"
 
 
 def ordered(ids):

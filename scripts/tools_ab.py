@@ -50,7 +50,7 @@ from tau2.registry import registry
 from tau2.runner.batch import run_domain, run_tasks
 from tau2.utils import llm_utils
 
-from glint import glimmer_serve
+from glint import glimmer_serve, paths
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import recording
@@ -62,9 +62,9 @@ TOOL_NAMES = {"check_order_action", "find_user_items", "find_variants", "check_r
               "get_upcoming_trips_cost", "check_credit_limit_increase", "check_card_dispute"}
 # Tasks the tools were designed from, or that are in the failure inventory
 DESIGN_TASKS = {"retail": {"20", "93", "82", "52", "98", "103", "104"}, "airline": {"7"}}
-MEASURE = Path(r"<workspace>\measure\data")
-RESULTS = Path(r"<workspace>\research\5-measurements")
-BANKING_TASKS = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains\banking_knowledge\tasks.json")
+MEASURE = paths.MEASURE
+RESULTS = paths.RESULTS
+BANKING_TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.json"
 BANKING_SPLIT = RESULTS / "split-partition-banking.json"
 BANKING_WRITES = ("file_credit_card_transaction_dispute_4829", "submit_credit_limit_increase_request_7392")
 MODAL_CLI = str(Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "modal.exe")
@@ -243,7 +243,7 @@ def generate(cfg: dict) -> None:
     with ExitStack() as stack:
         endpoint = None
         if cfg.get("modal"):
-            env = os.environ | {"MODAL_CONFIG_PATH": r"<workspace>\.modal.toml", "MODAL_PROFILE": "quanticsoul4772",
+            env = os.environ | {"MODAL_CONFIG_PATH": str(paths.MODAL_CONFIG), "MODAL_PROFILE": "quanticsoul4772",
                                 "PYTHONIOENCODING": "utf-8"}
             endpoint = glimmer_serve.deploy(MODAL_CLI, env)
             stack.enter_context(glimmer_serve.session(gpu, MODAL_CLI, env, tag=cfg["save"]))
