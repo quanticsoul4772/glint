@@ -8,12 +8,18 @@ from pathlib import Path
 
 
 def test_repo_layout_defaults_to_the_folder_that_holds_the_repo(monkeypatch):
-    monkeypatch.delenv("GLINT_HOME", raising=False)
     from glint import paths
 
-    importlib.reload(paths)
-    here = Path(paths.__file__).resolve()
-    assert paths.HOME == here.parents[3]
+    monkeypatch.delenv("GLINT_HOME", raising=False)
+    try:
+        importlib.reload(paths)
+        here = Path(paths.__file__).resolve()
+        assert paths.HOME == here.parents[3]
+    finally:
+        # back to the test workspace: left reloaded without GLINT_HOME, glint.paths would point every later test at
+        # the real workspace (conftest's _paths_stay_in_the_test_home checks it after every test)
+        monkeypatch.undo()
+        importlib.reload(paths)
 
 
 def test_shallow_layout_does_not_fail(tmp_path):

@@ -140,3 +140,52 @@ def test_gate_labels_labels_the_writes_of_kept_runs(make_sim, monkeypatch, tmp_p
     assert rows[0]["label"] == "agreed" and rows[0]["run_passed"]  # the gold write
     assert rows[1]["label"] == "overruled" and not rows[1]["run_passed"] and not rows[1]["executed"]
     assert "retail: 2 writes, 1 overruled (50.0%)" in capsys.readouterr().out
+
+
+def test_gate_labels_keeps_overflows_and_glint_errors_as_failed_runs(make_sim, monkeypatch, tmp_path, capsys):
+    import gate_labels
+
+    # a context overflow is a model failure and a Glint error is Glint's: both are failed runs, labeled, never dropped
+    task = gate_labels.tasks("retail")["0"]
+    calls = [{"id": str(i), "name": a.name, "arguments": a.arguments} for i, a in
+             enumerate(task.evaluation_criteria.actions)]
+    msgs = [{"role": "assistant", "content": None, "tool_calls": calls}]
+    sims = [make_sim("0", 0, "context_overflow", messages=msgs), make_sim("0", 1, "glint_error", messages=msgs)]
+    (tmp_path / "runs.json").write_text(json.dumps({"simulations": sims}), encoding="utf-8")
+    monkeypatch.setattr(gate_labels, "DATA", tmp_path)
+    monkeypatch.setattr(gate_labels, "SOURCES", {"runs.json": "retail"})
+    monkeypatch.setattr(gate_labels, "OUT", tmp_path / "labels.json")
+    gate_labels.main()
+    rows = json.loads((tmp_path / "labels.json").read_text(encoding="utf-8"))
+    assert sorted(r["trial"] for r in rows) == [0, 1]  # the one write of each run
+    assert not any(r["run_passed"] for r in rows)
+    out = capsys.readouterr().out
+    assert "runs left out" not in out and "retail: 2 writes" in out
+
+
+def test_export_results_reports_tuned_and_untuned_tasks_apart(run_set, make_sim, monkeypatch, tmp_path):
+    import export_results
+
+    # one run set holds a tuned task (worse with the tools) and an untuned one (improved): pooled, they would tie out
+    arms = {("base", "banking_knowledge"): [make_sim("task_038", 0, "pass"), make_sim("task_001", 0, "fail")],
+            ("tools", "banking_knowledge"): [make_sim("task_038", 0, "fail"), make_sim("task_001", 0, "pass")]}
+    cfg = run_set(arms, k=1)
+    monkeypatch.setattr(tools_ab, "SETS", {"banking": {}})
+    monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: cfg)
+    monkeypatch.setattr(export_results, "SETS", [  # the filters the real SETS use
+        ("banking", True, "Untuned", "untuned", "note", lambda task: task not in export_results.TUNED_BANKING),
+        ("banking", True, "Tuned", "tuned", "note", lambda task: task in export_results.TUNED_BANKING)])
+    monkeypatch.setattr(export_results, "OUT", tmp_path / "results.json")
+    export_results.main()
+    untuned, tuned = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    assert (untuned["role"], tuned["role"]) == ("untuned", "tuned")
+    assert [r["task"] for r in untuned["tasks"]] == ["banking_knowledge-task_001"]
+    assert [r["task"] for r in tuned["tasks"]] == ["banking_knowledge-task_038"]
+    assert untuned["by_task"] == {"improved": 1, "tied": 0, "worse": 0, "no data": 0}
+    assert tuned["by_task"] == {"improved": 0, "tied": 0, "worse": 1, "no data": 0}
+    assert untuned["runs"] == {"alone": [0, 1], "tools": [1, 1]} and tuned["runs"] == {"alone": [1, 1], "tools": [0, 1]}
+    # the shipped SETS keep tuned tasks out of every banking set that has a filter
+    for name, _, _, role, _, *only in export_results.SETS:
+        if only:
+            assert only[0]("task_038") == only[0]("task_054") == (role == "tuned")
+            assert only[0]("task_001") == (role != "tuned")

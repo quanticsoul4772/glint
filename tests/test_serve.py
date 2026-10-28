@@ -56,9 +56,11 @@ def test_a_crash_in_the_log_stops_the_wait_at_once():
     from glint.glimmer_serve import LogWatch
 
     watch = LogWatch.__new__(LogWatch)
-    watch.history = ["RuntimeError: Engine core initialization failed. (previous container)"]
+    watch.history = []
+    # an exception line alone is not a crash: vLLM logs recoverable errors while it loads
+    watch.lines = ["INFO Loading weights", "WARNING ValueError: tokenizer has no chat template; using the default"]
+    assert watch.failure() is None
     watch.lines = ["INFO Loading weights"]
-    assert watch.failure() is None  # an old crash replayed from history does not count
     watch.lines.append("RuntimeError: Engine core initialization failed. See root cause above.")
     t0 = time.time()
     with pytest.raises(RuntimeError, match="failed to start: RuntimeError: Engine core"):
@@ -155,7 +157,8 @@ def test_session_stops_the_app_when_the_gpu_cap_is_reached_mid_batch(monkeypatch
         while not halt.is_set() and time.time() - t0 < 30:  # the batch, until the watcher halts it
             time.sleep(0.1)
     assert halt.is_set() and ["app", "stop"] in calls and 10 < time.time() - t0 < 30
-    assert meter.gpu_usd > 0
+    # the whole session, the stop and its drain included, is metered and stays within the cap
+    assert 0.008 < meter.gpu_usd <= meter.caps.gpu_usd
 
 
 def _fake_modal(calls, stop_codes=None):
@@ -229,14 +232,46 @@ def test_failure_finds_the_root_cause_after_a_log_prefix():
     assert watch.failure() == "RuntimeError: Could not find nvcc"
 
 
-def test_logwatch_streams_with_follow():
-    # the command is built in __init__; read it without starting a process
-    import inspect
+def test_logwatch_streams_with_follow_and_keeps_a_repeated_crash_in_a_new_container(monkeypatch):
+    # Without -f the CLI prints the last 100 entries and exits; without the timestamp and container id a restart's
+    # replay cannot be told from the same crash in a new container. The stand-in CLI streams only when it is asked
+    # to follow, and prefixes lines only when asked to.
+    import subprocess
+    import time
 
-    from glint.glimmer_serve import LogWatch
+    from glint import glimmer_serve
 
-    src = inspect.getsource(LogWatch.__init__)
-    assert '"-f"' in src and "--timestamps" in src and "--show-container-id" in src
+    started = []
+    crash = "RuntimeError: Engine core initialization failed. See root cause above."
+    streams = [[("ta-01", "INFO Loading weights"), ("ta-01", crash)],
+               [("ta-01", "INFO Loading weights"), ("ta-01", crash), ("ta-02", crash)]]  # a restart replays ta-01
+
+    class FakeProc:
+        def __init__(self, cmd, **kwargs):
+            started.append(cmd)
+            follow = "-f" in cmd
+            rows = streams[min(len(started), len(streams)) - 1] if follow else streams[0][:1]
+            stamp = "--timestamps" in cmd
+            container = "--show-container-id" in cmd
+            self.stdout = [f"{'2026-10-27T18:09:30 ' if stamp else ''}{c + ' ' if container else ''}{line}\n"
+                           for c, line in rows]
+
+        def wait(self, timeout=None):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", FakeProc)
+    watch = glimmer_serve.LogWatch("modal", {}, restart_s=0.01)
+    deadline = time.time() + 5
+    while len(started) < 3 and time.time() < deadline:
+        time.sleep(0.01)
+    watch._closed = True
+    assert started[0][:4] == ["modal", "app", "logs", glimmer_serve.APP_NAME]
+    crashes = [line for line in watch.lines if crash in line]
+    assert len(crashes) == 2 and {c.split()[1] for c in crashes} == {"ta-01", "ta-02"}
+    assert crash in watch.failure()
 
 
 def test_wait_ready_fails_at_once_on_refused_keys(monkeypatch):
@@ -294,3 +329,58 @@ def test_a_watcher_failure_halts_the_batch_stops_the_app_and_raises(monkeypatch,
         while not halt.is_set() and time.time() - t0 < 10:
             time.sleep(0.05)
         assert halt.is_set() and ["app", "stop"] in calls
+
+
+def _resumed_meter(tmp_path, prior_usd, cap_usd):
+    """A meter for a resumed run: the ledger already holds `prior_usd` of GPU spend in its phase."""
+    import json
+
+    from glint.meter import Caps, Meter
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(json.dumps({"kind": "gpu", "usd": prior_usd, "phase": "resume", "seconds": 0}) + "\n",
+                      encoding="utf-8")
+    return Meter(Caps(meta_usd=0.0, gpu_usd=cap_usd), ledger=ledger, phase="resume")
+
+
+def test_a_resumed_session_gets_only_what_the_earlier_spend_left_of_the_cap(monkeypatch, tmp_path):
+    import subprocess
+    import time
+
+    from glint import glimmer_serve
+    from glint.meter import BudgetExceeded
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_modal(calls))
+    monkeypatch.setattr(glimmer_serve, "GPU_USD_PER_HOUR", 36.0)  # $0.01 per second, so the test takes seconds
+    monkeypatch.setattr(glimmer_serve, "STOP_WAIT_S", 0.2)
+    monkeypatch.setattr(glimmer_serve, "STOP_MARGIN_EXTRA_S", 0.0)
+    # $0.05 cap with $0.03 already spent: about 2 s are left, minus the 0.25 s stop margin (a fresh run gets 4.75 s)
+    meter = _resumed_meter(tmp_path, prior_usd=0.03, cap_usd=0.05)
+    t0 = time.time()
+    with (pytest.raises(BudgetExceeded, match="reached during the session"),
+          glimmer_serve.session(meter, "modal", {}, tag="t", check_s=0.05) as halt):
+        while not halt.is_set() and time.time() - t0 < 10:
+            time.sleep(0.02)
+    assert time.time() - t0 < 3.5
+    assert 0.03 < meter.gpu_usd <= meter.caps.gpu_usd
+
+
+def test_a_resumed_session_at_or_near_its_cap_is_refused_before_it_starts(monkeypatch, tmp_path):
+    import subprocess
+
+    from glint import glimmer_serve
+    from glint.meter import BudgetExceeded
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_modal(calls))
+    # the earlier spend already reached the cap
+    with (pytest.raises(BudgetExceeded, match="reached cap"),
+          glimmer_serve.session(_resumed_meter(tmp_path / "a", 5.0, 5.0), "modal", {}, tag="t")):
+        pytest.fail("the batch must not run")
+    # $0.05 left of $5 is about 61 s at $2.94/h, less than the 135 s stop margin
+    with (pytest.raises(BudgetExceeded, match="leaves less than the 135 s stop margin"),
+          glimmer_serve.session(_resumed_meter(tmp_path / "b", 4.95, 5.0), "modal", {}, tag="t")):
+        pytest.fail("the batch must not run")
+    assert calls == []  # nothing was started or stopped

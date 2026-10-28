@@ -144,3 +144,126 @@ def test_banking_later_writes_are_matched_by_card():
     on_other = [("submit_credit_limit_increase_request_7392", {"credit_card_account_id": "cc_other"})]
     assert _banking(env.tools.db, "order_replacement_credit_card_7291", replace, on_same)[0] == "overruled"
     assert _banking(env.tools.db, "order_replacement_credit_card_7291", replace, on_other)[0] == "agreed"
+
+
+# --- Labels the policy decides, one per uncovered branch -----------------------------------------------------------
+# Banking base: task_054 (card cc_584f9c5d00_gold passes every credit limit check; txn_584f9c5d00_001 is a $487.50
+# fraud charge on a Gold card opened 03/20/2023, user has no prior disputes) and task_052 (cc_5e4c1a83b0_bronze:
+# entry tier, an approved request submitted 2025-09-15, 60 days before 2025-11-14).
+
+
+def _dispute_args(**over):
+    return {"transaction_id": "txn_584f9c5d00_001", "card_action": "keep_active", "card_last_4_digits": "7823",
+            "full_name": "Sofia Papadopoulos", "user_id": "584f9c5d00", "phone": "347-555-0387",
+            "email": "sofia.p@outlook.com", "address": "1456 Astoria Boulevard", "contacted_merchant": False,
+            "purchase_date": "11/11/2025", "issue_noticed_date": "11/12/2025",
+            "dispute_reason": "unauthorized_fraudulent_charge", "resolution_requested": "full_refund",
+            "eligible_for_provisional_credit": True} | over
+
+
+def _file(dispute):
+    sim = _sim("task_054", [
+        ("unlock_discoverable_agent_tool", {"agent_tool_name": "file_credit_card_transaction_dispute_4829"}),
+        _hidden("file_credit_card_transaction_dispute_4829", dispute)])
+    [d] = label_run(sim, _task("banking_knowledge", "task_054"), banking_env(retrieval_variant="bm25_grep"))
+    return d
+
+
+def test_banking_dispute_with_the_wrong_card_action():
+    # credit_cards_(general)_014 item 2: 'cancel_and_reissue' only "when user wants card replaced"; with no
+    # replacement in the run the card stays 'keep_active'
+    assert _file(_dispute_args()).label == "agreed"
+    d = _file(_dispute_args(card_action="cancel_and_reissue"))
+    assert d.label == "overruled" and d.reasons == ["card_action cancel_and_reissue != keep_active"]
+
+
+def test_banking_dispute_with_the_wrong_provisional_credit_flag():
+    # credit_cards_(general)_015: eligible if ALL hold; this charge meets each (open 60+ days, fraud reason,
+    # $25.00 <= $487.50 <= $10,000 premium max, no prior disputes, merchant contact not needed for fraud)
+    d = _file(_dispute_args(eligible_for_provisional_credit=False))
+    assert d.label == "overruled" and d.reasons == ["eligible_for_provisional_credit False != True"]
+
+
+def _decide(task_id, card, user, amount, decision, decision_args):
+    unlock = [("unlock_discoverable_agent_tool", {"agent_tool_name": n}) for n in
+              ("submit_credit_limit_increase_request_7392", decision)]
+    base = {"credit_card_account_id": card, "user_id": user}
+    sim = _sim(task_id, unlock + [_hidden("submit_credit_limit_increase_request_7392",
+                                          base | {"requested_increase_amount": amount}),
+                                  _hidden(decision, base | decision_args)])
+    return label_run(sim, _task("banking_knowledge", task_id), banking_env(retrieval_variant="bm25_grep"))[-1]
+
+
+def test_banking_approval_the_policy_denies():
+    # credit_card_account_logistics_005 §2: entry-tier cooldown 120 days after an approved request; task_052's was
+    # submitted 60 days ago, so _007 Step 4 says deny (cooldown_period_active), not approve
+    d = _decide("task_052", "cc_5e4c1a83b0_bronze", "5e4c1a83b0", 500, "approve_credit_limit_increase_5847",
+                {"new_credit_limit": 4500})
+    assert d.tool == "approve_credit_limit_increase_5847" and d.label == "overruled"
+    assert "cooldown 120 days" in d.reasons[0]
+    agreed = _decide("task_052", "cc_5e4c1a83b0_bronze", "5e4c1a83b0", 500, "deny_credit_limit_increase_5848",
+                     {"denial_reason": "cooldown_period_active"})
+    assert agreed.label == "agreed"
+
+
+def test_banking_denial_the_policy_approves():
+    # credit_card_account_logistics_007 Step 4: "If all requirements are met ... approve"; task_054's Gold card passes
+    # every check for +$2,500 (50% of $5,000, logistics_006)
+    d = _decide("task_054", "cc_584f9c5d00_gold", "584f9c5d00", 2500, "deny_credit_limit_increase_5848",
+                {"denial_reason": "high_utilization"})
+    assert d.label == "overruled" and d.reasons == ["every check passes; the policy approves"]
+
+
+def _airline(calls, unjudged=None):
+    return label_run(_sim("7", calls), _task("airline", "7"), registry.get_env_constructor("airline")(),
+                     unjudged)
+
+
+def test_airline_cancel_allowed_only_by_an_insurance_reason_is_uncertain():
+    # airline/policy.md "Cancel flight": allowed if "The user has travel insurance and the reason for cancellation is
+    # covered by insurance". CDXEBS (economy, insured, booked 2024-05-08) has no other ground; the replay does not
+    # see the user's reason, so the label is neither agreed nor overruled
+    [d] = _airline([("cancel_reservation", {"reservation_id": "CDXEBS"})])
+    assert d.label == "uncertain" and "covered by insurance" in d.reasons[0]
+
+
+def test_airline_baggage_labels():
+    # airline/policy.md "Change baggage and insurance": "The user can add but not remove checked bags." VAAOXJ has 1
+    for total, label in ((0, "overruled"), (2, "agreed")):
+        [d] = _airline([("update_reservation_baggages", {"reservation_id": "VAAOXJ", "total_baggages": total,
+                                                         "nonfree_baggages": 0, "payment_id": "x"})])
+        assert d.label == label
+        assert d.reasons == (["bags can be added but not removed"] if label == "overruled" else [])
+
+
+def test_airline_passenger_labels():
+    # airline/policy.md "Change passengers": "The user can modify passengers but cannot modify the number of
+    # passengers." VAAOXJ has one passenger
+    one = [{"first_name": "Ana", "last_name": "Lee", "dob": "1980-01-01"}]
+    [d] = _airline([("update_reservation_passengers", {"reservation_id": "VAAOXJ", "passengers": one})])
+    assert d.label == "agreed"
+    [d] = _airline([("update_reservation_passengers", {"reservation_id": "VAAOXJ", "passengers": one * 2})])
+    assert d.label == "overruled" and d.reasons == ["the number of passengers cannot change"]
+
+
+def test_airline_certificate_labels():
+    # airline/policy.md "Refunds and Compensation": "Only compensate if the user is a silver/gold member or has travel
+    # insurance or flies business." Regular members: olivia_jackson_4826 (no reservation qualifies),
+    # lucas_hernandez_8985 (2 of 3 qualify), yusuf_thomas_7802 (all 8 qualify); aarav_nguyen_1055 is silver
+    cases = {"olivia_jackson_4826": "overruled", "lucas_hernandez_8985": "uncertain", "yusuf_thomas_7802": "agreed",
+             "aarav_nguyen_1055": "agreed"}
+    for user, label in cases.items():
+        [d] = _airline([("send_certificate", {"user_id": user, "amount": 100})])
+        assert d.label == label, user
+
+
+def test_unjudged_writes_are_counted():
+    # A write no rule judges (a certificate to an unknown user, a payment-only flight update) is counted, not dropped
+    unjudged = {}
+    out = _airline([("send_certificate", {"user_id": "nobody_000", "amount": 100}),
+                    ("update_reservation_flights", {
+                        "reservation_id": "XEHM4B", "cabin": "basic_economy", "payment_id": "credit_card_2408938",
+                        "flights": [{"flight_number": "HAT005", "date": "2024-05-20"},
+                                    {"flight_number": "HAT178", "date": "2024-05-30"}]}),
+                    ("get_user_details", {"user_id": "daiki_muller_1116"})], unjudged)
+    assert out == [] and unjudged == {"send_certificate": 1, "update_reservation_flights": 1}
