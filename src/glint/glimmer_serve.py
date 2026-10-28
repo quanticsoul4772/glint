@@ -108,8 +108,10 @@ def _report_unfollowed(response) -> None:
     fails."""
     if 300 <= response.status_code < 400 and not response.has_redirect_location:
         req = response.request
+        sent = req.extensions.get("glint_sent")  # never raise into the call, even if the stamp hook did not run
+        hop = f"{time.monotonic() - sent:.0f} s" if sent is not None else "unknown time"
         print(f"[serve {time.strftime('%H:%M:%S')}] UNFOLLOWED REDIRECT {response.status_code} on {req.method} "
-              f"{req.url.host}{req.url.path} after {time.monotonic() - req.extensions['glint_sent']:.0f} s this hop; "
+              f"{req.url.host}{req.url.path} after {hop} this hop; "
               f"headers: {sorted(response.headers.keys())}", file=sys.stderr, flush=True)
 
 

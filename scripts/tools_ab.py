@@ -225,6 +225,43 @@ def _commit() -> str:
     return out + ("-dirty" if dirty else "")
 
 
+KEPT_ON_RESUME = ("context_overflow", "glint_error")  # failed runs: results, never rerun
+
+
+def keep_failed_runs_on_resume() -> None:
+    """τ²'s resume (tau2.runner.checkpoint.try_resume) reruns every simulation whose termination reason is
+    infrastructure_error, and rewrites the checkpoint without them. Glint splits that reason (glint.runlog.outcome):
+    a context overflow or a Glint error is a failed run, a result, and must not be rerun until it passes. This wraps
+    the resume τ²'s batch runner calls so those runs stay as recorded, on disk and in the runs it skips; only
+    Glint's infrastructure_error and budget_stop runs (not results) are rerun."""
+    from tau2.data_model.simulation import Results
+    from tau2.runner import batch
+
+    if getattr(batch.try_resume, "glint_keeps_failures", False):
+        return
+    resume = batch.try_resume
+
+    def wrapped(save_path, simulation_results, tasks, num_trials, auto_resume=False, results_format="json"):
+        save_path = Path(save_path)
+        before = Results.load(save_path).simulations if save_path.exists() else []
+        if save_path.exists() and Results._detect_format(save_path) != "json":
+            raise RuntimeError(f"{save_path}: τ²'s dir checkpoint format; the failed-run keeper handles json only")
+        keep = [s for s in before if outcome(s.model_dump(mode="json")) in KEPT_ON_RESUME]
+        results, done, tasks = resume(save_path, simulation_results, tasks, num_trials, auto_resume, results_format)
+        present = {s.id for s in results.simulations}
+        back = [s for s in keep if s.id not in present]
+        if back:
+            results.simulations.extend(back)
+            done |= {(s.trial, s.task_id, s.seed) for s in back}
+            save_path.write_text(results.model_dump_json(indent=2), encoding="utf-8")
+            print(f"KEPT {len(back)} failed runs (context overflow or Glint error) as recorded; τ²'s resume would "
+                  f"have rerun them: {sorted((s.task_id, s.trial) for s in back)}", flush=True)
+        return results, done, tasks
+
+    wrapped.glint_keeps_failures = True
+    batch.try_resume = wrapped
+
+
 def release_infrastructure_errors(cfg: dict, stamp: str, commit: str) -> int:
     """Take the infrastructure-error runs out of each arm's checkpoint so a resume reruns them (see the docstring
     above). Nothing is deleted: the released runs are written to a file first. Returns how many were released."""
@@ -251,6 +288,9 @@ def release_infrastructure_errors(cfg: dict, stamp: str, commit: str) -> int:
                 events.write_text("".join(json.dumps(r) + "\n" for r in rows if not (
                     r["label"] == f"{arm} {domain}" and r["outcome"] == "infrastructure_error"
                     and (r["task_id"], r["trial"]) in keys)), encoding="utf-8")
+            with (cfg.get("stamp_dir", data) / "reruns.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"ts": time.time(), "commit": commit, "arm": arm, "domain": domain,
+                                    "runs": sorted(keys)}) + "\n")
             print(f"RELEASED {len(drop)} infrastructure-error runs of {arm} {domain} for a rerun on {commit}: "
                   f"{sorted(keys)}; kept in {side.name}", flush=True)
             released += len(drop)
@@ -280,6 +320,7 @@ def generate(cfg: dict) -> None:
     if started and started != commit and "--allow-mixed-code" not in sys.argv:
         raise SystemExit(f"this comparison started on commit {started}, the code is now {commit}; resuming would mix "
                          "versions. Start a fresh stamp, or pass --allow-mixed-code.")
+    keep_failed_runs_on_resume()
     if "--rerun-infrastructure-errors" in sys.argv and not release_infrastructure_errors(cfg, stamp, commit):
         raise SystemExit("--rerun-infrastructure-errors: no infrastructure-error runs to rerun")
     tasks = cfg["tasks"]()

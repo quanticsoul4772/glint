@@ -55,7 +55,8 @@ def test_main_reports_sets_with_both_arms_and_names_the_rest(arms, monkeypatch, 
     half.mkdir()
     (half / "tasks.json").write_text(json.dumps({"retail": ["0"]}), encoding="utf-8")
     (half / "base-retail.json").write_text(json.dumps({"simulations": []}), encoding="utf-8")
-    sets = {"full": {"data": cfg["data"]}, "half": {"data": half}, "none": {"data": tmp_path / "missing"}}
+    sets = {"full": {"data": cfg["data"], "trials": 3}, "half": {"data": half, "trials": 3},
+            "none": {"data": tmp_path / "missing", "trials": 3}}
     monkeypatch.setattr(wrong_writes.tools_ab, "SETS", sets)
     monkeypatch.setattr(wrong_writes.tools_ab, "for_backend", lambda c, modal: c if not modal else
                         {"data": tmp_path / "missing"})
@@ -68,3 +69,9 @@ def test_main_reports_sets_with_both_arms_and_names_the_rest(arms, monkeypatch, 
     report = json.loads((tmp_path / "wrong-writes.json").read_text(encoding="utf-8"))
     assert set(report) == {"full"}
     assert report["full"]["retail"]["base"]["overruled"] == 1
+
+
+def test_trials_beyond_k_are_left_out_like_analyze_does(arms):
+    cfg, writes = arms
+    c = wrong_writes.count_set(cfg["data"], ["retail"], {"retail": 1})["retail"]["base"]
+    assert c["runs"] == 1 and c["writes"] == writes and c["dropped"] == {"beyond k": 2}
