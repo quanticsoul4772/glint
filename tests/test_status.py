@@ -82,3 +82,13 @@ def test_main_reports_the_named_sets_and_modal(monkeypatch, capsys):
     status.main()
     assert capsys.readouterr().out.splitlines() == ["== design", "== design --modal",
                                                     "Modal glint-serve: stopped (0 containers)"]
+
+
+def test_a_modal_only_set_is_reported_on_modal_only(monkeypatch, capsys):
+    # the gated sets refuse a non-Modal backend; status used to ask for it first and stop with an error
+    import status
+
+    monkeypatch.setattr(sys, "argv", ["status.py", "banking-gated"])
+    monkeypatch.setattr(status, "report", lambda name, cfg: [f"== {name} {cfg['data'].name}"])
+    status.main()
+    assert capsys.readouterr().out.splitlines() == ["== banking-gated --modal tools_ab_banking12_gated_modal"]
