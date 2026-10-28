@@ -108,12 +108,14 @@ SETS = {
     "heldout": {"tasks": heldout_tasks, "trials": 4, "airline_trials": 2, "glimmer_usd": 3.5, "meta_usd": 0.5,
                 "gpu_usd": 6.0, "data": MEASURE / "tools_ab_heldout", "out": RESULTS / "tools-ab-heldout.json",
                 "save": "tools-ab-heldout"},
-    "heldout2": {"tasks": heldout2_tasks, "trials": 4, "glimmer_usd": 3.5, "meta_usd": 1.0, "gpu_usd": 15.0,
+    "heldout2": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
+                 "gpu_usd": 8.0,
                  "data": MEASURE / "tools_ab_heldout2", "out": RESULTS / "tools-ab-heldout2.json",
                  "save": "tools-ab-heldout2"},
-    "banking": {"tasks": banking_tasks, "trials": 4, "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 6.0,
-                "data": MEASURE / "tools_ab_banking", "out": RESULTS / "tools-ab-banking.json",
-                "save": "tools-ab-banking"},
+    # fresh folders (2026-10-28): the earlier banking stamp folder holds runs from before the checkpoint fix
+    "banking": {"tasks": banking_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.0, "meta_usd": 1.5,
+                "gpu_usd": 12.0, "data": MEASURE / "tools_ab_banking12", "out": RESULTS / "tools-ab-banking12.json",
+                "save": "tools-ab-banking12"},
     # The 10 banking tasks not tuned on (the banking tools were changed after reading 038 and 054 runs only); k=2 to
     # keep Modal credit for activation capture
     "banking-other": {"tasks": lambda: {"banking_knowledge": [t for t in banking_tasks()["banking_knowledge"]
