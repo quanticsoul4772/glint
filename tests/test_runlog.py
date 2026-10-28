@@ -168,3 +168,58 @@ def test_a_plain_read_would_block_the_save(tmp_path):
         pytest.skip("Windows-only behavior")
     with open(target, encoding="utf-8"), pytest.raises(PermissionError):
         os.replace(temp, target)
+
+
+# --- Mutation-testing gaps (cosmic-ray on main, 2026-10-28: 60 of 165 mutants survived) -----------------------------
+def test_event_fields():
+    from glint.runlog import event
+
+    s = _sim("t9", 2, 1.0, term="TerminationReason.USER_STOP", error="x" * 400) | {"duration": 12.34,
+                                                                                  "messages": [{}, {}, {}]}
+    e = event(s, "lbl")
+    assert (e["label"], e["task_id"], e["trial"], e["reward"], e["termination"], e["duration_s"], e["messages"]) == (
+        "lbl", "t9", 2, 1.0, "USER_STOP", 12.3, 3)
+    assert e["error"] == "x" * 300
+    bare = event({"task_id": "t0", "trial": 0, "termination_reason": "user_stop", "reward_info": None}, "lbl")
+    assert (bare["reward"], bare["error"], bare["duration_s"], bare["messages"]) == (None, None, 0.0, 0)
+
+
+def test_counts_add_up_per_outcome_and_task(tmp_path, capsys):
+    results = tmp_path / "results.json"
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x")
+    results.write_text(json.dumps({"simulations": [_sim("a", 0, 0.0), _sim("a", 1, 0.0), _sim("b", 0, 0.0),
+                                                   _sim("b", 1, 1.0)]}), encoding="utf-8")
+    watch.poll()
+    assert watch.counts == {"fail": 3, "pass": 1}
+    assert watch.tasks_by_outcome == {"fail": {"a": 2, "b": 1}, "pass": {"b": 1}}
+    assert "totals {'fail': 3, 'pass': 1}" in capsys.readouterr().err
+
+
+def test_stall_warning_only_after_the_stall_time(tmp_path, capsys):
+    watch = RunEvents(tmp_path / "results.json", tmp_path / "e.jsonl", label="x", stall_s=3540.0)
+    watch.poll()  # nothing new, but not stalled yet
+    assert "no run finished" not in capsys.readouterr().err
+    watch._last_new = time.time() - 4000
+    watch.poll()
+    assert "WARNING: no run finished in 59 min (0 so far)" in capsys.readouterr().err
+
+
+def test_failed_reads_warn_at_3_and_10_in_a_row_and_reset_after_a_good_read(tmp_path, capsys):
+    results = tmp_path / "results.json"
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x")
+    warnings = lambda: capsys.readouterr().err.count("checkpoint reads in a row failed")
+    results.write_text("{ half", encoding="utf-8")
+    for n in range(1, 11):
+        watch.poll()
+        if n == 2:
+            assert warnings() == 0
+        if n == 3:
+            assert warnings() == 1
+        if n == 9:
+            assert warnings() == 0
+    assert warnings() == 1 and watch.read_errors == 10  # the 10th
+    results.write_text(json.dumps({"simulations": []}), encoding="utf-8")
+    watch.poll()  # a good read resets the streak
+    results.write_text("{ half", encoding="utf-8")
+    watch.poll(), watch.poll()
+    assert warnings() == 0  # two bad reads after the reset: not yet a streak of 3
