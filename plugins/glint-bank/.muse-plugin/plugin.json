@@ -1,0 +1,270 @@
+{
+  "schemaVersion": 1,
+  "name": "glint-bank",
+  "displayName": "Glint Bank",
+  "version": "0.1.0",
+  "description": "A live τ²-bench bank as MCP tools, with every write checked by Glint's policy gates before it runs.",
+  "compat": {
+    "source": "native",
+    "manifestDir": ".muse-plugin"
+  },
+  "capabilities": {
+    "skills": [],
+    "commands": [
+      {
+        "id": "start",
+        "path": "commands/start.md",
+        "enabledDefault": true
+      }
+    ],
+    "hooks": [],
+    "mcpServers": [
+      {
+        "id": "b",
+        "transport": "stdio",
+        "command": [
+          "uv",
+          "run",
+          "--script",
+          "mcp/glint_bank.py"
+        ]
+      }
+    ],
+    "reminders": [
+      {
+        "id": "gated-writes",
+        "path": "reminders/gated-writes.md",
+        "tools": [
+          "mcp__plugin_glint_bank_b__call_discoverable_agent_tool",
+          "mcp__plugin_glint_bank_b__log_verification",
+          "mcp__plugin_glint_bank_b__change_user_email"
+        ],
+        "blocking": false,
+        "decision": {
+          "version": 1,
+          "envelope": {
+            "version": 1,
+            "template": "<system-reminder>\n{text}\n</system-reminder>"
+          },
+          "deliveryRole": "developer",
+          "fields": [
+            {
+              "name": "text",
+              "description": "Reminder body text.",
+              "requirement": "remind",
+              "shape": {
+                "type": "string",
+                "minBytes": 1,
+                "maxBytes": 2000
+              }
+            }
+          ],
+          "bodyTemplate": {
+            "text": "{text}",
+            "slots": [
+              {
+                "name": "text",
+                "source": {
+                  "field": "text"
+                },
+                "escape": "xml",
+                "fallback": ""
+              }
+            ],
+            "maxBytes": 65536
+          },
+          "validators": [],
+          "proposal": {
+            "remind": {
+              "body": {
+                "renderedBody": true
+              },
+              "kind": {
+                "literal": "general"
+              },
+              "subject": {
+                "literal": "general"
+              },
+              "reason": {
+                "literal": "reminder_requested"
+              },
+              "requestedPriority": {
+                "effective": "defaultPriority"
+              },
+              "effectivePriority": {
+                "effective": "clampedPriority"
+              },
+              "visibleForSteps": {
+                "literal": 1
+              },
+              "rejection": {
+                "literal": null
+              },
+              "memoryEvidence": {
+                "literal": []
+              },
+              "skillEvidence": {
+                "literal": null
+              }
+            },
+            "none": {
+              "body": {
+                "literal": ""
+              },
+              "kind": {
+                "literal": "general"
+              },
+              "subject": {
+                "literal": "general"
+              },
+              "reason": {
+                "literal": "none"
+              },
+              "requestedPriority": {
+                "effective": "defaultPriority"
+              },
+              "effectivePriority": {
+                "effective": "clampedPriority"
+              },
+              "visibleForSteps": {
+                "literal": 1
+              },
+              "rejection": {
+                "literal": "no_reminder"
+              },
+              "memoryEvidence": {
+                "literal": []
+              },
+              "skillEvidence": {
+                "literal": null
+              }
+            },
+            "invalidPayload": {
+              "body": {
+                "inputError": true
+              },
+              "kind": {
+                "literal": "general"
+              },
+              "subject": {
+                "literal": "general"
+              },
+              "reason": {
+                "literal": "invalid_payload"
+              },
+              "requestedPriority": {
+                "effective": "defaultPriority"
+              },
+              "effectivePriority": {
+                "effective": "clampedPriority"
+              },
+              "visibleForSteps": {
+                "literal": 1
+              },
+              "rejection": {
+                "literal": "invalid_payload"
+              },
+              "memoryEvidence": {
+                "literal": []
+              },
+              "skillEvidence": {
+                "literal": null
+              }
+            },
+            "roundEnded": {
+              "body": {
+                "literal": ""
+              },
+              "kind": {
+                "literal": "general"
+              },
+              "subject": {
+                "literal": "general"
+              },
+              "reason": {
+                "literal": "round_ended"
+              },
+              "requestedPriority": {
+                "effective": "defaultPriority"
+              },
+              "effectivePriority": {
+                "effective": "clampedPriority"
+              },
+              "visibleForSteps": {
+                "literal": 1
+              },
+              "rejection": {
+                "literal": "round_ended"
+              },
+              "memoryEvidence": {
+                "literal": []
+              },
+              "skillEvidence": {
+                "literal": null
+              }
+            },
+            "syntheticFailure": {
+              "body": {
+                "literal": ""
+              },
+              "kind": {
+                "literal": "general"
+              },
+              "subject": {
+                "literal": "general"
+              },
+              "reason": {
+                "literal": "synthetic_failure"
+              },
+              "requestedPriority": {
+                "effective": "defaultPriority"
+              },
+              "effectivePriority": {
+                "effective": "clampedPriority"
+              },
+              "visibleForSteps": {
+                "literal": 1
+              },
+              "rejection": {
+                "literal": "invalid_payload"
+              },
+              "memoryEvidence": {
+                "literal": []
+              },
+              "skillEvidence": {
+                "literal": null
+              }
+            },
+            "validatorRejections": {}
+          },
+          "lifecycle": {
+            "seenKey": "ordinary",
+            "eotProgressGate": "notApplicable",
+            "failureFallback": "none",
+            "installBudget": "roster"
+          },
+          "limits": {
+            "declarationBytes": 65536,
+            "customFields": 64,
+            "fieldNameBytes": 64,
+            "descriptionBytes": 1024,
+            "objectDepth": 4,
+            "objectFields": 32,
+            "arrayItems": 64,
+            "submittedJsonBytes": 262144,
+            "scalarStringBytes": 65536,
+            "templateBytes": 16384,
+            "slots": 64,
+            "renderedBodyBytes": 65536,
+            "memoryAdmissionReads": 64,
+            "memoryAdmissionLinesPerRead": 2000,
+            "memoryAdmissionExaminedBytesPerRead": 100000,
+            "memoryAdmissionReturnedBytesPerRead": 100000,
+            "memoryAdmissionExaminedBytesPerDecision": 6400000,
+            "memoryAdmissionReturnedBytesPerDecision": 6400000
+          }
+        }
+      }
+    ]
+  }
+}

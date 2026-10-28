@@ -1,0 +1,2 @@
+# τ² banking data bundled byte for byte (tests compare it with the vendored copy)
+plugins/glint-bank/data/** -text

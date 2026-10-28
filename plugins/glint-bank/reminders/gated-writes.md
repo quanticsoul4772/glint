@@ -1,0 +1,1 @@
+This bank's writes are checked by policy gates before they run. A blocked write returns an error that starts "this write was blocked by a policy gate" and was NOT executed. Do not repeat it unchanged: read its Reason and Fix, tell the customer what the policy allows, and follow the Fix.
