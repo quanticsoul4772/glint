@@ -239,6 +239,37 @@ def test_logwatch_streams_with_follow():
     assert '"-f"' in src and "--timestamps" in src and "--show-container-id" in src
 
 
+def test_wait_ready_fails_at_once_on_refused_keys(monkeypatch):
+    import httpx
+
+    from glint import glimmer_serve
+
+    def handler(request):
+        return httpx.Response(401)
+
+    real = httpx.Client
+
+    def client(**kwargs):
+        return real(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", client)
+    with pytest.raises(RuntimeError, match="proxy keys were refused"):
+        glimmer_serve.wait_ready("https://x.modal.run", "k", "s", timeout_s=600, poll_s=0.01)
+
+
+def test_a_log_watch_that_cannot_start_is_reported_by_failure():
+    from glint.glimmer_serve import LogWatch
+
+    watch = LogWatch("Z:/no/such/modal.exe", {})
+    import time
+
+    deadline = time.time() + 5
+    while watch.failure() is None and time.time() < deadline:
+        time.sleep(0.05)
+    assert watch.failure().startswith("the log watch failed")
+    watch._closed = True
+
+
 def test_a_watcher_failure_halts_the_batch_stops_the_app_and_raises(monkeypatch, tmp_path):
     # a watcher exception used to kill the cap and the spend writes silently while the batch ran on
     import subprocess

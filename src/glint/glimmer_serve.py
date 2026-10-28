@@ -75,7 +75,12 @@ def deploy(modal_cli: str, env: dict) -> str:
         say(f"FAILED: modal deploy exited {out.returncode}")
         print((out.stdout + out.stderr)[-4000:], file=sys.stderr, flush=True)
         raise RuntimeError(f"modal deploy exited {out.returncode}")
-    url = re.search(r"https://\S+\.modal\.run", out.stdout).group(0)
+    found = re.search(r"https://\S+\.modal\.run", out.stdout)
+    if found is None:
+        say("FAILED: modal deploy succeeded but printed no endpoint URL; its output:")
+        print((out.stdout + out.stderr)[-4000:], file=sys.stderr, flush=True)
+        raise RuntimeError("modal deploy printed no https://...modal.run URL (output above)")
+    url = found.group(0)
     say(f"deployed: {url}")
     return url
 
@@ -112,6 +117,11 @@ def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 90
                 if status == 200:
                     say(f"READY after {time.time() - t0:.0f} s")
                     return time.time() - t0
+                if status in (401, 403, 404):  # wrong proxy keys or URL: waiting cannot fix these
+                    say(f"FAILED: /health -> HTTP {status}; "
+                        + ("check MODAL_PROXY_KEY / MODAL_PROXY_SECRET" if status != 404 else "check the URL"))
+                    raise RuntimeError(f"{url}/health answered HTTP {status}: "
+                                       + ("the proxy keys were refused" if status != 404 else "no such endpoint"))
             except httpx.HTTPError as e:  # booting: refused or reset, or still queued past this poll's timeout
                 outcome = type(e).__name__
             seen = f", container log lines {log_lines()}" if log_lines is not None else ""
@@ -154,12 +164,22 @@ class LogWatch:
         self._cmd = [modal_cli, "app", "logs", app_name, "-f", "--timestamps", "--show-container-id"]
         self._env, self._restart_s = env, restart_s
         self._closed = False
+        self.error: str | None = None  # set when the watch itself fails (see _run)
         self._proc = None
         self._lock = threading.Lock()
         threading.Thread(target=self._run, daemon=True).start()
         say(f"watching {app_name} logs (streaming)")
 
     def _run(self):
+        # A failure here (the CLI cannot start, a read error) would end the watch silently and leave wait_ready
+        # waiting out its whole timeout: it is reported and returned by failure() instead
+        try:
+            self._stream()
+        except Exception as e:  # noqa: BLE001  (surfaced through failure())
+            self.error = f"the log watch failed: {type(e).__name__}: {e}"
+            say(f"FAILED: {self.error}")
+
+    def _stream(self):
         while True:
             with self._lock:
                 if self._closed:
@@ -187,7 +207,9 @@ class LogWatch:
     def failure(self) -> str | None:
         """The crash as its root cause: the last exception line before the first failure marker (for example
         "RuntimeError: Could not find nvcc ..."), else the marker line itself. The exception may follow a log
-        prefix such as "(EngineCore pid=25)"."""
+        prefix such as "(EngineCore pid=25)". A failed log watch is reported here too: without it a crash is unseen."""
+        if getattr(self, "error", None):
+            return self.error
         lines = list(self.lines)
         hit = next((i for i, line in enumerate(lines) if any(m in line for m in FAILURE_MARKERS)), None)
         if hit is None:

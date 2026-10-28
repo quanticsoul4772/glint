@@ -334,3 +334,29 @@ def test_started_pairs_count_against_the_daily_limit_before_they_end(tmp_path):
     budget.started(types.SimpleNamespace(id="s1", task_id="task_054"))  # its process may die before it ends
     with pytest.raises(BudgetExceeded):
         budget.check()
+
+
+def test_a_failed_record_pauses_live_mode_and_is_kept_on_the_session(tmp_path):
+    import time
+
+    import pytest
+
+    from glint.desk import live
+
+    budget = live.DeskBudget(gpu_usd_per_day=10, pairs_per_day=5, ledger=tmp_path / "ledger.jsonl",
+                             log_path=tmp_path / "sessions.jsonl")
+
+    def broken(*a, **k):
+        raise OSError("volume gone")
+
+    budget._meter = broken  # the ledger cannot be opened
+    session = live.LiveSession("task_054", _fake_build, on_done=budget.record)
+    for pane in session.panes.values():
+        pane.orchestrator.gate.set()
+    session.start()
+    deadline = time.time() + 5
+    while session.done_error is None and time.time() < deadline:
+        time.sleep(0.01)
+    assert "OSError: volume gone" in session.done_error
+    with pytest.raises(live.BudgetExceeded, match="live mode is paused"):
+        budget.check()

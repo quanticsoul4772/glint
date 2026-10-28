@@ -41,9 +41,14 @@ def _modal_state() -> str:
     try:
         out = subprocess.run([MODAL, "app", "list", "--json"], env=env, capture_output=True, text=True, timeout=60,
                              check=False)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return f"UNKNOWN: modal app list could not run ({type(e).__name__}: {e})"
+    if out.returncode:
+        return f"UNKNOWN: modal app list exited {out.returncode}: {(out.stderr or out.stdout).strip()[-300:]}"
+    try:
         apps = [a for a in json.loads(out.stdout) if a.get("description") == "glint-serve"]
-    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as e:
-        return f"unknown ({type(e).__name__})"
+    except json.JSONDecodeError:
+        return f"UNKNOWN: modal app list printed no JSON: {out.stdout.strip()[-300:]}"
     live = [a for a in apps if a.get("state") != "stopped"]
     return ", ".join(f"{a['state']} ({a['tasks']} containers)" for a in live) or "stopped (0 containers)"
 
@@ -74,6 +79,10 @@ def report(name: str, cfg: dict) -> list[str]:
                 mean = sum(e["duration_s"] for e in evs) / len(evs)
                 left = (expected - len(evs)) * mean / max(1, cfg.get("concurrency", 8))
                 line += f"  last {time.strftime('%H:%M', time.localtime(evs[-1]['ts']))}, ~{left / 60:.0f} min left"
+                quiet = time.time() - evs[-1]["ts"]
+                if quiet > max(1200.0, 3 * mean):  # far longer than a run takes: stalled, or the event watch died
+                    line += (f"  WARNING: no event for {quiet / 60:.0f} min: the run is stalled or its event watch "
+                             "stopped; check the run log")
             lines.append(line)
             for e in evs:
                 if e["outcome"] in ("infrastructure_error", "context_overflow"):

@@ -48,6 +48,9 @@ def _tier(card_type: str) -> str | None:
 
 
 def _money(value) -> float:
+    # A missing amount is $0 on purpose: τ²'s banking data omits zero fields (past_due_amount is on 1 of the 38 base
+    # credit card accounts; tasks add it when it matters), so raising here would break the tool for most accounts.
+    # A present but malformed amount still raises (float() of a non-number), naming the bad value.
     return float(str(value or 0).replace("$", "").replace(",", ""))
 
 
