@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from glint.assist import as_flag
+
 NOW = datetime(2024, 5, 15, 15, 0, 0)
 ACTIONS = ("cancel", "change_flights", "change_cabin", "add_baggage", "remove_baggage", "add_insurance",
            "change_passengers", "compensation")
@@ -38,7 +40,10 @@ def _flown(db, reservation) -> list[str]:
     out = []
     for f in reservation.flights:
         status = _flight_status(db, f.flight_number, f.date)
-        if status in ("landed", "flying") or datetime.fromisoformat(f.date) < NOW.replace(hour=0, minute=0):
+        # a past date counts as flown unless the airline cancelled that flight (2026-10-27 review: 23 reservations
+        # with a cancelled past segment were refused as "already flown")
+        past = datetime.fromisoformat(f.date) < NOW.replace(hour=0, minute=0)
+        if status in ("landed", "flying") or (past and status != "cancelled"):
             out.append(f"{f.flight_number} {f.date} ({status})")
     return out
 
@@ -127,7 +132,7 @@ def check_eligibility(db, reservation_id: str, action: str, reason: str | None =
         if not (user.membership in ("silver", "gold") or res.insurance == "yes" or res.cabin == "business"):
             reasons.append("regular member, no insurance and not business: no compensation")
     out = {"allowed": not reasons, "reasons": reasons, "rules": rules, "details": details}
-    if paths and user_asked_how:
+    if paths and as_flag(user_asked_how):
         out["paths_to_allowed"] = paths
     elif paths:
         out["note"] = ("Not allowed as asked. Do not suggest workarounds; tell the user it is not allowed. Only if the "

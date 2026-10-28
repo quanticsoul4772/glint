@@ -324,3 +324,48 @@ def test_banking_steps_say_hidden_tools_go_through_the_discoverable_wrapper():
     steps = " ".join(banking.CLI_STEPS)
     assert "unlock_discoverable_agent_tool" in steps and "call_discoverable_agent_tool" in steps
     assert "Never call it by its own name" in steps
+
+
+def test_review_retail_payment_check_holds_when_no_method_qualifies(rdb):
+    # An empty list of allowed methods switched the check off (review 2026-10-27)
+    same = retail.check_eligibility(rdb, "#W5918442", "modify_payment", "credit_card_5051208")
+    assert same["allowed"] is False and "no payment method covers it" in same["reasons"][-1]
+    short = retail.check_eligibility(rdb, "#W4316152", "exchange", "gift_card_7245904",
+                                     ["7292993796", "7292993796"], ["3761330360", "9647374798"])
+    assert short["allowed"] is False  # gift card $17.00 < price difference $21.10; τ² rejects it too
+
+
+def test_review_retail_repeated_item_ids_need_that_many_in_the_order(rdb):
+    res = retail.check_eligibility(rdb, "#W9911714", "modify_items", item_ids=["1763705424", "1763705424"],
+                                   new_item_ids=["2882812427", "2882812427"])
+    assert res["allowed"] is False and "more times than the order holds" in res["reasons"][0]
+
+
+def test_review_airline_cancelled_past_segment_is_not_flown(adb):
+    # 9FNHDR: business, HAT277 on 2024-05-10 cancelled by the airline; it was refused as "already flown"
+    res = airline.check_eligibility(adb, "9FNHDR", "cancel", reason="change of plan")
+    assert res["allowed"] is True
+
+
+def test_review_string_false_does_not_leak_the_workaround(adb):
+    res = airline.check_eligibility(adb, "EHGLP3", "cancel", "change of plan", "False")
+    assert "paths_to_allowed" not in res
+    assert airline.check_eligibility(adb, "EHGLP3", "cancel", "change of plan", "True")["paths_to_allowed"]
+
+
+def test_review_banking_string_flags_and_cooldown():
+    from glint.assist import banking
+
+    tools, _ = _banking_episode("task_038")
+    args = ("890389b165", "cc_890389b165_silver", "txn_28cb62125078", "goods_services_not_as_described")
+    assert banking.check_dispute(tools.db, *args, "False", "False")["card_action"] == "keep_active"
+    assert banking.check_dispute(tools.db, *args, "False")["provisional_credit_criteria"][
+        "merchant_contacted_if_not_fraud"] is False
+    # cooldown counts from the submission date, and only if the most recent request was approved
+    tools, _ = _banking_episode("task_052")
+    acc = "cc_5e4c1a83b0_bronze"
+    reqs = tools.db.credit_limit_increase_requests.data
+    reqs["later_denied"] = {"credit_card_account_id": acc, "user_id": "5e4c1a83b0", "status": "DENIED",
+                            "submitted_date": "2025-10-01", "requested_increase_amount": 500}
+    assert banking.check_credit_limit_increase(tools.db, "5e4c1a83b0", acc, 500)["checks"][
+        "cooldown_period_active"]["passed"] is True
