@@ -288,11 +288,16 @@ def session(meter, modal_cli: str, env: dict, tag: str, check_s: float = 15.0):
     - Spend reaches the ledger every RECORD_EVERY_S, so a killed process loses at most that much, and a resumed run
       on the same phase sees the spend.
     - The watcher trips with a margin (the time to notice, stop and drain), stops the app with retries until no
-      container is left, and interrupts the batch so it ends at once; the session then raises BudgetExceeded.
+      container is left, and sets the yielded `halt` event; the caller's completion wrapper refuses Glimmer calls once
+      it is set, so the batch drains at once, and the session then raises BudgetExceeded.
     - Every modal CLI call has a timeout, and the drain time is metered.
-    (2026-10-27 review: the cap was enforced by one stop attempt with no margin, and spend was only written at exit.)"""
-    import _thread
+    - A watcher error (a failed ledger write, a failed stop) is never silent: it is printed in full, the app is
+      stopped, `halt` is set, and the session raises it.
+    (2026-10-27 review: the cap was enforced by one stop attempt with no margin, and spend was only written at exit.
+    Second review: the trip used `_thread.interrupt_main()`, which τ²'s batch runner turns into `os._exit(130)`,
+    skipping this cleanup, the app stop and the BudgetExceeded; and a watcher exception killed the cap silently.)"""
     import threading
+    import traceback
 
     from glint.meter import BudgetExceeded
 
@@ -306,7 +311,8 @@ def session(meter, modal_cli: str, env: dict, tag: str, check_s: float = 15.0):
     t0 = time.time()
     recorded_s = [0.0]
     record_lock = threading.Lock()
-    done, tripped = threading.Event(), threading.Event()
+    done, tripped, halt = threading.Event(), threading.Event(), threading.Event()
+    watch_error: list[BaseException] = []
 
     def record_until_now():
         with record_lock:
@@ -315,7 +321,7 @@ def session(meter, modal_cli: str, env: dict, tag: str, check_s: float = 15.0):
                 meter.record_gpu(elapsed - recorded_s[0], GPU_USD_PER_HOUR, GPU, tag=tag)
                 recorded_s[0] = elapsed
 
-    def watch():
+    def watch_loop():
         last_record = time.time()
         while not done.wait(check_s):
             if time.time() - last_record >= RECORD_EVERY_S:
@@ -323,21 +329,28 @@ def session(meter, modal_cli: str, env: dict, tag: str, check_s: float = 15.0):
                 last_record = time.time()
             if time.time() - t0 >= budget_s:
                 tripped.set()
+                halt.set()
                 say(f"GPU CAP REACHED: ${meter.gpu_usd + (time.time() - t0 - recorded_s[0]) * GPU_USD_PER_HOUR / 3600:.2f}"
                     f" of ${meter.caps.gpu_usd:.2f}; stopping {APP_NAME} now and ending the batch")
                 left = stop_until_stopped(modal_cli, env)
                 record_until_now()
                 if left:
                     say(f"FAILED: {APP_NAME} still running after {STOP_TRIES} stop attempts: {left}")
-                _thread.interrupt_main()
                 return
+
+    def watch():
+        try:
+            watch_loop()
+        except BaseException as e:  # noqa: BLE001  (reported in full and re-raised by the session)
+            watch_error.append(e)
+            halt.set()
+            say(f"FAILED: the GPU watcher died, so the cap and the spend writes are gone; stopping {APP_NAME} and "
+                f"ending the batch:\n{traceback.format_exc()}")
+            stop_until_stopped(modal_cli, env)
 
     threading.Thread(target=watch, daemon=True).start()
     try:
-        yield
-    except KeyboardInterrupt:
-        if not tripped.is_set():
-            raise
+        yield halt
     finally:
         done.set()
         say(f"stopping {APP_NAME} after {time.time() - t0:.0f} s")
@@ -349,5 +362,7 @@ def session(meter, modal_cli: str, env: dict, tag: str, check_s: float = 15.0):
             say(f"FAILED: {APP_NAME} still has running containers after {STOP_TRIES} stop attempts: {left}")
             raise RuntimeError(f"{APP_NAME} still has running containers after stop: {left}")
         say(f"{APP_NAME} stopped, 0 containers running")
+    if watch_error:
+        raise RuntimeError(f"the GPU watcher failed during the session: {watch_error[0]!r}") from watch_error[0]
     if tripped.is_set():
         raise BudgetExceeded(f"GPU cap ${meter.caps.gpu_usd:.2f} reached during the session; the app was stopped")
