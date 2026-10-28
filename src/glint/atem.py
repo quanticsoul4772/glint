@@ -140,10 +140,13 @@ def reparse_response(response, tools: list[dict]) -> None:
     choice = response.choices[0]
     turn = parse_turn(generated_text(choice.model_dump() if hasattr(choice, "model_dump") else choice), tools)
     host_calls = choice.message.tool_calls or []
-    if [c.function.name for c in host_calls] != [c.name for c in turn.tool_calls]:
+    # the host may pass a doubled name ("x.x") through unnormalized: compare and call by the normalized name
+    known = set(_schemas(tools))
+    if [_normalize_name(c.function.name, known) for c in host_calls] != [c.name for c in turn.tool_calls]:
         raise AtemParseError(f"host calls {[c.function.name for c in host_calls]} != "
                              f"generated calls {[c.name for c in turn.tool_calls]}")
     for host, ours in zip(host_calls, turn.tool_calls):
+        host.function.name = ours.name
         host.function.arguments = json.dumps(ours.arguments, ensure_ascii=False)
     choice.message.content = turn.content or None
     choice.message.reasoning_content = turn.reasoning or None
