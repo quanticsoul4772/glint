@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glint Bank Desk</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2330; --muted: #5d6878; --line: #dfe3ea;
+    --customer: #eef2ff; --agent: #f3f5f8; --lookup: #f7f7f2; --action: #fff6e6; --verdict: #e9f8ef;
+    --verdict-line: #2f9e5b; --bad: #c6283a; --bad-bg: #fdecee; --good: #1f8a4c; --accent: #3355dd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151c; --panel: #171c25; --ink: #e6e9ef; --muted: #9aa4b2; --line: #2a3140;
+      --customer: #1c2440; --agent: #1d222c; --lookup: #22231d; --action: #2d2618; --verdict: #16301f;
+      --verdict-line: #49c27a; --bad: #ff6b7d; --bad-bg: #3a1c22; --good: #4fd18a; --accent: #7d95ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 18px 20px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  h1 { margin: 0; font-size: 20px; }
+  .sub { color: var(--muted); margin-top: 4px; font-size: 13.5px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 20px; }
+  select, button { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+                   background: var(--panel); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .goal { margin: 0 20px 10px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
+          border-radius: 8px; font-size: 13.5px; color: var(--muted); }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 20px 24px; }
+  @media (max-width: 860px) { .panes { grid-template-columns: 1fr; } }
+  .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex;
+          flex-direction: column; min-height: 420px; max-height: 78vh; }
+  .pane h2 { margin: 0; padding: 12px 14px; font-size: 15px; border-bottom: 1px solid var(--line);
+             display: flex; justify-content: space-between; gap: 8px; }
+  .pane h2 small { color: var(--muted); font-weight: 400; }
+  .feed { overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .ev { border-radius: 8px; padding: 8px 10px; border: 1px solid var(--line); white-space: pre-wrap;
+        word-break: break-word; font-size: 13.5px; }
+  .ev .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 2px; }
+  .customer { background: var(--customer); }
+  .agent { background: var(--agent); }
+  .lookup { background: var(--lookup); font-size: 12.5px; }
+  .action { background: var(--action); font-weight: 500; }
+  .verdict { background: var(--verdict); border-left: 4px solid var(--verdict-line); }
+  .overruled { border: 2px solid var(--bad); background: var(--bad-bg); }
+  .overruled .why { color: var(--bad); margin-top: 6px; font-weight: 600; }
+  .err { color: var(--bad); }
+  .args { color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .outcome { margin: 0 14px 14px; padding: 10px 12px; border-radius: 8px; font-weight: 600; display: none; }
+  .outcome.pass { display: block; background: var(--verdict); color: var(--good); }
+  .outcome.fail { display: block; background: var(--bad-bg); color: var(--bad); }
+  footer { color: var(--muted); font-size: 12.5px; padding: 0 20px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Glint Bank Desk</h1>
+  <div class="sub">One customer, two agents. Left: Meta's open-weight Muse Glimmer 30B alone. Right: the same model
+    with Glint's decision tools, which take over the policy decisions. Replay of recorded runs.</div>
+</header>
+<div class="controls">
+  <select id="scenario" aria-label="Scenario"></select>
+  <button class="primary" id="play">Play</button>
+  <button id="step">Step</button>
+  <button id="all">Show all</button>
+  <label>Speed <select id="speed"><option value="1400">slow</option><option value="700" selected>normal</option><option value="250">fast</option></select></label>
+  <label><input type="checkbox" id="lookups" checked> show lookups</label>
+</div>
+<div class="goal" id="goal"></div>
+<div class="panes">
+  <section class="pane"><h2>Glimmer alone <small id="alone-meta"></small></h2>
+    <div class="feed" id="alone"></div><div class="outcome" id="alone-out"></div></section>
+  <section class="pane"><h2>Glimmer + Glint tools <small id="tools-meta"></small></h2>
+    <div class="feed" id="tools"></div><div class="outcome" id="tools-out"></div></section>
+</div>
+<footer id="source"></footer>
+<script>
+const $ = (id) => document.getElementById(id);
+let data = null, pos = 0, timer = null;
+
+function argText(args) {
+  if (!args) return "";
+  const s = JSON.stringify(args);
+  return s.length > 260 ? s.slice(0, 260) + " …" : s;
+}
+function verdictText(result) {
+  try {
+    const v = JSON.parse(result);
+    const parts = [];
+    for (const k of ["verdict", "card_action", "eligible_for_provisional_credit", "new_credit_limit", "denial_reason",
+                     "max_increase", "sequencing"]) if (v[k] !== undefined && v[k] !== null) parts.push(`${k}: ${v[k]}`);
+    if (v.reasons && v.reasons.length) parts.push(`reasons: ${v.reasons.join("; ")}`);
+    return parts.join("\n") || result;
+  } catch (e) { return result; }
+}
+function render(ev) {
+  const d = document.createElement("div");
+  const tag = (t) => `<div class="tag">${t}</div>`;
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+  // the agent writes markdown: bold and list markers are rendered, everything else stays plain escaped text
+  const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[-*] /gm, "• ");
+  if (ev.kind === "customer") { d.className = "ev customer"; d.innerHTML = tag("Customer") + md(ev.text); }
+  else if (ev.kind === "agent") { d.className = "ev agent"; d.innerHTML = tag("Agent") + md(ev.text); }
+  else if (ev.kind === "verdict") {
+    d.className = "ev verdict";
+    d.innerHTML = tag("Glint verdict · " + ev.tool) + esc(verdictText(ev.result));
+  } else {
+    d.className = "ev " + ev.kind + (ev.overruled ? " overruled" : "");
+    d.dataset.kind = ev.kind;
+    d.innerHTML = tag((ev.kind === "action" ? "Action · " : "Lookup · ") + ev.tool) +
+      `<div class="args">${esc(argText(ev.args))}</div>` +
+      (ev.error ? `<div class="err">${esc(ev.result)}</div>` : "") +
+      (ev.overruled ? `<div class="why">A Glint tool would have overruled this: ${esc(ev.overruled.join("; "))}</div>` : "");
+  }
+  return d;
+}
+function steps() { return Math.max(data.alone.events.length, data.tools.events.length); }
+function showUpTo(n) {
+  for (const side of ["alone", "tools"]) {
+    const feed = $(side); feed.innerHTML = "";
+    data[side].events.slice(0, n).forEach((ev) => {
+      if (ev.kind === "lookup" && !$("lookups").checked) return;
+      feed.appendChild(render(ev));
+    });
+    feed.scrollTop = feed.scrollHeight;
+    const out = $(side + "-out");
+    out.className = "outcome";
+    if (n >= data[side].events.length) {
+      const o = data[side].outcome;
+      out.className = "outcome " + (o.passed ? "pass" : "fail");
+      out.textContent = o.passed ? "Task completed correctly: the bank's records match the correct outcome."
+        : "Task failed: the bank's records do not match the correct outcome." +
+          (side === "alone" ? (data.alone.overruled_writes ? ` ${data.alone.overruled_writes} action(s) a Glint tool would have overruled.`
+                                                           : " No action here is one Glint's tools judge; it failed for another reason.") : "");
+    }
+  }
+}
+function stop() { clearInterval(timer); timer = null; $("play").textContent = "Play"; }
+function play() {
+  if (timer) return stop();
+  if (pos >= steps()) pos = 0;
+  $("play").textContent = "Pause";
+  timer = setInterval(() => { pos++; showUpTo(pos); if (pos >= steps()) stop(); }, Number($("speed").value));
+}
+async function load(id) {
+  stop();
+  data = await (await fetch(`/api/scenarios/${id}`)).json();
+  pos = 0; showUpTo(0);
+  $("goal").textContent = "Customer: " + data.customer;
+  $("alone-meta").textContent = `trial ${data.alone.trial}`;
+  $("tools-meta").textContent = `trial ${data.tools.trial}`;
+  $("source").textContent = "Recorded runs: " + data.source + ". τ²-bench banking task " + data.id + " (MIT).";
+}
+async function init() {
+  const list = await (await fetch("/api/scenarios")).json();
+  for (const s of list) {
+    const o = document.createElement("option"); o.value = s.id; o.textContent = s.title; $("scenario").appendChild(o);
+  }
+  $("scenario").onchange = (e) => load(e.target.value);
+  $("play").onclick = play;
+  $("step").onclick = () => { stop(); pos = Math.min(pos + 1, steps()); showUpTo(pos); };
+  $("all").onclick = () => { stop(); pos = steps(); showUpTo(pos); };
+  $("lookups").onchange = () => showUpTo(pos);
+  if (list.length) load(list[0].id);
+}
+init();
+</script>
+</body>
+</html>
