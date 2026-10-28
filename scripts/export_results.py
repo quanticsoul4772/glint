@@ -18,8 +18,9 @@ import tools_ab  # after the log setup above
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "results.json"
 SETS = [  # (set, Modal backend, title, role, note)
     ("heldout", False, "Retail and airline, held-out tasks", "held-out",
-     ("Tasks drawn at random, excluding the tasks the tools were built from. Retail k=4, airline k=2. Glimmer on "
-      "DeepInfra.")),
+     ("Tasks drawn at random, excluding the tasks the tools were built from. The draw missed part of the failure "
+      "inventory, so retail task 21 (already in it) is included. The two arms span four code commits (resumed runs). "
+      "Retail k=4, airline k=2. Glimmer on DeepInfra.")),
     ("banking-other", True, "Banking, untuned tasks", "untuned",
      ("The banking tasks with a dispute or credit-limit step that no tool change came from. The tools' rules were "
       "checked against these tasks' correct answers, so they are not fully held-out. k=2. Glimmer on Modal.")),
@@ -39,15 +40,19 @@ def main():
             continue
         tools_ab.analyze(cfg)
         report = json.loads(cfg["out"].read_text(encoding="utf-8"))
-        rows, tally = [], {"improved": 0, "tied": 0, "worse": 0}
+        rows, tally = [], {"improved": 0, "tied": 0, "worse": 0, "no data": 0}
         for key in sorted(report, key=lambda k: (k.split("-")[0], k)):
             arms = report[key]
             if "base" not in arms or "tools" not in arms:
                 continue
             b, t = arms["base"], arms["tools"]
-            rb = b["passes"] / b["runs"] if b["runs"] else 0.0
-            rt = t["passes"] / t["runs"] if t["runs"] else 0.0
-            change = "improved" if rt > rb else ("worse" if rt < rb else "tied")
+            # no counted run in an arm, or every run overflowed the context: the task says nothing about the tools
+            if not b["runs"] or not t["runs"] or b.get("context_overflows", 0) + t.get("context_overflows", 0) == \
+                    b["runs"] + t["runs"]:
+                change = "no data"
+            else:
+                rb, rt = b["passes"] / b["runs"], t["passes"] / t["runs"]
+                change = "improved" if rt > rb else ("worse" if rt < rb else "tied")
             tally[change] += 1
             rows.append({"task": key, "alone": f"{b['passes']}/{b['runs']}", "tools": f"{t['passes']}/{t['runs']}",
                          "change": change, "overflows": b.get("context_overflows", 0) + t.get("context_overflows", 0),

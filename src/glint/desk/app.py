@@ -37,7 +37,7 @@ def index():
 @app.get("/api/scenarios")
 def list_scenarios():
     return [{"id": s["id"], "title": s["title"], "alone_passed": s["alone"]["outcome"]["passed"],
-             "tools_passed": s["tools"]["outcome"]["passed"]} for s in scenarios()]
+             "tools_passed": s["tools"]["outcome"]["passed"], "tuned": s.get("tuned", False)} for s in scenarios()]
 
 
 @app.get("/api/results")

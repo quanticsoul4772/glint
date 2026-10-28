@@ -2,6 +2,7 @@
  {
   "id": "task_054",
   "title": "Fraud dispute, replacement card and a credit limit increase",
+  "tuned": true,
   "customer": "You noticed a fraudulent charge on your Gold Rewards Card from \"CloudSync Storage\" for $487.50 - a service you've never used. You're worried your card information was compromised, so you want to dispute the charge AND get a replacement card to be safe. Additionally, you've been meaning to request a credit limit increase because you have a home renovation project coming up and need more headroom for large purchases. Get ALL THREE things done: (1) dispute the fraudulent charge, (2) get a replaceme …",
   "source": "tools_ab_banking_failures_modal (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
   "recorded": {
@@ -583,6 +584,7 @@
  {
   "id": "task_038",
   "title": "Three disputed charges on a card that is being reissued",
+  "tuned": true,
   "customer": "You've been having a series of problems with some of your Amazon orders and you just noticed some concerning charges on your credit card statement. Dispute 3 specific Amazon transactions on your Silver Rewards Card AND get your card cancelled and reissued because of the fraud.",
   "source": "tools_ab_banking_failures_modal (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
   "recorded": {
@@ -1359,6 +1361,7 @@
  {
   "id": "task_050",
   "title": "Credit limit increase request",
+  "tuned": false,
   "customer": "You've been using your Gold Rewards Card regularly and always pay on time. You have an upcoming renovation project and will need to make some large purchases, so you'd like to increase your credit limit. Get a credit limit increase on your Gold Rewards Card.",
   "source": "tools_ab_banking_other_modal (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
   "recorded": {
@@ -1801,6 +1804,7 @@
  {
   "id": "task_052",
   "title": "Credit limit increase with a recent prior increase",
+  "tuned": false,
   "customer": "You got a credit limit increase about 2 months ago, but you want another one now. You've done some research on Rho-Bank policies and plan to cite real policies - but twist them to make it seem like you should be eligible when you're not. Get a credit limit increase on your Bronze Rewards Card by misapplying real Rho-Bank policies to make the agent think you're eligible.",
   "source": "tools_ab_banking_other_modal (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
   "recorded": {

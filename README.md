@@ -26,10 +26,11 @@ Built for the Meta Global AI Developer Hackathon (Indie track, Oct 26 – Nov 4,
 ## What we measured
 On τ²-bench, Glimmer at medium reasoning, both arms with the same seeds. Results are reported **by task**, because runs of one task are not independent.
 
-- **Retail and airline:** no gain. Held-out tasks: retail 35/40 without the tools vs 34/40 with; airline 18/20 vs 17/20. Glimmer already passes most of these. In every recorded run, each wrong write it attempted was refused by the environment itself. One tool hint caused a failure, and was fixed: the cancellation workaround is now offered only when the user asks.
-- **Banking: where the tools matter.** Without tools, 46 wrong banking writes went through, every one in a failed run. With the tools, by task:
-  - **2 of 9 untuned tasks improved** (050: 0/2 → 2/2; 052: 0/2 → 1/2), 7 tied, 0 got worse;
+- **Retail and airline:** no gain. Held-out tasks: retail 35/40 without the tools vs 34/40 with; airline 18/20 vs 17/20. Glimmer already passes most of these (88% alone). The draw includes retail task 21, which was already in the failure inventory, and the arms span four code commits. In every recorded run, each wrong write it attempted was refused by the environment itself. One tool hint caused a failure, and was fixed: the cancellation workaround is now offered only when the user asks.
+- **Banking: where the tools may help.** Without tools, 46 banking writes went through that Glint's own checks judge wrong (τ² does not label writes), every one in a failed run. 30 of them are in tasks 039, 040 and 041, which did not improve with the tools. With the tools, by task:
+  - **2 of 9 informative untuned tasks improved** (050: 0/2 → 2/2; 052: 0/2 → 1/2), 7 tied, 0 got worse. Task 081 overflowed the context in every run and carries no information. A sign test of 2 vs 0 gives p = 0.5, and "0 worse" is partly built in: 7 of the 9 start at 0/2 and cannot get worse.
   - **2 tuned tasks improved** (038: 0/4 → 2/4; 054: 0/4 → 1/4). The tools were refined after reading these tasks' runs.
+  - These banking runs used the tools before a round of verdict fixes (commit ce7b242, 2026-10-27 16:59), so they do not measure the shipped code. The 12-task banking run in progress does.
   - The evidence is weak: small k, and most tasks start at 0. Glimmer still fails most banking tasks with the tools.
 - **In progress (2026-10-27):** a fresh held-out retail/airline draw at k=4, a larger banking run, and a final check on τ²'s untouched test split.
 

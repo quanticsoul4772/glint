@@ -113,8 +113,8 @@ function verdictText(result) {
 }
 function render(ev) {
   const d = document.createElement("div");
-  const tag = (t) => `<div class="tag">${t}</div>`;
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+  const tag = (t) => `<div class="tag">${esc(t)}</div>`;
   // the agent writes markdown: bold and list markers are rendered, everything else stays plain escaped text
   const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[-*] /gm, "• ");
   if (ev.kind === "customer") { d.className = "ev customer"; d.innerHTML = tag("Customer") + md(ev.text); }
@@ -207,7 +207,8 @@ async function load(id) {
   $("source").textContent = "Selected pair, not a typical run: a recorded run where Glimmer alone failed, beside one " +
     `where Glimmer with Glint's tools passed. All recorded runs of this task: alone ${rec.base.passed}/${rec.base.runs}` +
     ` passed, with tools ${rec.tools.passed}/${rec.tools.runs} passed. Source: ${data.source}; τ²-bench banking task ` +
-    `${data.id} (MIT).`;
+    `${data.id} (MIT).` + (data.tuned ? " A tuned task: the tools were refined after reading its runs, so this " +
+    "pair is not evidence that the tools generalize." : "");
 }
 async function showResults() {
   const sets = await (await fetch("/api/results")).json();
@@ -218,13 +219,13 @@ async function showResults() {
     html += `<div class="set"><h3>${esc(s.title)}<span class="role">${esc(s.role)}</span></h3>
       <div class="sub">${esc(s.note)}</div>
       <div style="margin-top:6px"><b>By task:</b> ${s.by_task.improved} improved, ${s.by_task.tied} tied,
-        ${s.by_task.worse} worse. <b>All runs:</b> alone ${s.runs.alone[0]}/${s.runs.alone[1]} passed,
+        ${s.by_task.worse} worse${s.by_task["no data"] ? `, ${s.by_task["no data"]} with no data` : ""}. <b>All runs:</b> alone ${s.runs.alone[0]}/${s.runs.alone[1]} passed,
         with tools ${s.runs.tools[0]}/${s.runs.tools[1]}.</div>
       <table><tr><th>Task</th><th>Glimmer alone</th><th>Glimmer + Glint tools</th><th>Change</th></tr>`;
     for (const r of s.tasks) {
       const extra = r.overflows ? ` (${r.overflows} context overflow${r.overflows > 1 ? "s" : ""})` : "";
-      html += `<tr><td>${esc(r.task)}${esc(extra)}</td><td>${r.alone}</td><td>${r.tools}</td>
-        <td class="${r.change}">${r.change}</td></tr>`;
+      html += `<tr><td>${esc(r.task)}${esc(extra)}</td><td>${esc(r.alone)}</td><td>${esc(r.tools)}</td>
+        <td class="${esc(r.change)}">${esc(r.change === "no data" ? "no data (every run overflowed)" : r.change)}</td></tr>`;
     }
     html += `</table></div>`;
   }
@@ -242,7 +243,7 @@ async function init() {
   $("tab-results").onclick = () => tab("results");
   const list = await (await fetch("/api/scenarios")).json();
   for (const s of list) {
-    const o = document.createElement("option"); o.value = s.id; o.textContent = s.title; $("scenario").appendChild(o);
+    const o = document.createElement("option"); o.value = s.id; o.textContent = s.title + (s.tuned ? " (tuned task)" : ""); $("scenario").appendChild(o);
   }
   $("scenario").onchange = (e) => load(e.target.value);
   $("play").onclick = play;
