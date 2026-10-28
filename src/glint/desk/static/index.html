@@ -186,6 +186,9 @@ async function runLive() {
   liveTimer = setInterval(async () => {
     const snap = await (await fetch(`/api/live/${body.id}`)).json();
     showLive(snap);
+    if (snap.customer_fallback)
+      $("source").textContent = "Live: Muse Glimmer 30B bf16 on Modal; customer played by Spark Open on Baseten " +
+                                `(Meta's API could not serve it: ${snap.customer_fallback}).`;
     if (snap.done) {
       clearInterval(liveTimer);
       $("live-note").textContent = snap.stopped ? `Live run stopped: ${snap.stopped}.` : "Live run finished.";

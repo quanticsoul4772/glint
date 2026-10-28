@@ -7,6 +7,8 @@ trajectory and returns the same events replay mode shows, then the outcome and t
 
 Glimmer is served by glint.glimmer_serve on Modal (GLINT_GLIMMER_URL, MODAL_PROXY_KEY, MODAL_PROXY_SECRET); the
 customer is Muse Spark on Meta's Model API (MODEL_API_KEY). Glimmer calls go through glint.atem; Meta spend is capped.
+If Meta's API cannot serve the customer (out of credit, 401/402/403, or 429 after LiteLLM's retries), the pair switches
+its customer to Spark Open on Baseten (BASETEN_API_KEY) for the rest of that pair, with its own cap, and says so loudly.
 """
 from __future__ import annotations
 
@@ -22,6 +24,14 @@ from glint.desk.events import outcome, timeline
 from glint.meter import BudgetExceeded
 
 SPARK = "openai/muse-spark-1.3-contributor"
+# The customer's fallback: Spark Open on Baseten (as in scripts/usersim_check.py, priced in glint.meter.META_PRICES)
+SPARK_OPEN = "openai/meta-models/muse-spark-open-1026"
+SPARK_OPEN_BASE = "https://inference.baseten.co/v1"
+SPARK_OPEN_KEY_ENV = "BASETEN_API_KEY"
+SPARK_OPEN_CAP_USD = 1.0  # per desk process, separate from the Meta cap: Baseten credit is its own pool
+META_ONLY, OPEN_ONLY = ("muse-spark-1",), ("muse-spark-open",)  # model-name substrings of each credit pool
+SWITCH_STATUS = (401, 402, 403, 429)  # Meta's API cannot serve the call: no key access, no credit, rate limited
+OUT_OF_CREDIT = ("out of credit", "insufficient credit", "insufficient_quota", "insufficient balance")
 DOMAIN = "banking_knowledge"
 META_CAP_USD = 1.0  # per desk process; a live pair costs a few cents of Meta credit
 CHARGE_EVERY_S = 60.0  # a running pair's GPU time is written to the ledger this often, not only when it ends
@@ -59,6 +69,7 @@ class LiveSession:
         self.charged_s = 0.0
         self.stop_reason: str | None = None
         self.done_error: str | None = None  # on_done (charging and logging the pair) failed
+        self.customer_fallback: str | None = None  # why the customer moved to Spark Open, once it has
         self.halt = threading.Event()
         self._ended = threading.Event()
         self._view_lock = threading.Lock()
@@ -115,6 +126,12 @@ class LiveSession:
             self.stop_reason = reason
             print(f"desk: stopping live run {self.id}: {reason}", flush=True)
         self.halt.set()
+
+    def switch_customer(self, reason: str) -> None:
+        """Play the customer with Spark Open on Baseten for the rest of this pair (logged once, shown in snapshot)."""
+        if self.customer_fallback is None:
+            self.customer_fallback = reason
+            print(f"desk: CUSTOMER SWITCHED to Spark Open on Baseten for live run {self.id}: {reason}", flush=True)
 
     def _control(self) -> None:
         try:
@@ -187,7 +204,7 @@ class LiveSession:
 
     def snapshot(self) -> dict:
         out = {"id": self.id, "task_id": self.task_id, "done": self.done, "stopped": self.stop_reason,
-               "done_error": self.done_error}
+               "done_error": self.done_error, "customer_fallback": self.customer_fallback}
         for name, pane in self.panes.items():
             view = {"status": "error" if pane.error else ("done" if pane.finished else
                                                            ("waking" if self.waking else "running")),
@@ -284,7 +301,7 @@ class DeskBudget:
             row = {"event": "end", "day": time.strftime("%Y-%m-%d"), "ts": time.time(), "session": session.id,
                    "task_id": session.task_id, "gpu_seconds": round(seconds),
                    "gpu_usd": round(seconds * GPU_USD_PER_HOUR / 3600, 4), "wake_error": session.wake_error,
-                   "stopped": session.stop_reason,
+                   "stopped": session.stop_reason, "customer_fallback": session.customer_fallback,
                    **{f"{n}_outcome": outcomes[n] for n in ("alone", "tools")},
                    **{f"{n}_error": p.error for n, p in session.panes.items()},
                    **{f"{n}_seconds": round((p.finished or time.time()) - p.started)
@@ -350,12 +367,58 @@ def router(base, glimmer):
     return route
 
 
+def cannot_serve(error: Exception) -> str | None:
+    """Why Meta's API cannot serve the customer (the reason to switch to Spark Open), or None for any other error,
+    which must fail as before. Our own cap stop (BudgetExceeded) is never a reason to switch."""
+    if isinstance(error, BudgetExceeded):
+        return None
+    status = getattr(error, "status_code", None)
+    if status in SWITCH_STATUS:
+        return f"Meta's API returned {status} ({type(error).__name__}: {error})"
+    if any(s in str(error).lower() for s in OUT_OF_CREDIT):
+        return f"Meta's API is out of credit ({type(error).__name__}: {error})"
+    return None
+
+
+def customer(meta_call, open_call):
+    """Send Muse Spark customer calls to `meta_call`; once Meta cannot serve them (`cannot_serve`), switch the running
+    pair to Spark Open via `open_call` for the rest of the pair. Other models pass to `meta_call` unchanged. With no
+    Baseten key the switch fails loudly, chained to Meta's error."""
+    def to_open(kwargs, error=None):
+        key = os.environ.get(SPARK_OPEN_KEY_ENV)
+        if not key:
+            raise RuntimeError(f"Meta's API cannot serve the customer and the Spark Open fallback is unavailable: "
+                               f"{SPARK_OPEN_KEY_ENV} is not set") from error
+        return open_call(**(kwargs | {"model": SPARK_OPEN, "api_base": SPARK_OPEN_BASE, "api_key": key}))
+
+    def call(**kwargs):
+        if not any(s in kwargs.get("model", "") for s in META_ONLY):
+            return meta_call(**kwargs)
+        session = _active
+        if session is not None and session.customer_fallback:
+            return to_open(kwargs)
+        try:
+            return meta_call(**kwargs)
+        except Exception as e:
+            reason = cannot_serve(e)
+            if reason is None:
+                raise
+            if session is not None:
+                session.switch_customer(reason)
+            else:
+                print(f"desk: CUSTOMER SWITCHED to Spark Open on Baseten for this call: {reason}", flush=True)
+            return to_open(kwargs, e)
+
+    return call
+
+
 _configured = {}
 
 
 def configure() -> dict:
-    """Route Glimmer through glint.atem and cap Meta spend, once per process. Returns the Glimmer settings, or raises
-    KeyError naming the missing environment variable."""
+    """Route Glimmer through glint.atem, cap Meta spend, and give the customer its Spark Open fallback (capped on its
+    own), once per process. Returns the Glimmer settings, or raises KeyError naming the missing environment variable
+    (the Baseten key is optional: without it the fallback fails loudly when needed)."""
     if _configured:
         return _configured
     import litellm
@@ -366,11 +429,14 @@ def configure() -> dict:
     from glint.meter import Caps, Meter, guarded, litellm_callback
 
     url, key, secret = os.environ["GLINT_GLIMMER_URL"], os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"]
-    meta = Meter(Caps(meta_usd=META_CAP_USD, gpu_usd=0.0), phase=f"desk-live-{time.strftime('%Y%m%d')}")
-    litellm.callbacks = [litellm_callback((meta, ("muse-spark",)))]
+    day = time.strftime('%Y%m%d')
+    meta = Meter(Caps(meta_usd=META_CAP_USD, gpu_usd=0.0), phase=f"desk-live-{day}")
+    spark_open = Meter(Caps(meta_usd=SPARK_OPEN_CAP_USD, gpu_usd=0.0), phase=f"desk-live-open-{day}")
+    litellm.callbacks = [litellm_callback((meta, META_ONLY), (spark_open, OPEN_ONLY))]
     base, glimmer = llm_utils.completion, reparsing(llm_utils.completion)
 
-    llm_utils.completion = guarded(router(base, glimmer), meta, only=("muse-spark",))
+    calls = customer(guarded(base, meta, only=META_ONLY), guarded(base, spark_open, only=OPEN_ONLY))
+    llm_utils.completion = router(calls, glimmer)
     _configured.update(url=url, glimmer_model=f"openai/{glimmer_serve.MODEL_NAME}",
                        glimmer_args=glimmer_serve.litellm_args(url, key, secret, "medium"),
                        user_args={"api_base": "https://api.meta.ai/v1", "api_key": os.environ["MODEL_API_KEY"],

@@ -56,6 +56,7 @@ def get_scenario(scenario_id: str):
 
 
 LIVE_ENV = ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY")
+FALLBACK_ENV = (live.SPARK_OPEN_KEY_ENV,)  # the customer's Spark Open fallback; live mode runs without it
 # Live mode wakes the Glimmer GPU ($2.94/h while up): a daily GPU cap and pair limit, kept in the meter ledger
 budget = live.DeskBudget(gpu_usd_per_day=float(os.environ.get("GLINT_DESK_GPU_USD_PER_DAY", "3")),
                          pairs_per_day=int(os.environ.get("GLINT_DESK_PAIRS_PER_DAY", "12")),
@@ -97,7 +98,9 @@ def _new_session(task_id: str) -> live.LiveSession:
 def live_status():
     missing = [k for k in LIVE_ENV if not os.environ.get(k)]
     running = [s.id for s in _sessions.values() if not s.done]
-    return {"available": not missing, "missing": missing, "running": running,
+    fallback_missing = [k for k in FALLBACK_ENV if not os.environ.get(k)]
+    return {"available": not missing, "missing": missing, "fallback_available": not fallback_missing,
+            "fallback_missing": fallback_missing, "running": running,
             "pairs_today": budget.pairs_today(), "pairs_per_day": budget.pairs_per_day}
 
 

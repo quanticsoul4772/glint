@@ -126,7 +126,8 @@ def test_desk_budget_records_gpu_and_refuses_past_the_caps(tmp_path):
 
     def session():
         return types.SimpleNamespace(id="s1", task_id="task_054", started=0.0, ended=180.0, wake_error=None,
-                                     stop_reason=None, panes=panes, take_uncharged=lambda until: until,
+                                     stop_reason=None, customer_fallback=None, panes=panes,
+                                     take_uncharged=lambda until: until,
                                      outcomes=lambda: {"alone": None, "tools": True})
 
     budget.record(session())  # 180 s + 120 s scale-down = 300 s at $2.94/h = $0.245
@@ -555,7 +556,8 @@ def test_configure_refuses_a_meta_call_over_the_cap_and_leaves_glimmer_uncapped(
     for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY"):
         monkeypatch.setenv(k, "https://x.modal.run" if k == "GLINT_GLIMMER_URL" else "placeholder")
     live.configure()
-    (meta,) = meters
+    meta, spark_open = meters
+    assert spark_open.caps.meta_usd == live.SPARK_OPEN_CAP_USD and spark_open.phase.startswith("desk-live-open-")
     assert meta.caps.meta_usd == live.META_CAP_USD
     assert llm_utils.completion(model=live.SPARK, messages=[]) == "ok"
     meta.record_meta("muse-wonder-1.0", 250_000, 0, 0)  # $1.00: the cap is reached
@@ -563,3 +565,168 @@ def test_configure_refuses_a_meta_call_over_the_cap_and_leaves_glimmer_uncapped(
         llm_utils.completion(model=live.SPARK, messages=[])
     assert llm_utils.completion(model="openai/Muse-Glimmer-30B-modal", messages=[]) == "ok"
     assert sent == [live.SPARK, "openai/Muse-Glimmer-30B-modal"]  # the refused call was never sent
+
+
+class _ApiError(Exception):
+    """Stand-in for a LiteLLM API error: LiteLLM's exceptions carry the HTTP status as `status_code`."""
+
+    def __init__(self, status, message="error"):
+        super().__init__(message)
+        self.status_code = status
+
+
+def _customer_on_a_session(monkeypatch, meta_error):
+    """live.customer with a fake Meta call that raises `meta_error` and a fake Spark Open call, on a running pair."""
+    from glint.desk import live
+
+    session = live.LiveSession("task_x", _fake_build)
+    monkeypatch.setattr(live, "_active", session)
+    monkeypatch.setenv(live.SPARK_OPEN_KEY_ENV, "placeholder")
+    meta_sent, open_sent = [], []
+
+    def meta_call(**kw):
+        meta_sent.append(kw["model"])
+        raise meta_error
+
+    def open_call(**kw):
+        open_sent.append(kw)
+        return "spark-open reply"
+
+    return session, live.customer(meta_call, open_call), meta_sent, open_sent
+
+
+@pytest.mark.parametrize("error", [_ApiError(401), _ApiError(402), _ApiError(403), _ApiError(429),
+                                   _ApiError(400, "Insufficient credit on this account")],
+                         ids=["401", "402", "403", "429", "out-of-credit"])
+def test_the_customer_switches_to_spark_open_when_meta_cannot_serve_it(monkeypatch, capsys, error):
+    from glint.desk import live
+
+    session, call, meta_sent, open_sent = _customer_on_a_session(monkeypatch, error)
+    kwargs = {"model": live.SPARK, "messages": [], "api_base": "https://api.meta.ai/v1", "api_key": "meta"}
+    assert call(**kwargs) == "spark-open reply"
+    assert call(**kwargs) == "spark-open reply"  # the rest of the pair goes straight to Spark Open
+    assert meta_sent == [live.SPARK]
+    assert [(k["model"], k["api_base"], k["api_key"]) for k in open_sent] == \
+        [(live.SPARK_OPEN, "https://inference.baseten.co/v1", "placeholder")] * 2
+    assert session.customer_fallback and session.snapshot()["customer_fallback"] == session.customer_fallback
+    assert "CUSTOMER SWITCHED to Spark Open" in capsys.readouterr().out  # never silent
+    # a new pair tries Meta again
+    monkeypatch.setattr(live, "_active", live.LiveSession("task_y", _fake_build))
+    call(**kwargs)
+    assert meta_sent == [live.SPARK, live.SPARK]
+
+
+@pytest.mark.parametrize("error", [_ApiError(500), _ApiError(400, "bad request"), ValueError("parse"), None],
+                         ids=["500", "400", "other", "our-cap"])
+def test_other_customer_errors_fail_as_before_without_a_switch(monkeypatch, error):
+    from glint.desk import live
+
+    error = error or live.BudgetExceeded("Meta API spend reached cap")  # our own cap is not Meta failing
+    session, call, meta_sent, open_sent = _customer_on_a_session(monkeypatch, error)
+    with pytest.raises(type(error)):
+        call(model=live.SPARK, messages=[])
+    assert meta_sent == [live.SPARK] and open_sent == [] and session.customer_fallback is None
+
+
+def test_a_switch_without_the_baseten_key_fails_loudly(monkeypatch):
+    from glint.desk import live
+
+    _, call, _, open_sent = _customer_on_a_session(monkeypatch, _ApiError(402))
+    monkeypatch.delenv(live.SPARK_OPEN_KEY_ENV)
+    with pytest.raises(RuntimeError, match="BASETEN_API_KEY is not set") as raised:
+        call(model=live.SPARK, messages=[])
+    assert isinstance(raised.value.__cause__, _ApiError) and open_sent == []
+
+
+def test_a_switch_with_no_running_pair_still_serves_the_call(monkeypatch, capsys):
+    from glint.desk import live
+
+    _, call, _, open_sent = _customer_on_a_session(monkeypatch, _ApiError(429))
+    monkeypatch.setattr(live, "_active", None)
+    assert call(model=live.SPARK, messages=[]) == "spark-open reply" and len(open_sent) == 1
+    assert "for this call" in capsys.readouterr().out
+
+
+def _configured_with_fakes(monkeypatch, tmp_path, completion):
+    import litellm
+    from tau2.utils import llm_utils
+
+    from glint import meter as meter_mod
+    from glint.desk import live
+
+    monkeypatch.setattr(litellm, "callbacks", litellm.callbacks)
+    monkeypatch.setattr(llm_utils, "completion", completion)
+    monkeypatch.setattr(live, "_configured", {})
+    monkeypatch.setattr(live, "_active", live.LiveSession("task_x", _fake_build))
+    meters = []
+
+    class TmpMeter(meter_mod.Meter):  # the desk's meters, on a temporary ledger
+        def __init__(self, caps, phase):
+            super().__init__(caps, tmp_path / "ledger.jsonl", phase)
+            meters.append(self)
+
+    monkeypatch.setattr(meter_mod, "Meter", TmpMeter)
+    for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY", "BASETEN_API_KEY"):
+        monkeypatch.setenv(k, "https://x.modal.run" if k == "GLINT_GLIMMER_URL" else "placeholder")
+    live.configure()
+    return llm_utils, meters
+
+
+def _meta_out_of_credit(sent):
+    from glint.desk import live
+
+    def completion(**kw):
+        sent.append(kw["model"])
+        if kw["model"] == live.SPARK:
+            raise _ApiError(402, "payment required")
+        return "ok"
+
+    return completion
+
+
+def test_spark_open_is_capped_on_its_own(monkeypatch, tmp_path):
+    from glint.desk import live
+
+    sent = []
+    llm_utils, (meta, spark_open) = _configured_with_fakes(monkeypatch, tmp_path, _meta_out_of_credit(sent))
+    assert llm_utils.completion(model=live.SPARK, messages=[]) == "ok"
+    spark_open.record_meta("muse-spark-open-1026", 0, 0, 236_000)  # $1.003 of output: the Spark Open cap is passed
+    with pytest.raises(live.BudgetExceeded, match="reached cap"):
+        llm_utils.completion(model=live.SPARK, messages=[])
+    assert sent == [live.SPARK, live.SPARK_OPEN]  # the refused Spark Open call was never sent
+    assert meta.meta_usd == 0.0
+
+
+def test_spark_open_spend_is_charged_to_the_ledger_at_its_price(monkeypatch, tmp_path):
+    import json
+    import types
+
+    import litellm
+
+    from glint.desk import live
+
+    sent = []
+    _, (meta, spark_open) = _configured_with_fakes(monkeypatch, tmp_path, _meta_out_of_credit(sent))
+    usage = types.SimpleNamespace(prompt_tokens=400_000, completion_tokens=100_000,
+                                  prompt_tokens_details=types.SimpleNamespace(cached_tokens=100_000),
+                                  completion_tokens_details=None)
+    (logger,) = litellm.callbacks
+    logger.log_success_event({"model": live.SPARK_OPEN}, types.SimpleNamespace(usage=usage), 0, 0)
+    # 300k input at $1.25/M + 100k cached at $0.15/M + 100k output at $4.25/M (baseten.co/library/muse-spark-open)
+    expected = 0.375 + 0.015 + 0.425
+    assert spark_open.meta_usd == pytest.approx(expected) and meta.meta_usd == 0.0
+    (row,) = [json.loads(line) for line in (tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert row["phase"] == spark_open.phase and row["model"] == live.SPARK_OPEN
+    assert row["usd"] == pytest.approx(expected)
+
+
+def test_live_status_reports_a_missing_baseten_key(monkeypatch):
+    for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY"):
+        monkeypatch.setenv(k, "x")
+    monkeypatch.delenv("BASETEN_API_KEY", raising=False)
+    status = client.get("/api/live/status").json()
+    assert status["available"] is True  # live mode runs on Meta alone
+    assert status["fallback_available"] is False and status["fallback_missing"] == ["BASETEN_API_KEY"]
+    monkeypatch.setenv("BASETEN_API_KEY", "x")
+    status = client.get("/api/live/status").json()
+    assert status["fallback_available"] is True and status["fallback_missing"] == []
