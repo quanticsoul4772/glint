@@ -53,6 +53,7 @@ from tau2.utils import llm_utils
 from glint import glimmer_serve
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
+from glint.calllog import recording
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
 from glint.runlog import RunEvents, outcome
@@ -228,7 +229,9 @@ def generate(cfg: dict) -> None:
     def route(*args, **kwargs):
         return (glimmer if "Muse-Glimmer" in kwargs.get("model", "") else base)(*args, **kwargs)
 
-    llm_utils.completion = guarded(guarded(route, glim, only=("Muse-Glimmer",)), meta, RateLimiter(per_minute=120),
+    # every Glimmer call's exact prompt and completion token ids (τ²'s saved runs keep neither), for activation capture
+    recorded = recording(route, data / "calls.jsonl")
+    llm_utils.completion = guarded(guarded(recorded, glim, only=("Muse-Glimmer",)), meta, RateLimiter(per_minute=120),
                                    only=("muse-spark", "muse-wonder"))
     nl.DEFAULT_LLM_NL_ASSERTIONS, nl.DEFAULT_LLM_NL_ASSERTIONS_ARGS = SPARK, {**META, "temperature": 0.0}
     with ExitStack() as stack:
