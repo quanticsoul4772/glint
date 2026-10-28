@@ -7,6 +7,7 @@ import pytest
 from loguru import logger
 from tau2.data_model.message import ToolCall
 from tau2.data_model.tasks import Task
+from tau2.environment.toolkit import ToolType
 from tau2.registry import registry
 
 from glint import paths
@@ -219,10 +220,15 @@ def _banking(task_id: str):
     env, events = _gated("banking_knowledge", task)
     gold = [(a.arguments["agent_tool_name"], json.loads(a.arguments["arguments"]))
             for a in task.evaluation_criteria.actions if a.name == "call_discoverable_agent_tool"]
-    # phase 2 gates every banking write on the user's verification: log it as the gold conversation does
+    # phase 2 gates banking writes on the user's verification and on the lookups each procedure names: do them as
+    # the gold conversation does (the hidden lookups are reads; they change nothing the phase-1 gates judge)
     for a in task.evaluation_criteria.actions:
         if a.name == "log_verification":
             env.get_response(ToolCall(id="v", name=a.name, arguments=a.arguments, requestor="assistant"))
+    for tool, args in gold:
+        if env.tools.tool_type(tool) == ToolType.READ:
+            _call(env, "unlock_discoverable_agent_tool", agent_tool_name=tool)
+            _call(env, "call_discoverable_agent_tool", agent_tool_name=tool, arguments=json.dumps(args))
     return env, events, gold
 
 
@@ -564,8 +570,8 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
 # ---- false refusals on gold ----------------------------------------------------------------------------------------
 
 def test_no_gold_write_is_refused():
-    """Every gold action of every retail, airline and banking task through the gates: a deny of a gold write that
-    τ²'s own tool would run is a false refusal; there must be none."""
+    """Every gold action of every TRAIN task (retail, airline, banking) through the gates: a deny of a gold write that
+    τ²'s own tool would run is a false refusal; there must be none. τ²'s test splits stay unread."""
     import gate_replay
 
     events = EventLog(":memory:")
@@ -573,25 +579,27 @@ def test_no_gold_write_is_refused():
     refusals = [f for r in reports for f in r["false_refusals"]]
     assert refusals == [], "\n".join(f"{f['domain']} {f['task_id']} {f['tool']} {f['rule_id']}: {f['reason']}"
                                      for f in refusals)
-    # the two gold writes τ²'s tool rejects anyway (retail 64: exchange on a pending order; 105: gift card balance)
-    assert sorted(f["task_id"] for r in reports for f in r["also_rejected"]) == ["105", "64"]
+    # the gold write τ²'s tool rejects anyway (retail 105: gift card balance)
+    assert sorted(f["task_id"] for r in reports for f in r["also_rejected"]) == ["105"]
+    assert [r["tasks"] for r in reports] == [74, 30, 77]
+    assert not {t.id for t in gate_replay.tasks_of("banking_knowledge")} & set(json.loads(
+        (paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))["test_untouched"])
     # task_005's gold verifies a placeholder user and changes an unverified user's email: denied by policy, listed
     assert sorted((f["task_id"], f["tool"]) for r in reports for f in r["placeholder_gold"]) == [
         ("task_005", "change_user_email"), ("task_005", "log_verification")]
-    # 568 phase-1 gold writes + 13 banking transfer_to_human_agents (gated since phase 2)
-    assert sum(r["gold_writes"] for r in reports) == 581 and events.verify() > 581
+    assert sum(r["gold_writes"] for r in reports) == 418 and events.verify() > 418
 
 
 def test_gate_replay_main_reports_and_exits_by_the_count(tmp_path, monkeypatch, capsys):
     import gate_replay
 
-    retail = [t for t in gate_replay.tasks_of("retail") if t.id in ("64", "0")]
+    retail = [t for t in gate_replay.tasks_of("retail") if t.id in ("105", "0")]
     monkeypatch.setattr(gate_replay, "DOMAINS", ("retail",))
     monkeypatch.setattr(gate_replay, "tasks_of", lambda d: retail)
     out = tmp_path / "r.json"
     assert gate_replay.main(["--json", str(out), "--log", str(tmp_path / "g.sqlite")]) == 0
     text = capsys.readouterr().out
-    assert "TOTAL false refusals on gold: 0" in text and "also rejected by τ² 64" in text
+    assert "TOTAL false refusals on gold: 0" in text and "also rejected by τ² 105" in text
     assert json.loads(out.read_text(encoding="utf-8"))[0]["tasks"] == 2
     monkeypatch.setattr(rules, "_retail_gate", lambda action: lambda db, a: deny("x", "s", "no", "fix"))
     assert gate_replay.main([]) == 1

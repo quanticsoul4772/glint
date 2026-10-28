@@ -7,6 +7,15 @@ instance's `get_response`. Only `requestor == "assistant"` calls to WRITE tools 
 gets an error message carrying the reason, purpose, fix and verdict; arguments are never rewritten. τ²'s gold actions
 go through `make_tool_call`, not `get_response`, so they stay ungated. A few GENERIC tools that end or change the
 conversation are gated like writes (rules.GATED_GENERIC: banking's transfer_to_human_agents).
+
+The wrapper also keeps the environment's own record of the hidden READ tools the agent called successfully
+(`env.tools.glint_reads`); the procedure gates judge required lookups on it. Hidden reads go through
+call_discoverable_agent_tool, a WRITE that τ²'s evaluator replays, so the replay rebuilds the same record and every
+gate decision replays unchanged. In replay a gate runs without a wall-clock timeout (core.run_gate).
+
+The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
+{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+"permissionDecisionReason": GateResult.message()} } to block a call (research/5-measurements/M0-results.md, M6a).
 """
 from __future__ import annotations
 
@@ -65,7 +74,7 @@ class Enforcer:
                 result, ms = deny("gate_error", gate.name, f"gate {gate.name!r} needs the environment's toolkit and "
                                   "was given none", "Call Enforcer.check with toolkit=env.tools."), 0.0
             else:
-                result, ms = run_gate(gate, toolkit if gate.toolkit else db, args)
+                result, ms = run_gate(gate, toolkit if gate.toolkit else db, args, wait=replay)
             if not self._log(tool, args, result, ms, replay, gate.name):
                 result = deny("audit_failed", gate.name, f"gate {gate.name!r} fired but its event could not be "
                               "logged; denying rather than allowing a write with no audit trail",
@@ -88,6 +97,17 @@ class Enforcer:
             log.exception("gate %s: the gate.fired event was not logged", gate)
             return False
 
+    @staticmethod
+    def _record_read(env, call: ToolCall, reply: ToolMessage) -> None:
+        """Note a hidden READ tool the agent called through the wrapper and that ran (its reply is not an error)."""
+        if call.requestor != "assistant" or call.name != WRAPPER or reply.error:
+            return
+        name = str((call.arguments or {}).get("agent_tool_name", ""))
+        if str(reply.content).startswith("Error") or not env.tools.has_tool(name):
+            return
+        if env.tools.tool_type(name) == ToolType.READ:
+            env.tools.glint_reads.add(name)
+
     def attach(self, env):
         """Gate this environment instance's writes. Raises when a write tool of its toolkit has no gate."""
         if getattr(env, "glint_enforcer", None) is self:
@@ -98,10 +118,14 @@ class Enforcer:
         original_response, original_set_state = env.get_response, env.set_state
         state = {"replay": False}
 
+        env.tools.glint_reads = set()
+
         def get_response(message: ToolCall) -> ToolMessage:
             write = self.write_call(env, message)
             if write is None:
-                return original_response(message)
+                reply = original_response(message)
+                self._record_read(env, message, reply)
+                return reply
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
                 return original_response(message)

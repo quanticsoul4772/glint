@@ -3,10 +3,10 @@ agent says or seems to have done them.
 
 - Verification: a write acting for a user needs that user's log_verification record dated today (every procedure in
   the knowledge base starts with "Customer must be verified").
-- Required lookups: a write needs the hidden lookups its procedure names, recorded in agent_discoverable_tools. τ²
-  records a hidden READ only when the environment's read-log allowlist names it (tau2.runner.build derives the list
-  from the task's expected actions). A lookup the environment does not record can never show in the database, so the
-  gate requires only lookups the environment records and says which ones it could not see.
+- Required lookups: a write needs the hidden lookups its knowledge base procedure names, on the enforcer's own
+  record of the hidden reads the agent ran in this conversation (`toolkit.glint_reads`, kept by
+  glint.gates.enforce). Nothing here reads τ²'s read-log allowlist or the task's expected actions. Each requirement
+  cites its document, and τ²'s TRAIN-task gold conversations all do the lookup before the write.
 - Order: a credit card dispute waits while a credit limit increase is submitted and not decided
   (credit_card_account_logistics_007: a pending dispute fails the increase).
 - transfer_to_human_agents: the reason code follows bank_accounts_(general)_042 where the database shows the
@@ -15,16 +15,15 @@ agent says or seems to have done them.
 from __future__ import annotations
 
 from glint.assist.banking import LIMIT_FIRST, TODAY
-from glint.gates.bankdb import as_date, owner, recorded_tools, undecided_increases, verified_today
+from glint.gates.bankdb import as_date, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 
 DISPUTES_HISTORY, PENDING_ORDERS, CLOSURE_HISTORY = ("get_user_dispute_history_7291",
                                                       "get_pending_replacement_orders_5765",
                                                       "get_closure_reason_history_8293")
 CLI_HISTORY, PAYMENTS = "get_credit_limit_increase_history_4829", "get_payment_history_6183"
-ACCOUNTS, TRANSACTIONS, CARDS, DEBIT_DISPUTES = ("get_all_user_accounts_by_user_id_3847",
-                                                 "get_bank_account_transactions_9173",
-                                                 "get_debit_cards_by_account_id_7823", "get_debit_dispute_status_7483")
+ACCOUNTS, TRANSACTIONS, CARDS = ("get_all_user_accounts_by_user_id_3847", "get_bank_account_transactions_9173",
+                                 "get_debit_cards_by_account_id_7823")
 CLOSURE_LOOKUPS = ((CLOSURE_HISTORY, "credit_card_account_logistics_003 step 2"),
                    (PENDING_ORDERS, "credit_card_replacements_005 / logistics_003 step 1"),
                    (DISPUTES_HISTORY, "credit_cards_(general)_016 / logistics_003 step 1"))
@@ -32,9 +31,10 @@ CLI_LOOKUPS = ((DISPUTES_HISTORY, "credit_card_account_logistics_007"), (PENDING
                (CLI_HISTORY, "logistics_007"), (PAYMENTS, "logistics_006"))
 BANK_CREDIT_LOOKUPS = ((ACCOUNTS, "bank_accounts_(general)_043/_044"),
                        (TRANSACTIONS, "bank_accounts_(general)_017/_043/_044"))
-# write -> the hidden lookups its procedure requires before it, each with its source document
+# write -> the hidden lookups its procedure requires before it, each with its source document. Lookups the
+# knowledge base mentions without making them a precondition are not required (credit card disputes: the dispute
+# history feeds the provisional credit count, but τ²'s train gold files some disputes without that lookup).
 REQUIRED_LOOKUPS = {
-    "file_credit_card_transaction_dispute_4829": ((DISPUTES_HISTORY, "credit_cards_(general)_015/_016"),),
     "approve_credit_limit_increase_5847": CLI_LOOKUPS,
     "deny_credit_limit_increase_5848": CLI_LOOKUPS,
     "log_credit_card_closure_reason_4521": CLOSURE_LOOKUPS,
@@ -46,8 +46,7 @@ REQUIRED_LOOKUPS = {
     "close_debit_card_4721": ((TRANSACTIONS, "bank_accounts_(general)_025 requirements 4-5"),),
     "order_debit_card_5739": ((CARDS, "bank_accounts_(general)_029 replacement history"),
                               (ACCOUNTS, "bank_accounts_(general)_023 eligibility")),
-    "file_debit_card_transaction_dispute_6281": ((TRANSACTIONS, "bank_accounts_(general)_031 argument 1"),
-                                                 (DEBIT_DISPUTES, "bank_accounts_(general)_031 requirement 4 / _035")),
+    "file_debit_card_transaction_dispute_6281": ((TRANSACTIONS, "bank_accounts_(general)_031 argument 1"),),
 }
 # writes that act for a user and so need that user verified today (the knowledge base's first step everywhere)
 VERIFIED_WRITES = (
@@ -83,15 +82,12 @@ def lookups(tool: str):
 
     def gate(toolkit, a: dict) -> GateResult:
         source = "; ".join(sorted({s for _, s in required}))
-        recordable = set(getattr(toolkit, "_read_log_allowlist", set()) or set())
-        done = recorded_tools(toolkit.db)
-        checkable = [r for r, _ in required if r in recordable]
-        missing = [r for r in checkable if r not in done]
-        details = {"required": [r for r, _ in required], "recorded": sorted(done & {r for r, _ in required}),
-                   "not_recordable": [r for r, _ in required if r not in recordable]}
+        done = set(getattr(toolkit, "glint_reads", set()))
+        missing = [r for r, _ in required if r not in done]
+        details = {"required": [r for r, _ in required], "done": sorted(done & {r for r, _ in required})}
         if missing:
-            return deny("procedure.lookups", source, f"{tool} needs the lookup(s) {missing} first; the database has "
-                        "no record of them in this conversation",
+            return deny("procedure.lookups", source, f"the procedure for {tool} looks up {missing} first; no such "
+                        "lookup ran in this conversation",
                         f"Unlock and call {', '.join(missing)} (call_discoverable_agent_tool), check the result, then "
                         "retry this write.", details | {"missing": missing})
         return allow("procedure.lookups", source, details)

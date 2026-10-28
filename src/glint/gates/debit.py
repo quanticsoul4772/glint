@@ -10,8 +10,8 @@
   card must be PENDING, unexpired, on an OPEN account).
 
 Whether a card is lost for certain or only misplaced (freeze first, then decide) is the user's statement, not the
-database's, so no gate here requires a freeze before a close: τ²'s expected actions close without a freeze in tasks
-082 and 084-092 and freeze first in 077-081.
+database's, so no gate here requires a freeze before a close: τ²'s train tasks close without a freeze in 084 and
+086-092 and freeze first in 081.
 """
 from __future__ import annotations
 
@@ -96,8 +96,9 @@ def close(db, a: dict) -> GateResult:
     pending = [t for t in db.bank_account_transaction_history.data.values()
                if t.get("account_id") == card.get("account_id")
                and str(t.get("status", "")).lower() in ("pending", "processing")]
+    # requirement 5 lets a pending refund through once the user acknowledges in writing that it goes to the checking
+    # account; that acknowledgment is in the conversation only, so pending refunds are not judged here
     held = sorted(t["transaction_id"] for t in pending if t.get("type") != "refund")
-    refunds = sorted(t["transaction_id"] for t in pending if t.get("type") == "refund")
     if held:
         return deny("debit.close.pending_transactions", source, f"the linked account {card.get('account_id')} has "
                     f"pending transactions {held}; a card closes only after they settle",
@@ -109,12 +110,6 @@ def close(db, a: dict) -> GateResult:
         return deny("debit.close.card_age", source, f"the card was issued {age} days ago; a card closed for "
                     f"'{reason}' must be active at least 14 days (lost, stolen and fraud_suspected skip this)",
                     f"Do not close it yet; the earliest closure date is {eligible:%m/%d/%Y}.", {"age_days": age})
-    if refunds:
-        # requirement 5: a pending refund blocks the closure unless the user acknowledges in writing that it goes to
-        # the checking account; that acknowledgment is in the conversation, not the database (task_079)
-        return allow("debit.close.refund_acknowledgment_unseen", source, {"pending_refunds": refunds},
-                     reason="pending refunds: allowed only with the user's written acknowledgment, which the "
-                            "database cannot show")
     return allow("debit.close", source, {"status": status, "reason": reason})
 
 

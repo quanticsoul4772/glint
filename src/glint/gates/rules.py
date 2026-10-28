@@ -42,8 +42,8 @@ NO_RULE_REASONS = {
     "pay_credit_card_from_checking_9182": "the amount is the user's choice; the procedure gates require verification",
     "open_bank_account_4821": ("the account class follows the user's stated needs; the tool checks eligibility "
                                "(the 14-day checking tenure)"),
-    "close_bank_account_7392": ("whether the user also wants a savings account (task_060: open it first) is not "
-                                "in the database"),
+    "close_bank_account_7392": ("whether the user also plans to open an account that needs this one's tenure is "
+                                "not in the database"),
     "transfer_funds_between_bank_accounts_7291": "the amount and accounts are the user's choice",
     "apply_savings_account_credit_6831": ("the interest correction amount needs the rate tables; the procedure gates "
                                           "require the lookups"),

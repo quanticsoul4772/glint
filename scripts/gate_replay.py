@@ -1,11 +1,12 @@
 """False-refusal replay: τ²'s GOLD actions through gated environments. Every deny of a gold write is a false refusal.
 
-For every task of retail and airline (train and test splits) and banking_knowledge (all tasks; τ² does not split
-them), a fresh environment is set to the task's initial state and gated with glint.gates; each gold action
+For every TRAIN task of retail, airline and banking_knowledge (`tasks_of`; τ²'s test splits stay unread), a fresh
+environment is set to the task's initial state and gated with glint.gates; each gold action
 (`evaluation_criteria.actions`) is sent through `get_response` the way an agent's call would be. An ungated twin of
 the environment takes the same calls in step: a denied gold write that τ²'s own tool also rejects on the twin (gold
 data with an action the environment refuses, such as an exchange on a pending order) changes nothing either way and
-is counted as `also_rejected`, not as a false refusal; a denied gold write of PLACEHOLDER_GOLD is listed apart. The target is 0 false refusals. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
+is counted as `also_rejected`, not as a false refusal; a denied gold write of PLACEHOLDER_GOLD is listed apart. The
+target is 0 false refusals. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
 
 Usage: python scripts/gate_replay.py [--log PATH] [--json OUT]
 """
@@ -18,11 +19,12 @@ from collections import Counter
 from loguru import logger
 from tau2.data_model.message import ToolCall
 from tau2.registry import registry
-from tau2.runner.build import _derive_read_log_allowlist
 
+from glint import paths
 from glint.gates import Enforcer, EventLog
 
 DOMAINS = ("retail", "airline", "banking_knowledge")
+BANKING_SPLIT = paths.RESULTS / "split-partition-banking.json"
 # Gold data the gates deny by policy, listed and reported on its own, never silently: task_005's gold logs a
 # verification whose every field is the placeholder '9K2X7M4P1N8Q3R5T6A' (no such user) and then changes the email of
 # a user who was never verified (the user simulator is told to fail verification)
@@ -30,19 +32,20 @@ PLACEHOLDER_GOLD = {("banking_knowledge", "task_005"): "placeholder verification
 
 
 def tasks_of(domain: str) -> list:
+    """The TRAIN tasks only: τ²'s test splits stay unread (research/00-decisions.md). Retail and airline use τ²'s
+    train split; banking_knowledge has none, so its test tasks are the `test_untouched` 20 of
+    split-partition-banking.json and the rest (pilot + rest, 77 tasks) are replayed."""
     loader = registry.get_tasks_loader(domain)
     if domain == "banking_knowledge":
-        return list(loader(None))
-    return [t for split in ("train", "test") for t in loader(split)]
+        untouched = set(json.loads(BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
+        return [t for t in loader(None) if t.id not in untouched]
+    return list(loader("train"))
 
 
 def _env(domain: str, task):
-    """The environment τ²'s runner builds for the task: for banking, with the read-log allowlist
-    (tau2.runner.build._derive_read_log_allowlist), so the hidden lookups the task needs are recorded."""
     constructor = registry.get_env_constructor(domain)
     if domain == "banking_knowledge":
-        return constructor(retrieval_variant="bm25_grep", task=task,
-                           read_log_allowlist=_derive_read_log_allowlist(task))
+        return constructor(retrieval_variant="bm25_grep", task=task)
     return constructor()
 
 

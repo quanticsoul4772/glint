@@ -1,301 +1,345 @@
 [
- {
-  "set": "btest",
-  "dom": "banking_knowledge",
-  "arm": "base",
-  "task": "task_022",
-  "trial": 0,
-  "outcome": "fail",
-  "writes": [
-   {
-    "i": 12,
-    "role": "assistant",
-    "name": "log_verification",
-    "args": {
-     "name": "Isabella Fernandez",
-     "user_id": "f9bf8de0be",
-     "address": "742 Sunset Boulevard, Miami, FL 33101",
-     "email": "bella_fernandez92@yahoo.com",
-     "phone_number": "305-555-0729",
-     "date_of_birth": "12/19/1992",
-     "time_verified": "2025-11-14 03:40:00 EST"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 43,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_30cb41175311",
-     "new_rewards_earned": "5342 points"
-    },
-    "st": "extra"
-   },
-   {
-    "i": 47,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_097c072e7df3",
-     "new_rewards_earned": "3870 points"
-    },
-    "st": "extra"
-   },
-   {
-    "i": 51,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_508e275e27af",
-     "new_rewards_earned": "5000 points"
-    },
-    "st": "extra"
-   },
-   {
-    "i": 55,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_4f5e249acc6c",
-     "new_rewards_earned": "78 points"
-    },
-    "st": "extra"
-   }
-  ]
- },
- {
-  "set": "btest",
-  "dom": "banking_knowledge",
-  "arm": "tools",
-  "task": "task_043",
-  "trial": 0,
-  "outcome": "fail",
-  "writes": [
-   {
-    "i": 12,
-    "role": "assistant",
-    "name": "log_verification",
-    "args": {
-     "name": "Yuki Nakamura",
-     "user_id": "224959b99e",
-     "address": "3421 Sakura Avenue, Portland, OR 97205",
-     "email": "yuki.nakamura@simba.com",
-     "phone_number": "503-555-0842",
-     "date_of_birth": "05/12/1991",
-     "time_verified": "2025-11-14 03:40:00 EST"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 31,
-    "role": "assistant",
-    "name": "apply_credit_card_account_flag_6147",
-    "args": {
-     "credit_card_account_id": "cc_224959b99e_plat",
-     "user_id": "224959b99e",
-     "flag_type": "annual_fee_waived",
-     "expiration_date": "11/14/2026",
-     "reason": "loyalty_benefit"
-    },
-    "st": "ok"
-   }
-  ]
- },
- {
-  "set": "btest",
-  "dom": "banking_knowledge",
-  "arm": "base",
-  "task": "task_074",
-  "trial": 0,
-  "outcome": "fail",
-  "writes": [
-   {
-    "i": 22,
-    "role": "assistant",
-    "name": "log_verification",
-    "args": {
-     "name": "Ahmad Razali bin Mohd Yusof",
-     "user_id": "ar72c5d8e3",
-     "address": "1245 Pioneer Road, Denver, CO 80203",
-     "email": "ahmad.razali@gmail.com",
-     "phone_number": "303-555-0821",
-     "date_of_birth": "06/15/1989",
-     "time_verified": "2025-11-14 03:40:00 EST"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 40,
-    "role": "assistant",
-    "name": "get_all_user_accounts_by_user_id_3847",
-    "args": {
-     "user_id": "ar72c5d8e3"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 48,
-    "role": "assistant",
-    "name": "get_bank_account_transactions_9173",
-    "args": {
-     "account_id": "chk_ar72c5d8e3_1"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 50,
-    "role": "assistant",
-    "name": "get_bank_account_transactions_9173",
-    "args": {
-     "account_id": "chk_ar72c5d8e3_2"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 52,
-    "role": "assistant",
-    "name": "get_bank_account_transactions_9173",
-    "args": {
-     "account_id": "chk_ar72c5d8e3_3"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 54,
-    "role": "assistant",
-    "name": "get_bank_account_transactions_9173",
-    "args": {
-     "account_id": "chk_ar72c5d8e3_4"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 70,
-    "role": "assistant",
-    "name": "apply_checking_account_credit_5829",
-    "args": {
-     "account_id": "chk_ar72c5d8e3_1",
-     "amount": 24.5,
-     "credit_type": "fee_refund"
-    },
-    "st": "wrongarg"
-   },
-   {
-    "i": 72,
-    "role": "assistant",
-    "name": "apply_checking_account_credit_5829",
-    "args": {
-     "account_id": "chk_ar72c5d8e3_3",
-     "amount": 7.5,
-     "credit_type": "fee_refund"
-    },
-    "st": "wrongarg"
-   },
-   {
-    "i": 74,
-    "role": "assistant",
-    "name": "apply_checking_account_credit_5829",
-    "args": {
-     "account_id": "chk_ar72c5d8e3_4",
-     "amount": 10.0,
-     "credit_type": "fee_refund"
-    },
-    "st": "wrongarg"
-   }
-  ]
- },
- {
-  "set": "banking12",
-  "dom": "banking_knowledge",
-  "arm": "base",
-  "task": "task_081",
-  "trial": 0,
-  "outcome": "context_overflow",
-  "writes": []
- },
- {
-  "set": "heldout2",
-  "dom": "retail",
-  "arm": "tools",
-  "task": "50",
-  "trial": 2,
-  "outcome": "pass",
-  "writes": [
-   {
-    "i": 18,
-    "role": "assistant",
-    "name": "transfer_to_human_agents",
-    "args": {
-     "summary": "User requests reinstatement of cancelled order #W8859225, which cannot be reinstated via system tools per policy."
-    },
-    "st": "ok"
-   }
-  ]
- },
- {
-  "set": "synthetic",
-  "dom": "banking_knowledge",
-  "arm": "base",
-  "task": "task_022",
-  "trial": 0,
-  "outcome": "pass",
-  "writes": [
-   {
-    "i": 12,
-    "role": "assistant",
-    "name": "log_verification",
-    "args": {
-     "name": "Isabella Fernandez",
-     "user_id": "f9bf8de0be",
-     "address": "742 Sunset Boulevard, Miami, FL 33101",
-     "email": "bella_fernandez92@yahoo.com",
-     "phone_number": "305-555-0729",
-     "date_of_birth": "12/19/1992",
-     "time_verified": "2025-11-14 03:40:00 EST"
-    },
-    "st": "ok"
-   },
-   {
-    "i": 43,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_30cb41175311",
-     "new_rewards_earned": "5342 points"
-    },
-    "st": "extra"
-   },
-   {
-    "i": 47,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_097c072e7df3",
-     "new_rewards_earned": "3870 points"
-    },
-    "st": "extra"
-   },
-   {
-    "i": 51,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_508e275e27af",
-     "new_rewards_earned": "5000 points"
-    },
-    "st": "extra"
-   },
-   {
-    "i": 55,
-    "role": "assistant",
-    "name": "update_transaction_rewards_3847",
-    "args": {
-     "transaction_id": "txn_4f5e249acc6c",
-     "new_rewards_earned": "78 points"
-    },
-    "st": "extra"
-   }
-  ]
- }
+{
+"dom": "banking_knowledge",
+"arm": "base",
+"task": "task_037",
+"trial": 0,
+"outcome": "fail",
+"writes": [
+{
+"i": 10,
+"role": "assistant",
+"name": "log_verification",
+"args": {
+"name": "Fatima Al-Hassan",
+"user_id": "890389b165",
+"address": "1923 Oak Park Boulevard, Detroit, MI 48226",
+"email": "coffeelover_fati@protonmail.com",
+"phone_number": "313-555-0246",
+"date_of_birth": "12/05/1993",
+"time_verified": "2025-11-14 03:40:00 EST"
+},
+"st": "ok"
+},
+{
+"i": 30,
+"role": "assistant",
+"name": "order_replacement_credit_card_7291",
+"args": {
+"credit_card_account_id": "cc_890389b165_silver",
+"user_id": "890389b165",
+"shipping_address": "2500 Woodward Avenue, Suite 300, Detroit, MI 48201",
+"reason": "fraud_suspected",
+"expedited_shipping": true
+},
+"st": "ok"
+},
+{
+"i": 54,
+"role": "assistant",
+"name": "transfer_to_human_agents",
+"args": {
+"summary": "Customer reported fraudulent charges on Silver Rewards Card: Electronics Express Miami ($487.99 on 09/04/2025) and GamerZone LA ($299.95 on 09/06/2025). Customer has already ordered replacement card with expedited shipping. Cannot file disputes due to inability to provide card last 4 digits - numbers worn on physical card. Customer does not have mobile app access to retrieve card number. Needs alternative verification to file credit card transaction disputes.",
+"reason": "customer_requests_human_no_specific_reason"
+},
+"st": "extra"
+}
+],
+"set": "fixture"
+},
+{
+"dom": "banking_knowledge",
+"arm": "base",
+"task": "task_037",
+"writes": [
+{
+"i": 10,
+"role": "assistant",
+"name": "log_verification",
+"args": {
+"name": "Fatima Al-Hassan",
+"user_id": "890389b165",
+"address": "1923 Oak Park Boulevard, Detroit, MI 48226",
+"email": "coffeelover_fati@protonmail.com",
+"phone_number": "313-555-0246",
+"date_of_birth": "12/05/1993",
+"time_verified": "2025-11-14 03:40:00 EST"
+},
+"st": "ok"
+},
+{
+"i": 30,
+"role": "assistant",
+"name": "order_replacement_credit_card_7291",
+"args": {
+"credit_card_account_id": "cc_890389b165_silver",
+"user_id": "890389b165",
+"shipping_address": "2500 Woodward Avenue, Suite 300, Detroit, MI 48201",
+"reason": "fraud_suspected",
+"expedited_shipping": true
+},
+"st": "ok"
+},
+{
+"i": 54,
+"role": "assistant",
+"name": "transfer_to_human_agents",
+"args": {
+"summary": "Customer reported fraudulent charges on Silver Rewards Card: Electronics Express Miami ($487.99 on 09/04/2025) and GamerZone LA ($299.95 on 09/06/2025). Customer has already ordered replacement card with expedited shipping. Cannot file disputes due to inability to provide card last 4 digits - numbers worn on physical card. Customer does not have mobile app access to retrieve card number. Needs alternative verification to file credit card transaction disputes.",
+"reason": "customer_requests_human_no_specific_reason"
+},
+"st": "extra"
+}
+],
+"set": "fixture",
+"trial": 9,
+"outcome": "pass"
+},
+{
+"dom": "banking_knowledge",
+"arm": "base",
+"task": "task_031",
+"trial": 0,
+"outcome": "pass",
+"writes": [
+{
+"i": 16,
+"role": "assistant",
+"name": "log_verification",
+"args": {
+"name": "Fatima Al-Hassan",
+"user_id": "890389b165",
+"address": "1923 Oak Park Boulevard, Detroit, MI 48226",
+"email": "coffeelover_fati@protonmail.com",
+"phone_number": "313-555-0246",
+"date_of_birth": "12/05/1993",
+"time_verified": "2025-11-14 03:40:00 EST"
+},
+"st": "ok"
+},
+{
+"i": 47,
+"role": "assistant",
+"name": "give:get_card_last_4_digits",
+"args": {},
+"st": "ok"
+},
+{
+"i": 52,
+"role": "user",
+"name": "U:get_card_last_4_digits",
+"args": {
+"credit_card_account_id": "cc_890389b165_silver"
+},
+"st": "ok"
+},
+{
+"i": 59,
+"role": "assistant",
+"name": "file_credit_card_transaction_dispute_4829",
+"args": {
+"transaction_id": "txn_adea68821a1d",
+"card_action": "keep_active",
+"card_last_4_digits": "5320",
+"full_name": "Fatima Al-Hassan",
+"user_id": "890389b165",
+"phone": "313-555-0246",
+"email": "coffeelover_fati@protonmail.com",
+"address": "1923 Oak Park Boulevard, Detroit, MI 48226",
+"contacted_merchant": true,
+"purchase_date": "11/07/2025",
+"issue_noticed_date": "11/14/2025",
+"dispute_reason": "goods_services_not_as_described",
+"resolution_requested": "full_refund",
+"eligible_for_provisional_credit": false
+},
+"st": "ok"
+}
+],
+"set": "fixture"
+},
+{
+"dom": "banking_knowledge",
+"arm": "base",
+"task": "task_050",
+"trial": 0,
+"outcome": "fail",
+"writes": [
+{
+"i": 18,
+"role": "assistant",
+"name": "log_verification",
+"args": {
+"name": "Sofia Papadopoulos",
+"user_id": "584f9c5d00",
+"address": "1456 Astoria Boulevard, Queens, NY 11102",
+"email": "sofia.p@outlook.com",
+"phone_number": "347-555-0387",
+"date_of_birth": "01/25/1986",
+"time_verified": "2025-11-14 03:40:00 EST"
+},
+"st": "ok"
+},
+{
+"i": 32,
+"role": "assistant",
+"name": "submit_credit_limit_increase_request_7392",
+"args": {
+"credit_card_account_id": "cc_584f9c5d00_gold",
+"user_id": "584f9c5d00",
+"requested_increase_amount": 2500.0
+},
+"st": "ok"
+},
+{
+"i": 42,
+"role": "assistant",
+"name": "get_credit_limit_increase_history_4829",
+"args": {
+"credit_card_account_id": "cc_584f9c5d00_gold"
+},
+"st": "ok"
+},
+{
+"i": 50,
+"role": "assistant",
+"name": "get_payment_history_6183",
+"args": {
+"credit_card_account_id": "cc_584f9c5d00_gold",
+"months": 3.0
+},
+"st": "ok"
+},
+{
+"i": 56,
+"role": "assistant",
+"name": "approve_credit_limit_increase_5847",
+"args": {
+"credit_card_account_id": "cc_584f9c5d00_gold",
+"user_id": "584f9c5d00",
+"new_credit_limit": 7500.0
+},
+"st": "ok"
+}
+],
+"set": "fixture"
+},
+{
+"dom": "banking_knowledge",
+"arm": "base",
+"task": "task_031",
+"trial": 1,
+"outcome": "fail",
+"writes": [
+{
+"i": 12,
+"role": "assistant",
+"name": "log_verification",
+"args": {
+"name": "Fatima Al-Hassan",
+"user_id": "890389b165",
+"address": "1923 Oak Park Boulevard, Detroit, MI 48226",
+"email": "coffeelover_fati@protonmail.com",
+"phone_number": "313-555-0246",
+"date_of_birth": "12/05/1993",
+"time_verified": "2025-11-14 03:40:00 EST"
+},
+"st": "ok"
+},
+{
+"i": 34,
+"role": "assistant",
+"name": "file_credit_card_transaction_dispute_4829",
+"args": {
+"transaction_id": "txn_adea68821a1d",
+"card_action": "keep_active",
+"card_last_4_digits": "sensitive",
+"full_name": "Fatima Al-Hassan",
+"user_id": "890389b165",
+"phone": "313-555-0246",
+"email": "coffeelover_fati@protonmail.com",
+"address": "1923 Oak Park Boulevard, Detroit, MI 48226",
+"contacted_merchant": true,
+"purchase_date": "11/07/2025",
+"issue_noticed_date": "11/14/2025",
+"dispute_reason": "goods_services_not_as_described",
+"resolution_requested": "full_refund",
+"eligible_for_provisional_credit": false
+},
+"st": "wrongarg"
+}
+],
+"set": "fixture"
+},
+{
+"dom": "banking_knowledge",
+"arm": "base",
+"task": "task_054",
+"trial": 1,
+"outcome": "fail",
+"writes": [
+{
+"i": 16,
+"role": "assistant",
+"name": "log_verification",
+"args": {
+"name": "Sofia Papadopoulos",
+"user_id": "584f9c5d00",
+"address": "1456 Astoria Boulevard, Queens, NY 11102",
+"email": "sofia.p@outlook.com",
+"phone_number": "347-555-0387",
+"date_of_birth": "01/25/1986",
+"time_verified": "2025-11-14 03:40:00 EST"
+},
+"st": "ok"
+},
+{
+"i": 20,
+"role": "assistant",
+"name": "file_credit_card_transaction_dispute_4829",
+"args": {
+"transaction_id": "txn_584f9c5d00_001",
+"card_action": "cancel_and_reissue",
+"card_last_4_digits": "7823",
+"full_name": "Sofia Papadopoulos",
+"user_id": "584f9c5d00",
+"phone": "347-555-0387",
+"email": "sofia.p@outlook.com",
+"address": "1456 Astoria Boulevard, Queens, NY 11102",
+"contacted_merchant": false,
+"purchase_date": "11/11/2025",
+"issue_noticed_date": "11/12/2025",
+"dispute_reason": "unauthorized_fraudulent_charge",
+"resolution_requested": "full_refund",
+"eligible_for_provisional_credit": true
+},
+"st": "ok"
+},
+{
+"i": 26,
+"role": "assistant",
+"name": "order_replacement_credit_card_7291",
+"args": {
+"credit_card_account_id": "cc_584f9c5d00_gold",
+"user_id": "584f9c5d00",
+"shipping_address": "1456 Astoria Boulevard, Queens, NY 11102",
+"reason": "fraud_suspected",
+"expedited_shipping": true
+},
+"st": "ok"
+},
+{
+"i": 49,
+"role": "assistant",
+"name": "submit_credit_limit_increase_request_7392",
+"args": {
+"credit_card_account_id": "cc_584f9c5d00_gold",
+"user_id": "584f9c5d00",
+"requested_increase_amount": 2500.0
+},
+"st": "ok"
+}
+],
+"set": "fixture"
+}
 ]
