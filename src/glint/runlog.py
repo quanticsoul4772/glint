@@ -10,18 +10,40 @@ import json
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 CONTEXT_OVERFLOW = "ContextWindowExceeded"
+# Glint's own exceptions put their class name first in the message (τ² keeps only str(exception) in info.error)
+BUDGET_STOP = "BudgetExceeded:"
+GLINT_ERRORS = ("AtemParseError:", "CallLogError:")
+# outcomes that are neither a pass nor a fail of the model; every one is counted and reported, never dropped quietly
+NOT_RESULTS = ("infrastructure_error", "budget_stop", "eval_error")
 
 
 def outcome(sim: dict) -> str:
-    """'pass', 'fail', 'context_overflow' (the model's own conversation outgrew the context: a model failure that τ²
-    records as an infrastructure error) or 'infrastructure_error' (anything else τ² could not complete)."""
+    """One of:
+    - 'pass' / 'fail': the run finished and was evaluated (reward 1 or not);
+    - 'context_overflow': the model's own conversation outgrew the context, a model failure that τ² records as an
+      infrastructure error;
+    - 'glint_error': Glint's own code failed inside the run (atem re-parse, call recording): a failed run, charged
+      to Glint, never hidden as infrastructure;
+    - 'budget_stop': a spend cap stopped the run: not a result, and the arm must not be saved as finished;
+    - 'eval_error': the run ended but has no reward (τ²'s evaluation failed): not a result;
+    - 'infrastructure_error': anything else τ² could not complete."""
     if "infrastructure" in str(sim.get("termination_reason")).lower():  # enum text in memory, value on disk
         error = str((sim.get("info") or {}).get("error", ""))
-        return "context_overflow" if CONTEXT_OVERFLOW in error else "infrastructure_error"
-    return "pass" if (sim.get("reward_info") or {}).get("reward") == 1.0 else "fail"
+        if CONTEXT_OVERFLOW in error:
+            return "context_overflow"
+        if BUDGET_STOP in error:
+            return "budget_stop"
+        if any(e in error for e in GLINT_ERRORS):
+            return "glint_error"
+        return "infrastructure_error"
+    reward = (sim.get("reward_info") or {}).get("reward")
+    if reward is None:
+        return "eval_error"
+    return "pass" if reward == 1.0 else "fail"
 
 
 def event(sim: dict, label: str) -> dict:
@@ -42,6 +64,8 @@ class RunEvents:
         self.poll_s, self.stall_s = poll_s, stall_s
         self.seen: set[tuple] = set()
         self.counts: dict[str, int] = {}
+        self.read_errors = 0  # checkpoint reads refused or caught mid-write (retried at the next poll)
+        self._bad_reads_in_a_row = 0
         self._done = threading.Event()
         self._last_new = time.time()
         self._thread = threading.Thread(target=self._watch, daemon=True)
@@ -57,16 +81,28 @@ class RunEvents:
         self._done.set()
         self._thread.join(timeout=self.poll_s + 5)
         self.poll()  # whatever landed since the last poll
-        self._say(f"done: {self.counts}")
+        self._say(f"done: {self.counts}" + (f"; {self.read_errors} checkpoint reads retried" if self.read_errors
+                                            else ""))
 
     def _say(self, msg: str) -> None:
         print(f"[runs {time.strftime('%H:%M:%S')} {self.label}] {msg}", file=sys.stderr, flush=True)
 
     def _read(self) -> list[dict]:
+        if not self.results_path.exists():
+            return []  # τ² has not written its checkpoint yet
+        # Windows refuses the read while τ² rewrites the file (PermissionError, 2026-10-27), and a read can land
+        # mid-write (JSONDecodeError): both are retried at the next poll, counted, and reported if they persist
         try:
-            return json.loads(self.results_path.read_text(encoding="utf-8")).get("simulations") or []
-        except (FileNotFoundError, json.JSONDecodeError):  # not written yet, or caught mid-write: next poll
+            sims = json.loads(self.results_path.read_text(encoding="utf-8")).get("simulations") or []
+        except (OSError, json.JSONDecodeError) as e:
+            self.read_errors += 1
+            self._bad_reads_in_a_row += 1
+            if self._bad_reads_in_a_row in (3, 10, 30):
+                self._say(f"WARNING: {self._bad_reads_in_a_row} checkpoint reads in a row failed "
+                          f"({type(e).__name__}: {e}); events are not being recorded")
             return []
+        self._bad_reads_in_a_row = 0
+        return sims
 
     def poll(self) -> list[dict]:
         new = [s for s in self._read() if (s.get("task_id"), s.get("trial")) not in self.seen]
@@ -89,5 +125,10 @@ class RunEvents:
         return new
 
     def _watch(self):
+        # An exception here would end the thread and every later event without a word (2026-10-27: a PermissionError
+        # stopped events.jsonl for a whole arm); anything unexpected is printed in full and watching goes on
         while not self._done.wait(self.poll_s):
-            self.poll()
+            try:
+                self.poll()
+            except Exception:  # noqa: BLE001  (printed in full; the next poll retries)
+                self._say(f"WARNING: the event watcher hit an error and keeps polling:\n{traceback.format_exc()}")

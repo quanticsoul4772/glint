@@ -15,6 +15,7 @@ from tau2.registry import registry
 
 from glint import paths
 from glint.decisions import label_run, to_rows
+from glint.runlog import NOT_RESULTS, outcome
 
 DATA = paths.MEASURE
 DOMAINS = paths.tau2_data() / "tau2" / "domains"
@@ -42,25 +43,41 @@ def env(domain: str):
 
 def sources() -> dict[str, str]:
     out = dict(SOURCES) | {f"planb/pilot/batch{i}.json": "retail" for i in range(3)}  # Plan B k=16, retail
+    missing = [k for k in out if not (DATA / k).exists()]
+    if missing:
+        print(f"NOTE: {len(missing)} of {len(out)} sources are not on disk and are not labeled: {missing}", flush=True)
     return {k: v for k, v in out.items() if (DATA / k).exists()}
 
 
 def main():
-    rows, counts = [], Counter()
+    rows, counts, dropped = [], Counter(), Counter()
+    unjudged = {d: {} for d in ("retail", "airline", "banking_knowledge")}
     task_cache = {}
     for rel, domain in sources().items():
         task_cache.setdefault(domain, tasks(domain))
-        sims = json.loads((DATA / rel).read_text(encoding="utf-8")).get("simulations") or []
+        sims = json.loads((DATA / rel).read_text(encoding="utf-8"))["simulations"]
         for s in sims:
-            if "infrastructure" in str(s.get("termination_reason")) or str(s["task_id"]) not in task_cache[domain]:
+            kind = outcome(s)
+            # runs that are not results are left out, counted; a context overflow or a Glint error is a failed run
+            # (an overflow used to be dropped here as "infrastructure", against the project rule)
+            if kind in NOT_RESULTS:
+                dropped[(domain, kind)] += 1
                 continue
-            passed = (s.get("reward_info") or {}).get("reward") == 1.0
-            for d in label_run(s, task_cache[domain][str(s["task_id"])], env(domain)):
+            if str(s["task_id"]) not in task_cache[domain]:
+                dropped[(domain, "unknown task id")] += 1
+                continue
+            passed = kind == "pass"
+            for d in label_run(s, task_cache[domain][str(s["task_id"])], env(domain), unjudged[domain]):
                 row = to_rows([d])[0] | {"domain": domain, "source": rel, "run_passed": passed}
                 rows.append(row)
                 counts[(domain, d.label, "passed" if passed else "failed")] += 1
                 counts[(domain, d.label, "executed" if d.executed else "rejected")] += 1
     OUT.write_text(json.dumps(rows, indent=1, default=str), encoding="utf-8")
+    if dropped:
+        print(f"NOTE: runs left out of the labels: {dict(dropped)}", flush=True)
+    for domain, c in unjudged.items():
+        if c:
+            print(f"NOTE: {domain}: {sum(c.values())} writes could not be judged (no label): {c}", flush=True)
     for domain in ("retail", "airline", "banking_knowledge"):
         c = {k[1:]: v for k, v in counts.items() if k[0] == domain}
         total = sum(v for k, v in c.items() if k[1] in ('passed', 'failed'))

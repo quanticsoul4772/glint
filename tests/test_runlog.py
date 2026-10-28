@@ -56,3 +56,50 @@ def test_banking_runs_get_a_checkpoint_path(monkeypatch):
     tools_ab._run(cfg, "banking_knowledge", ["task_031"], "base", "20261027-000000", None)
     assert seen["save_path"].name == "results.json"
     assert seen["save_dir"].name == "glint-tools-ab-banking-other-base-banking_knowledge-20261027-000000"
+
+
+def test_outcome_tells_glint_errors_cap_stops_and_missing_rewards_apart():
+    from glint.atem import AtemParseError
+    from glint.calllog import CallLogError
+    from glint.meter import BudgetExceeded
+    from glint.runlog import outcome
+
+    def infra(err):
+        return {"termination_reason": "infrastructure_error", "info": {"error": str(err)}}
+
+    assert outcome(infra(BudgetExceeded("Meta API spend $1 reached cap $1"))) == "budget_stop"
+    assert outcome(infra(AtemParseError("host calls [] != generated"))) == "glint_error"
+    assert outcome(infra(CallLogError("no token ids"))) == "glint_error"
+    assert outcome(infra("ContextWindowExceededError: too long")) == "context_overflow"
+    assert outcome(infra("ConnectionError: reset")) == "infrastructure_error"
+    assert outcome({"termination_reason": "user_stop", "reward_info": None}) == "eval_error"
+    assert outcome({"termination_reason": "user_stop", "reward_info": {"reward": 1.0}}) == "pass"
+    assert outcome({"termination_reason": "user_stop", "reward_info": {"reward": 0.0}}) == "fail"
+
+
+def test_a_locked_checkpoint_is_retried_not_fatal(tmp_path, monkeypatch, capsys):
+    # 2026-10-27: Windows refused the read while tau2 rewrote results.json and the watcher thread died
+    import json
+    from pathlib import Path
+
+    from glint.runlog import RunEvents
+
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({"simulations": []}), encoding="utf-8")
+    events = RunEvents(results, tmp_path / "events.jsonl", label="t", poll_s=60)
+    real = Path.read_text
+
+    def locked(self, *a, **k):
+        if self == results:
+            raise PermissionError(13, "Permission denied", str(results))
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "read_text", locked)
+    for _ in range(3):
+        assert events.poll() == []
+    assert events.read_errors == 3 and "3 checkpoint reads in a row failed" in capsys.readouterr().err
+    monkeypatch.setattr(Path, "read_text", real)
+    results.write_text(json.dumps({"simulations": [{"task_id": "1", "trial": 0, "termination_reason": "user_stop",
+                                                    "reward_info": {"reward": 1.0}, "messages": []}]}),
+                       encoding="utf-8")
+    assert len(events.poll()) == 1  # back to normal once the file reads again
