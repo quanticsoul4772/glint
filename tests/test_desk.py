@@ -118,14 +118,20 @@ def test_desk_budget_records_gpu_and_refuses_past_the_caps(tmp_path):
     log, ledger = tmp_path / "sessions.jsonl", tmp_path / "ledger.jsonl"
     budget = DeskBudget(gpu_usd_per_day=0.25, pairs_per_day=2, ledger=ledger, log_path=log)
     budget.check()
-    snap = {"alone": {"elapsed_s": 60}, "tools": {"elapsed_s": 70, "outcome": {"passed": True}}}
-    session = types.SimpleNamespace(id="s1", task_id="task_054", started=0.0, ended=180.0, wake_error=None,
-                                    snapshot=lambda: snap)
-    budget.record(session)  # 180 s + 120 s scale-down = 300 s at $2.94/h = $0.245
+    panes = {"alone": types.SimpleNamespace(error="boom", started=0.0, finished=60.0),
+             "tools": types.SimpleNamespace(error=None, started=0.0, finished=70.0)}
+
+    def session():
+        return types.SimpleNamespace(id="s1", task_id="task_054", started=0.0, ended=180.0, wake_error=None,
+                                     stop_reason=None, charged_s=0.0, panes=panes,
+                                     outcomes=lambda: {"alone": None, "tools": True})
+
+    budget.record(session())  # 180 s + 120 s scale-down = 300 s at $2.94/h = $0.245
     row = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
     assert row["gpu_seconds"] == 300 and row["tools_outcome"] is True and row["alone_outcome"] is None
+    assert row["alone_error"] == "boom" and row["tools_seconds"] == 70
     budget.check()  # $0.245 < $0.25, 1 pair < 2
-    budget.record(session)
+    budget.record(session())
     with pytest.raises(BudgetExceeded):
         budget.check()
 
@@ -189,3 +195,76 @@ def test_results_tab_reports_by_task_with_roles():
 def test_replay_marks_the_tuned_tasks():
     tuned = {s["id"]: s["tuned"] for s in client.get("/api/scenarios").json()}
     assert tuned == {"task_054": True, "task_038": True, "task_050": False, "task_052": False}
+
+
+def test_a_running_pair_is_charged_as_it_runs_and_stopped_at_the_cap(tmp_path):
+    import json
+    import time
+
+    from glint.desk import live
+
+    budget = live.DeskBudget(gpu_usd_per_day=0.1, pairs_per_day=5, ledger=tmp_path / "ledger.jsonl",
+                             log_path=tmp_path / "sessions.jsonl")
+    session = live.LiveSession("task_054", _fake_build, charge=budget.charge)
+    session.started = time.time() - 200  # 200 s at $2.94/h = $0.163, past the $0.10 cap
+    try:
+        session.tick()
+        assert session.stop_reason.startswith("the daily GPU cap is reached") and live.halt.is_set()
+        assert round(session.charged_s) == 200
+        session.ended = session.started + 210
+        budget.record(session)  # charges only the rest: 10 s + the 120 s scale-down
+        rows = [json.loads(x) for x in (tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert round(sum(r["seconds"] for r in rows if r.get("kind") == "gpu")) == 330
+        logged = json.loads((tmp_path / "sessions.jsonl").read_text(encoding="utf-8"))
+        assert logged["stopped"] == session.stop_reason
+    finally:
+        live.halt.clear()
+
+
+def test_a_pair_past_its_time_limit_is_stopped():
+    import time
+
+    from glint.desk import live
+
+    session = live.LiveSession("task_054", _fake_build, max_seconds=10)
+    session.started = time.time() - 20
+    try:
+        session.tick()
+        assert "minute limit" in session.stop_reason
+        assert live.halt.is_set()
+    finally:
+        live.halt.clear()
+
+
+def test_halt_refuses_glimmer_calls_but_not_the_customer():
+    import pytest
+
+    from glint.desk import live
+
+    route = live.router(lambda **kw: "spark", lambda **kw: "glimmer")
+    assert route(model="openai/Muse-Glimmer-30B-modal") == "glimmer"
+    live.halt.set()
+    try:
+        with pytest.raises(live.BudgetExceeded):
+            route(model="openai/Muse-Glimmer-30B-modal")
+        assert route(model="openai/muse-spark-1.3-contributor") == "spark"
+    finally:
+        live.halt.clear()
+
+
+def test_a_finished_pane_is_labeled_once():
+    import time
+
+    from glint.desk import live
+
+    calls = []
+    session = live.LiveSession("task_054", _fake_build, label=lambda sim: calls.append(1) or {})
+    for pane in session.panes.values():
+        pane.orchestrator.gate.set()
+    session.start()
+    for pane in session.panes.values():
+        while pane.finished is None:
+            time.sleep(0.01)
+    session.snapshot()
+    session.snapshot()
+    assert calls == [1]

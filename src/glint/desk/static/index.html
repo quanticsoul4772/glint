@@ -186,7 +186,10 @@ async function runLive() {
   liveTimer = setInterval(async () => {
     const snap = await (await fetch(`/api/live/${body.id}`)).json();
     showLive(snap);
-    if (snap.done) { clearInterval(liveTimer); $("live-note").textContent = "Live run finished."; }
+    if (snap.done) {
+      clearInterval(liveTimer);
+      $("live-note").textContent = snap.stopped ? `Live run stopped: ${snap.stopped}.` : "Live run finished.";
+    }
   }, 2000);
 }
 function stop() { clearInterval(timer); timer = null; $("play").textContent = "Play"; }

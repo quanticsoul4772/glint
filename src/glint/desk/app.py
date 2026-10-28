@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from glint import paths
 from glint.desk import live
 
 HERE = Path(__file__).resolve().parent
@@ -58,7 +59,7 @@ LIVE_ENV = ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL
 # Live mode wakes the Glimmer GPU ($2.94/h while up): a daily GPU cap and pair limit, kept in the meter ledger
 budget = live.DeskBudget(gpu_usd_per_day=float(os.environ.get("GLINT_DESK_GPU_USD_PER_DAY", "3")),
                          pairs_per_day=int(os.environ.get("GLINT_DESK_PAIRS_PER_DAY", "12")),
-                         log_path=os.environ.get("GLINT_DESK_LOG", "desk_sessions.jsonl"))
+                         log_path=os.environ.get("GLINT_DESK_LOG") or str(paths.HOME / "desk_sessions.jsonl"))
 _sessions: dict[str, live.LiveSession] = {}
 _lock = threading.Lock()
 
@@ -88,7 +89,8 @@ def _new_session(task_id: str) -> live.LiveSession:
     task = banking_tasks()[task_id]
     build = live.tau2_builder(task, settings["glimmer_args"], settings["glimmer_model"], settings["user_args"],
                               seed=int.from_bytes(os.urandom(2), "big"))
-    return live.LiveSession(task_id, build, live.tau2_labeler(task), wake=_wake(settings), on_done=budget.record)
+    return live.LiveSession(task_id, build, live.tau2_labeler(task), wake=_wake(settings), on_done=budget.record,
+                            charge=budget.charge)
 
 
 @app.get("/api/live/status")
