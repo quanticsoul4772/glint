@@ -123,10 +123,12 @@ def test_doubled_generated_name_matches_a_normalized_host_name():
     assert json.loads(host.choices[0].message.tool_calls[0].function.arguments) == {"zip": "02134"}
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: reparse_response compares the host's raw call name with the normalized "
-                   "generated name, so a doubled name the host passes through unnormalized raises AtemParseError")
 def test_doubled_name_from_both_host_and_text_is_not_a_parse_error():
+    # regression: the host's raw name was compared with the normalized generated name, so a doubled name the host
+    # passed through unnormalized raised AtemParseError and ended the run as a Glint error
     text = call("find_user_id_by_name_zip.find_user_id_by_name_zip", {"zip": "02134"})
     host = response(text, [("find_user_id_by_name_zip.find_user_id_by_name_zip", {"zip": 2134})])
     reparse_response(host, TOOLS)
-    assert json.loads(host.choices[0].message.tool_calls[0].function.arguments) == {"zip": "02134"}
+    fn = host.choices[0].message.tool_calls[0].function
+    assert json.loads(fn.arguments) == {"zip": "02134"}
+    assert fn.name == "find_user_id_by_name_zip"  # the environment is called by the tool's real name
