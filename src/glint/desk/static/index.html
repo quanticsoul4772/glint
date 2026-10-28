@@ -65,6 +65,8 @@
   <button class="primary" id="play">Play</button>
   <button id="step">Step</button>
   <button id="all">Show all</button>
+  <button id="live" title="Run this task now on Glimmer 30B (Modal)">Run live</button>
+  <span id="live-note" class="sub"></span>
   <label>Speed <select id="speed"><option value="1400">slow</option><option value="700" selected>normal</option><option value="250">fast</option></select></label>
   <label><input type="checkbox" id="lookups" checked> show lookups</label>
 </div>
@@ -137,6 +139,42 @@ function showUpTo(n) {
     }
   }
 }
+let liveTimer = null;
+function showLive(snap) {
+  for (const side of ["alone", "tools"]) {
+    const pane = snap[side], feed = $(side);
+    feed.innerHTML = "";
+    pane.events.forEach((ev) => { if (ev.kind !== "lookup" || $("lookups").checked) feed.appendChild(render(ev)); });
+    feed.scrollTop = feed.scrollHeight;
+    $(side + "-meta").textContent = `live · ${pane.status} · ${pane.elapsed_s} s`;
+    const out = $(side + "-out");
+    out.className = "outcome";
+    if (pane.error) { out.className = "outcome fail"; out.textContent = "Error: " + pane.error; }
+    else if (pane.outcome) {
+      out.className = "outcome " + (pane.outcome.passed ? "pass" : "fail");
+      out.textContent = pane.outcome.passed ? "Task completed correctly: the bank's records match the correct outcome."
+        : "Task failed: the bank's records do not match the correct outcome." +
+          (side === "alone" && pane.overruled_writes !== undefined
+            ? (pane.overruled_writes ? ` ${pane.overruled_writes} action(s) a Glint tool would have overruled.`
+                                     : " No action here is one Glint's tools judge; it failed for another reason.") : "");
+    }
+  }
+}
+async function runLive() {
+  stop(); clearInterval(liveTimer);
+  const id = $("scenario").value;
+  const r = await fetch("/api/live/start", {method: "POST", headers: {"Content-Type": "application/json"},
+                                            body: JSON.stringify({task_id: id})});
+  const body = await r.json();
+  if (!r.ok) { $("live-note").textContent = body.detail || "live run failed to start"; return; }
+  $("live-note").textContent = "Live run started: both agents are talking to a simulated customer now.";
+  $("source").textContent = "Live: Muse Glimmer 30B bf16 on Modal; customer played by Muse Spark (Meta Model API).";
+  liveTimer = setInterval(async () => {
+    const snap = await (await fetch(`/api/live/${body.id}`)).json();
+    showLive(snap);
+    if (snap.done) { clearInterval(liveTimer); $("live-note").textContent = "Live run finished."; }
+  }, 2000);
+}
 function stop() { clearInterval(timer); timer = null; $("play").textContent = "Play"; }
 function play() {
   if (timer) return stop();
@@ -163,6 +201,9 @@ async function init() {
   $("step").onclick = () => { stop(); pos = Math.min(pos + 1, steps()); showUpTo(pos); };
   $("all").onclick = () => { stop(); pos = steps(); showUpTo(pos); };
   $("lookups").onchange = () => showUpTo(pos);
+  $("live").onclick = runLive;
+  const status = await (await fetch("/api/live/status")).json();
+  if (!status.available) { $("live").disabled = true; $("live").title = "Live mode needs: " + status.missing.join(", "); }
   if (list.length) load(list[0].id);
 }
 init();

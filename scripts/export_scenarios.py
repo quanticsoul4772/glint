@@ -14,7 +14,8 @@ from pathlib import Path
 from tau2.data_model.tasks import Task
 from tau2.domains.banking_knowledge.environment import get_environment
 
-from glint.decisions import GLINT_TOOLS, label_run
+from glint.decisions import label_run
+from glint.desk.events import customer_summary, outcome, timeline
 
 DATA = Path(r"<workspace>\measure\data")
 TASKS = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains\banking_knowledge\tasks.json")
@@ -26,66 +27,6 @@ TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increa
           "task_038": "Three disputed charges on a card that is being reissued",
           "task_050": "Credit limit increase request",
           "task_052": "Credit limit increase with a recent prior increase"}
-
-
-def _short(value, n=400) -> str:
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    return text if len(text) <= n else text[:n] + " …"
-
-
-def customer_summary(instructions: str) -> str:
-    """The customer's situation and goal from the simulator brief, without markdown (the brief also holds persona
-    details and hidden facts the agent must ask for, which the page should not show)."""
-    import re
-
-    parts = []
-    for label in ("Your situation", "Your goal"):
-        # the section runs to the next blank line or the next **Label:** heading
-        m = re.search(rf"\*\*{label}:\*\*\s*(.+?)(?=\n\s*\n|\*\*[A-Z][^*]+:\*\*|$)", instructions, re.DOTALL)
-        if m:
-            parts.append(" ".join(m.group(1).replace("**", "").split()))
-    text = " ".join(parts) or " ".join(instructions.replace("**", "").split())
-    return _short(text, 500)
-
-
-def timeline(sim: dict, overrules: dict[int, dict]) -> list[dict]:
-    """Events in conversation order. `overrules`: message index -> decision for writes a tool would overrule."""
-    results = {m.get("id"): m.get("content") for m in sim["messages"] if m["role"] == "tool"}
-    events = []
-    for i, m in enumerate(sim["messages"]):
-        if m["role"] == "user" and m.get("content"):
-            events.append({"kind": "customer", "text": m["content"]})
-        if m["role"] != "assistant":
-            continue
-        if m.get("content"):
-            events.append({"kind": "agent", "text": m["content"]})
-        for tc in m.get("tool_calls") or []:
-            name, args = tc["name"], tc["arguments"]
-            result = results.get(tc.get("id"))
-            if name == "unlock_discoverable_agent_tool":
-                continue
-            if name in GLINT_TOOLS:
-                events.append({"kind": "verdict", "tool": name, "args": args, "result": _short(result, 1500)})
-                continue
-            if name == "call_discoverable_agent_tool":
-                inner = args.get("arguments")
-                name, args = args.get("agent_tool_name", ""), json.loads(inner) if isinstance(inner, str) else inner
-            event = {"kind": "action" if name in WRITES else "lookup", "tool": name, "args": args,
-                     "result": _short(result), "error": str(result or "").startswith("Error")}
-            if i in overrules and overrules[i]["tool"] == name:
-                event["overruled"] = overrules[i]["reasons"]
-            events.append(event)
-    return events
-
-
-WRITES = {"file_credit_card_transaction_dispute_4829", "order_replacement_credit_card_7291",
-          "submit_credit_limit_increase_request_7392", "approve_credit_limit_increase_5847",
-          "deny_credit_limit_increase_5848"}
-
-
-def outcome(sim: dict) -> dict:
-    r = sim.get("reward_info") or {}
-    return {"passed": r.get("reward") == 1.0, "database_matches_gold": (r.get("db_check") or {}).get("db_match")}
 
 
 def main():
@@ -108,9 +49,9 @@ def main():
             "id": task_id, "title": TITLES.get(task_id, task_id),
             "customer": customer_summary(str(task.user_scenario.instructions)),
             "source": f"{folder} (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
-            "alone": {"trial": alone["trial"], "events": timeline(alone, overrules), "outcome": outcome(alone),
+            "alone": {"trial": alone["trial"], "events": timeline(alone["messages"], overrules), "outcome": outcome(alone),
                       "overruled_writes": len(overrules)},
-            "tools": {"trial": helped["trial"], "events": timeline(helped, {}), "outcome": outcome(helped)},
+            "tools": {"trial": helped["trial"], "events": timeline(helped["messages"]), "outcome": outcome(helped)},
         })
         print(f"{task_id}: alone trial {alone['trial']} ({len(overrules)} overruled writes), "
               f"tools trial {helped['trial']}")

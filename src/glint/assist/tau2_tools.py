@@ -175,6 +175,21 @@ _ASSISTED = {"retail": AssistedRetailTools, "airline": AssistedAirlineTools}
 _ASSISTED_BANKING: dict[type, type] = {}  # composed banking toolkit class -> its assisted subclass
 
 
+def assist_environment(env, domain: str):
+    """Give one environment the decision tools, on its own live database. Used by install() for every environment
+    of a domain, and by the Bank Desk for just the tools pane."""
+    if domain == "banking_knowledge":
+        # The banking toolkit class is composed per retrieval variant and holds per-episode state, so keep the
+        # instance and put the decision tools ahead of its class in the MRO
+        cls = type(env.tools)
+        if cls not in _ASSISTED_BANKING:
+            _ASSISTED_BANKING[cls] = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
+        env.tools.__class__ = _ASSISTED_BANKING[cls]
+    else:
+        env.tools = _ASSISTED[domain](env.tools.db)
+    return env
+
+
 def install(domain: str) -> None:
     """Make every environment τ² builds for `domain` carry the decision tools. Call once, before the run starts."""
     base = registry.get_env_constructor(domain)
@@ -182,17 +197,7 @@ def install(domain: str) -> None:
         return
 
     def constructor(*args, **kwargs):
-        env = base(*args, **kwargs)
-        if domain == "banking_knowledge":
-            # The banking toolkit class is composed per retrieval variant and holds per-episode state, so keep the
-            # instance and put the decision tools ahead of its class in the MRO
-            cls = type(env.tools)
-            if cls not in _ASSISTED_BANKING:
-                _ASSISTED_BANKING[cls] = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
-            env.tools.__class__ = _ASSISTED_BANKING[cls]
-        else:
-            env.tools = _ASSISTED[domain](env.tools.db)
-        return env
+        return assist_environment(base(*args, **kwargs), domain)
 
     constructor.glint_assisted = True
     registry._domains[domain] = constructor
