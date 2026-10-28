@@ -555,7 +555,8 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
     enforcer = tools_ab._enforcer({}, "retail", tmp_path)
     assert enforcer.events.path.endswith("gates-retail.sqlite") and enforcer.context() == {
         "task_id": "unknown", "trial": "unknown"}
-    for name in ("banking-gated", "heldout2-gated", "banking-test-gated"):
+    assert "banking-test-gated" not in tools_ab.SETS  # the banking test split is read once (decision 2026-10-28)
+    for name in ("banking-gated", "heldout2-gated"):
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
