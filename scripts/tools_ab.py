@@ -36,6 +36,7 @@ import json
 import os
 import random
 import sys
+import threading
 import time
 from collections import Counter
 from contextlib import ExitStack
@@ -54,7 +55,7 @@ from glint import glimmer_serve, paths
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import recording
-from glint.meter import Caps, Meter, guarded, litellm_callback, register_litellm_prices
+from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
 from glint.runlog import RunEvents, outcome
 
@@ -192,11 +193,15 @@ def _run(cfg: dict, domain: str, ids: list[str], arm: str, stamp: str, endpoint:
 def _commit() -> str:
     import subprocess
 
-    out = subprocess.run(["git", "-C", str(Path(__file__).resolve().parents[1]), "rev-parse", "--short", "HEAD"],
-                         capture_output=True, text=True, check=False)
-    dirty = subprocess.run(["git", "-C", str(Path(__file__).resolve().parents[1]), "status", "--porcelain", "src"],
-                           capture_output=True, text=True, check=False).stdout.strip()
-    return out.stdout.strip() + ("-dirty" if dirty else "")
+    # check=True and a non-empty commit: an empty commit would switch the mixed-code guard off for good
+    repo = str(Path(__file__).resolve().parents[1])
+    out = subprocess.run(["git", "-C", repo, "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
+                         check=True).stdout.strip()
+    if not out:
+        raise SystemExit(f"git rev-parse gave no commit for {repo}; the run cannot record which code it measures")
+    dirty = subprocess.run(["git", "-C", repo, "status", "--porcelain", "src"], capture_output=True, text=True,
+                           check=True).stdout.strip()
+    return out + ("-dirty" if dirty else "")
 
 
 def generate(cfg: dict) -> None:
@@ -216,6 +221,9 @@ def generate(cfg: dict) -> None:
     # A resume on different code would merge runs of two code versions into one comparison (the first held-out
     # arms span four commits)
     started = commit_file.read_text(encoding="utf-8").strip() if commit_file.exists() else None
+    if started == "" and "--allow-mixed-code" not in sys.argv:
+        raise SystemExit(f"{commit_file} is empty: which code this comparison started on is unknown. Write the "
+                         "starting commit into it, or pass --allow-mixed-code to resume knowingly")
     if started and started != commit and "--allow-mixed-code" not in sys.argv:
         raise SystemExit(f"this comparison started on commit {started}, the code is now {commit}; resuming would mix "
                          "versions. Start a fresh stamp, or pass --allow-mixed-code.")
@@ -232,8 +240,14 @@ def generate(cfg: dict) -> None:
     litellm.callbacks = [litellm_callback((glim, ("Muse-Glimmer",)), (meta, ("muse-spark", "muse-wonder")))]
     base, glimmer = llm_utils.completion, reparsing(llm_utils.completion)
 
+    halt = threading.Event()  # set by glimmer_serve.session() when the GPU cap trips or its watcher fails
+
     def route(*args, **kwargs):
-        return (glimmer if "Muse-Glimmer" in kwargs.get("model", "") else base)(*args, **kwargs)
+        if "Muse-Glimmer" not in kwargs.get("model", ""):
+            return base(*args, **kwargs)
+        if halt.is_set():
+            raise BudgetExceeded("the Modal session was halted (GPU cap reached or the GPU watcher failed)")
+        return glimmer(*args, **kwargs)
 
     # every Glimmer call's exact prompt and completion token ids (τ²'s saved runs keep neither), for activation capture
     recorded = recording(route, data / "calls.jsonl")
@@ -246,7 +260,7 @@ def generate(cfg: dict) -> None:
             env = os.environ | {"MODAL_CONFIG_PATH": str(paths.MODAL_CONFIG), "MODAL_PROFILE": "quanticsoul4772",
                                 "PYTHONIOENCODING": "utf-8"}
             endpoint = glimmer_serve.deploy(MODAL_CLI, env)
-            stack.enter_context(glimmer_serve.session(gpu, MODAL_CLI, env, tag=cfg["save"]))
+            halt = stack.enter_context(glimmer_serve.session(gpu, MODAL_CLI, env, tag=cfg["save"]))
             log = stack.enter_context(glimmer_serve.LogWatch(MODAL_CLI, env))
             glimmer_serve.wait_ready(endpoint, os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"],
                                      failed=log.failure, log_lines=lambda: len(log.lines))
@@ -258,6 +272,9 @@ def generate(cfg: dict) -> None:
                                label=f"{arm} {domain}")
             with events:
                 results = _run(cfg, domain, ids, arm, stamp, endpoint)
+            if halt.is_set():  # the drained runs are not results: no arm file, so a resume reruns this arm
+                raise BudgetExceeded(f"{arm} {domain}: the Modal session was halted mid-arm; the arm file is not "
+                                     "written and a resumed run starts this arm again")
             (data / f"{arm}-{domain}.json").write_text(results.model_dump_json(), encoding="utf-8")
             kinds = Counter(outcome(s.model_dump(mode="json")) for s in results.simulations)
             if kinds["infrastructure_error"]:

@@ -183,3 +183,47 @@ def test_litellm_knows_the_meta_prices():
     for model in ("openai/muse-spark-1.3-contributor", "openai/meta-models/Muse-Glimmer-30B"):
         p, c = litellm.cost_per_token(model=model, prompt_tokens=1000, completion_tokens=500)
         assert abs((p + c) - meta_cost(model, 1000, 0, 500)) < 1e-12
+
+
+def test_a_metering_error_closes_the_cap_instead_of_running_free(tmp_path):
+    # LiteLLM swallows logger exceptions; an unmetered call must close the pool, not leave the cap open
+    import types
+
+    import pytest
+
+    from glint.meter import BudgetExceeded, Caps, Meter, litellm_callback
+
+    meter = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), ledger=tmp_path / "ledger.jsonl", phase="fail-test")
+    logger = litellm_callback((meter, ("muse-spark",)))
+    usage = types.SimpleNamespace(prompt_tokens=10, completion_tokens=5)
+    # an unpriced model raises inside record_meta
+    logger.log_success_event({"model": "muse-spark-unpriced"}, types.SimpleNamespace(usage=usage), 0, 0)
+    with pytest.raises(BudgetExceeded, match="meter for phase fail-test is closed"):
+        meter.check_meta()
+
+
+def test_a_successful_call_without_usage_closes_the_cap(tmp_path):
+    import types
+
+    import pytest
+
+    from glint.meter import BudgetExceeded, Caps, Meter, litellm_callback
+
+    meter = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), ledger=tmp_path / "ledger.jsonl", phase="no-usage")
+    logger = litellm_callback((meter, ("muse-spark",)))
+    logger.log_failure_event({"model": "muse-spark-1.3-contributor"}, types.SimpleNamespace(usage=None), 0, 0)
+    meter.check_meta()  # a failed call with no usage was not billed
+    logger.log_success_event({"model": "muse-spark-1.3-contributor"}, types.SimpleNamespace(usage=None), 0, 0)
+    with pytest.raises(BudgetExceeded, match="carried no usage"):
+        meter.check_meta()
+
+
+def test_a_broken_ledger_line_names_the_file_and_line(tmp_path):
+    import pytest
+
+    from glint.meter import Caps, Meter
+
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text('{"kind": "meta", "usd": 0.1, "phase": "p"}\n{"kind": "me', encoding="utf-8")
+    with pytest.raises(RuntimeError, match="line 2 is not valid JSON"):
+        Meter(Caps(meta_usd=1.0, gpu_usd=0.0), ledger=ledger, phase="p")

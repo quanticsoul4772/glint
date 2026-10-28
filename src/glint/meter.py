@@ -8,8 +8,10 @@ against the Meta billing page and the Modal usage page.
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
+import traceback
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,10 +79,16 @@ class Meter:
         self._lock = threading.Lock()
         self.meta_usd = 0.0
         self.gpu_usd = 0.0
+        self.failure: str | None = None  # set by fail(): the meter could not record a call, so the cap is closed
         ledger.parent.mkdir(parents=True, exist_ok=True)
         if ledger.exists():
-            for line in ledger.read_text(encoding="utf-8").splitlines():
-                rec = json.loads(line)
+            for n, line in enumerate(ledger.read_text(encoding="utf-8").splitlines(), 1):
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError as e:
+                    raise RuntimeError(f"spend ledger {ledger} line {n} is not valid JSON ({e.msg}); a process was "
+                                       "probably killed mid-write. Inspect that line, then fix or delete it: the caps "
+                                       "cannot be checked until the ledger reads cleanly") from e
                 if rec.get("phase") != phase:
                     continue
                 if rec["kind"] == "meta":
@@ -111,7 +119,13 @@ class Meter:
                           "tag": tag})
         return usd
 
+    def fail(self, reason: str) -> None:
+        """Close this meter: a call could not be recorded, so its spend is unknown and no further call may run."""
+        self.failure = self.failure or reason
+
     def check_meta(self) -> None:
+        if self.failure:
+            raise BudgetExceeded(f"the meter for phase {self.phase} is closed: {self.failure}")
         if self.meta_usd >= self.caps.meta_usd:
             raise BudgetExceeded(f"Meta API spend ${self.meta_usd:.4f} reached cap ${self.caps.meta_usd}")
 
@@ -168,25 +182,40 @@ def litellm_callback(*pools):
             # silently dropped and its pool is never metered.
             self.glint_logger_id = uuid.uuid4().hex
 
-        def _record(self, kwargs, response_obj):
+        def _record(self, kwargs, response_obj, success: bool):
+            # LiteLLM swallows exceptions raised in a logger (it prints them only at verbose level), so an error here
+            # would leave the call unmetered and the cap open. Any failure closes every pool this call belongs to:
+            # their next check_meta raises with the reason.
+            model = str(kwargs.get("model", ""))
+            try:
+                self._meter_call(kwargs, response_obj, model, success)
+            except Exception as e:  # noqa: BLE001  (printed in full; the pools are closed below)
+                reason = f"metering {model!r} failed: {type(e).__name__}: {e}"
+                print(f"METER FAILED: {reason}\n{traceback.format_exc()}", file=sys.stderr, flush=True)
+                for meter, only in routed:
+                    if _matches(model, only):
+                        meter.fail(reason)
+
+        def _meter_call(self, kwargs, response_obj, model, success):
             usage = getattr(response_obj, "usage", None)
             if usage is None:
-                return
-            model = kwargs.get("model", "")
+                if success and any(_matches(model, only) for _, only in routed):
+                    raise ValueError("a successful response carried no usage, so its cost is unknown")
+                return  # a failed call with no usage was not billed
             details = getattr(usage, "prompt_tokens_details", None)
             cached = getattr(details, "cached_tokens", 0) or 0
             out_details = getattr(usage, "completion_tokens_details", None)
             reasoning = getattr(out_details, "reasoning_tokens", 0) or 0
-            tag = str((kwargs.get("litellm_params") or {}).get("metadata", {}).get("tag", ""))
+            tag = str(((kwargs.get("litellm_params") or {}).get("metadata") or {}).get("tag", ""))
             for meter, only in routed:
                 if _matches(model, only):
                     meter.record_meta(model, usage.prompt_tokens or 0, cached, usage.completion_tokens or 0,
                                       reasoning, tag=tag)
 
         def log_success_event(self, kwargs, response_obj, start_time, end_time):
-            self._record(kwargs, response_obj)
+            self._record(kwargs, response_obj, success=True)
 
         def log_failure_event(self, kwargs, response_obj, start_time, end_time):
-            self._record(kwargs, response_obj)
+            self._record(kwargs, response_obj, success=False)
 
     return _MeterLogger()

@@ -151,10 +151,10 @@ def test_session_stops_the_app_when_the_gpu_cap_is_reached_mid_batch(monkeypatch
     meter = Meter(Caps(meta_usd=0.0, gpu_usd=0.01), ledger=tmp_path / "ledger.jsonl", phase="guard-test")
     t0 = time.time()
     with (pytest.raises(BudgetExceeded, match="reached during the session"),
-          glimmer_serve.session(meter, "modal", {}, tag="t", check_s=0.2)):
-        while ["app", "stop"] not in calls and time.time() - t0 < 30:  # the batch, until the watcher stops it
+          glimmer_serve.session(meter, "modal", {}, tag="t", check_s=0.2) as halt):
+        while not halt.is_set() and time.time() - t0 < 30:  # the batch, until the watcher halts it
             time.sleep(0.1)
-    assert ["app", "stop"] in calls and 10 < time.time() - t0 < 30
+    assert halt.is_set() and ["app", "stop"] in calls and 10 < time.time() - t0 < 30
     assert meter.gpu_usd > 0
 
 
@@ -268,3 +268,29 @@ def test_a_log_watch_that_cannot_start_is_reported_by_failure():
         time.sleep(0.05)
     assert watch.failure().startswith("the log watch failed")
     watch._closed = True
+
+
+def test_a_watcher_failure_halts_the_batch_stops_the_app_and_raises(monkeypatch, tmp_path):
+    # a watcher exception used to kill the cap and the spend writes silently while the batch ran on
+    import subprocess
+    import time
+
+    from glint import glimmer_serve
+    from glint.meter import Caps, Meter
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", _fake_modal(calls))
+    monkeypatch.setattr(glimmer_serve, "RECORD_EVERY_S", 0.1)
+    meter = Meter(Caps(meta_usd=0.0, gpu_usd=5.0), ledger=tmp_path / "ledger.jsonl", phase="watch-fail")
+
+    def broken(*a, **k):
+        raise OSError("ledger disk full")
+
+    monkeypatch.setattr(meter, "record_gpu", broken)
+    # the last spend write in the session's cleanup hits the same broken ledger, so that error is what surfaces
+    with (pytest.raises(OSError, match="ledger disk full"),
+          glimmer_serve.session(meter, "modal", {}, tag="t", check_s=0.05) as halt):
+        t0 = time.time()
+        while not halt.is_set() and time.time() - t0 < 10:
+            time.sleep(0.05)
+        assert halt.is_set() and ["app", "stop"] in calls
