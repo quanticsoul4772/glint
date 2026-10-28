@@ -267,3 +267,99 @@ def test_unjudged_writes_are_counted():
                                     {"flight_number": "HAT178", "date": "2024-05-30"}]}),
                     ("get_user_details", {"user_id": "daiki_muller_1116"})], unjudged)
     assert out == [] and unjudged == {"send_certificate": 1, "update_reservation_flights": 1}
+
+
+# --- Mutation-testing gaps (cosmic-ray on main, 2026-10-28: 144 of 419 mutants survived) ----------------------------
+# Each test pins a comparison that a flipped operator (`<`, `<=`, `is`, `^`) or a shifted index passed unnoticed.
+GOLD, USER = "cc_584f9c5d00_gold", "584f9c5d00"
+
+
+def _db54():
+    env = banking_env(retrieval_variant="bm25_grep")
+    env.tools.update_db(_task("banking_knowledge", "task_054").initial_state.initialization_data.agent_data)
+    return env.tools.db
+
+
+def test_banking_dispute_mismatches_in_both_directions():
+    # card_action keep_active vs the policy's cancel_and_reissue (a later replacement on the same card), and a True
+    # provisional-credit flag where the policy says False: the reverse of the cases above
+    from glint.decisions import _banking
+
+    later = [("order_replacement_credit_card_7291", {"credit_card_account_id": GOLD})]
+    v = _banking(_db54(), "file_credit_card_transaction_dispute_4829", _dispute_args(), later)
+    assert v[0] == "overruled" and "card_action keep_active != cancel_and_reissue" in v[1]
+    dup = _dispute_args(dispute_reason="duplicate_charge", contacted_merchant=False, eligible_for_provisional_credit=True)
+    v = _banking(_db54(), "file_credit_card_transaction_dispute_4829", dup, [])
+    assert v[0] == "overruled" and "eligible_for_provisional_credit True != False" in v[1]
+
+
+def test_banking_later_writes_on_another_card_do_not_count():
+    # another card's id that sorts before this one ("cc_000...") must not match it
+    from glint.decisions import _banking
+
+    other = "cc_000_other"
+    v = _banking(_db54(), "order_replacement_credit_card_7291", {"credit_card_account_id": GOLD, "user_id": USER},
+                 [("submit_credit_limit_increase_request_7392", {"credit_card_account_id": other})])
+    assert v == ("agreed", [])
+    v = _banking(_db54(), "file_credit_card_transaction_dispute_4829", _dispute_args(),
+                 [("order_replacement_credit_card_7291", {"credit_card_account_id": other})])
+    assert v == ("agreed", [])  # no replacement of this card later: keep_active stands
+
+
+def _pending(db, *rows):
+    for n, (card, amount) in enumerate(rows):
+        db.credit_limit_increase_requests.data[f"cli_test_{n}"] = {
+            "credit_card_account_id": card, "status": "PENDING", "requested_increase_amount": amount}
+    return db
+
+
+def test_banking_decision_reads_only_this_cards_latest_pending_request():
+    from glint.decisions import _banking
+
+    approve = {"credit_card_account_id": GOLD, "user_id": USER, "new_credit_limit": 7500}
+    # a pending request on another card is not this card's request
+    v = _banking(_pending(_db54(), ("cc_other", 2500)), "approve_credit_limit_increase_5847", approve, [])
+    assert v == ("overruled", ["no credit limit increase request was submitted before this decision"])
+    # two pending requests on this card: the latest (+2,500 on 5,000) is the one decided
+    assert _banking(_pending(_db54(), (GOLD, 1000), (GOLD, 2500)), "approve_credit_limit_increase_5847", approve,
+                    []) == ("agreed", [])
+
+
+def test_banking_approval_above_the_submitted_increase_is_overruled():
+    d = _decide("task_054", GOLD, USER, 2500, "approve_credit_limit_increase_5847", {"new_credit_limit": 9000})
+    assert d.label == "overruled" and d.reasons == ["new_credit_limit 9,000 != current limit + submitted increase 7,500"]
+
+
+def test_banking_denial_with_a_reason_that_sorts_first_is_overruled():
+    d = _decide("task_052", "cc_5e4c1a83b0_bronze", "5e4c1a83b0", 500, "deny_credit_limit_increase_5848",
+                {"denial_reason": "account_too_new"})
+    assert d.label == "overruled" and d.reasons == ["denial_reason account_too_new != cooldown_period_active"]
+
+
+def test_banking_a_write_before_this_one_is_not_later():
+    # the increase submitted before the replacement is not a later request: the replacement is agreed
+    unlock = [("unlock_discoverable_agent_tool", {"agent_tool_name": n}) for n in
+              ("submit_credit_limit_increase_request_7392", "order_replacement_credit_card_7291")]
+    sim = _sim("task_054", unlock + [
+        _hidden("submit_credit_limit_increase_request_7392",
+                {"credit_card_account_id": GOLD, "user_id": USER, "requested_increase_amount": 2500}),
+        _hidden("order_replacement_credit_card_7291", {"credit_card_account_id": GOLD, "user_id": USER,
+                                                       "shipping_address": "1456 Astoria Boulevard",
+                                                       "reason": "fraud_suspected", "expedited_shipping": True})])
+    d = label_run(sim, _task("banking_knowledge", "task_054"), banking_env(retrieval_variant="bm25_grep"))
+    assert [(x.tool, x.label) for x in d][-1] == ("order_replacement_credit_card_7291", "agreed")
+
+
+def test_calls_after_a_user_message_are_still_read():
+    sim = _sim("82", [("return_delivered_order_items", {"order_id": "#W9571698", "item_ids": ["6065192424"],
+                                                         "payment_method_id": "credit_card_1565124"})])
+    sim["messages"].insert(0, {"role": "user", "content": "I want to return my item."})
+    [d] = label_run(sim, _task("retail", "82"), registry.get_env_constructor("retail")())
+    assert d.label == "overruled"
+
+
+def test_unjudged_writes_of_the_same_tool_add_up():
+    unjudged = {}
+    _airline([("send_certificate", {"user_id": "nobody_000", "amount": 100}),
+              ("send_certificate", {"user_id": "nobody_001", "amount": 50})], unjudged)
+    assert unjudged == {"send_certificate": 2}
