@@ -12,6 +12,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -21,6 +22,7 @@
     "change": "improved",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -30,6 +32,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -39,6 +42,7 @@
     "change": "improved",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -48,6 +52,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -57,6 +62,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -66,6 +72,7 @@
     "change": "worse",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -75,6 +82,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -84,6 +92,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -93,6 +102,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -102,6 +112,7 @@
     "change": "worse",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -111,6 +122,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -120,6 +132,7 @@
     "change": "worse",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -129,6 +142,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -138,6 +152,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -147,6 +162,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -156,6 +172,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -165,6 +182,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -174,6 +192,7 @@
     "change": "tied",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    },
    {
@@ -183,6 +202,7 @@
     "change": "worse",
     "overflows": 0,
     "infra_errors": 0,
+    "glint_errors": 0,
     "no_data_reason": null
    }
   ],
@@ -428,8 +448,176 @@
   }
  },
  {
+  "set": "banking",
+  "title": "Banking, untuned tasks (current tools)",
+  "role": "untuned",
+  "note": "The 10 banking tasks with a dispute or credit-limit step that no tool change came from, on the current tools (after commit ce7b242). The tools' rules were checked against these tasks' correct answers, so they are not fully held-out. By task: 3 improved, 7 tied, 0 worse (sign test p = 0.25). k=4. Glimmer on Modal.",
+  "tasks": [
+   {
+    "task": "banking_knowledge-task_031",
+    "alone": "3/4",
+    "tools": "3/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_037",
+    "alone": "0/4",
+    "tools": "3/4",
+    "change": "improved",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_039",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_040",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_041",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_050",
+    "alone": "2/4",
+    "tools": "4/4",
+    "change": "improved",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_051",
+    "alone": "1/4",
+    "tools": "1/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_052",
+    "alone": "0/4",
+    "tools": "1/4",
+    "change": "improved",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_053",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_081",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 7,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   }
+  ],
+  "by_task": {
+   "improved": 3,
+   "tied": 7,
+   "worse": 0,
+   "no data": 0
+  },
+  "runs": {
+   "alone": [
+    6,
+    40
+   ],
+   "tools": [
+    12,
+    40
+   ]
+  }
+ },
+ {
+  "set": "banking",
+  "title": "Banking, tuned tasks (current tools)",
+  "role": "tuned",
+  "note": "Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their runs. Do not read as general evidence. On the current tools. k=4. Glimmer on Modal.",
+  "tasks": [
+   {
+    "task": "banking_knowledge-task_038",
+    "alone": "0/4",
+    "tools": "1/4",
+    "change": "improved",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_054",
+    "alone": "0/4",
+    "tools": "4/4",
+    "change": "improved",
+    "overflows": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   }
+  ],
+  "by_task": {
+   "improved": 2,
+   "tied": 0,
+   "worse": 0,
+   "no data": 0
+  },
+  "runs": {
+   "alone": [
+    0,
+    8
+   ],
+   "tools": [
+    5,
+    8
+   ]
+  }
+ },
+ {
   "set": "banking-other",
-  "title": "Banking, untuned tasks",
+  "title": "Banking, untuned tasks (earlier tools)",
   "role": "untuned",
   "note": "The banking tasks with a dispute or credit-limit step that no tool change came from. The tools' rules were checked against these tasks' correct answers, so they are not fully held-out. These runs predate the verdict fixes of commit ce7b242 (2026-10-27 16:59). 2 improved vs 0 worse is a sign test of p = 0.5. k=2. Glimmer on Modal.",
   "tasks": [
@@ -553,7 +741,7 @@
  },
  {
   "set": "banking-failures",
-  "title": "Banking, tuned tasks",
+  "title": "Banking, tuned tasks (earlier tools)",
   "role": "tuned",
   "note": "Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their runs. Do not read as general evidence. These runs predate the verdict fixes of commit ce7b242. k=4. Glimmer on Modal.",
   "tasks": [

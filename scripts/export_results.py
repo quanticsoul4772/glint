@@ -16,7 +16,8 @@ logger.remove()  # τ² logs its registry at DEBUG on import
 import tools_ab  # after the log setup above
 
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "results.json"
-SETS = [  # (set, Modal backend, title, role, note)
+TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading these tasks' runs
+SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
     ("heldout2", True, "Retail and airline, held-out tasks (current tools)", "held-out",
      ("A fresh random draw of 10 retail and 10 airline tasks, excluding the design tasks, the whole failure "
       "inventory and the first draw; no tool change came from these tasks. Run on the current tools. By task: 2 "
@@ -29,12 +30,21 @@ SETS = [  # (set, Modal backend, title, role, note)
       "The retail and airline tools were changed afterwards from these tasks' failures (commits aa1dadc and "
       "ce7b242), so this draw is now design data and does not measure the shipped tools. Retail k=4, airline k=2. "
       "Glimmer on DeepInfra.")),
-    ("banking-other", True, "Banking, untuned tasks", "untuned",
+    ("banking", True, "Banking, untuned tasks (current tools)", "untuned",
+     ("The 10 banking tasks with a dispute or credit-limit step that no tool change came from, on the current tools "
+      "(after commit ce7b242). The tools' rules were checked against these tasks' correct answers, so they are not "
+      "fully held-out. By task: 3 improved, 7 tied, 0 worse (sign test p = 0.25). k=4. Glimmer on Modal."),
+     lambda task: task not in TUNED_BANKING),
+    ("banking", True, "Banking, tuned tasks (current tools)", "tuned",
+     ("Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their "
+      "runs. Do not read as general evidence. On the current tools. k=4. Glimmer on Modal."),
+     lambda task: task in TUNED_BANKING),
+    ("banking-other", True, "Banking, untuned tasks (earlier tools)", "untuned",
      ("The banking tasks with a dispute or credit-limit step that no tool change came from. The tools' rules were "
       "checked against these tasks' correct answers, so they are not fully held-out. These runs predate the verdict "
       "fixes of commit ce7b242 (2026-10-27 16:59). 2 improved vs 0 worse is a sign test of p = 0.5. k=2. Glimmer "
       "on Modal.")),
-    ("banking-failures", True, "Banking, tuned tasks", "tuned",
+    ("banking-failures", True, "Banking, tuned tasks (earlier tools)", "tuned",
      ("Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their "
       "runs. Do not read as general evidence. These runs predate the verdict fixes of commit ce7b242. k=4. Glimmer "
       "on Modal.")),
@@ -45,7 +55,8 @@ SETS = [  # (set, Modal backend, title, role, note)
 
 def main():
     out = []
-    for name, modal, title, role, note in SETS:
+    for name, modal, title, role, note, *only in SETS:
+        keep = only[0] if only else (lambda task: True)
         cfg = tools_ab.for_backend(tools_ab.SETS[name], modal)
         if not cfg["data"].exists():
             print(f"WARNING: {name}: no data folder ({cfg['data']}); the set is left off the Results tab", flush=True)
@@ -55,6 +66,8 @@ def main():
         rows, tally = [], {"improved": 0, "tied": 0, "worse": 0, "no data": 0}
         compared = []  # the tasks with both arms: the tally and the run totals both come from these
         for key in sorted(report, key=lambda k: (k.split("-")[0], k)):
+            if not keep(key.split("-", 1)[1]):
+                continue
             arms = report[key]
             if "base" not in arms or "tools" not in arms:
                 print(f"WARNING: {name}: {key} has only the {', '.join(arms)} arm; left off the Results tab",
