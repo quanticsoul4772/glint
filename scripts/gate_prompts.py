@@ -13,7 +13,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from m1_prefix_check import AGENT_INSTRUCTION, SYSTEM_PROMPT, ids, template, bos, to_template_messages
+from m1_prefix_check import AGENT_INSTRUCTION, SYSTEM_PROMPT, bos, ids, template, to_template_messages
 from tau2.data_model.simulation import Results
 from tau2.domains.banking_knowledge.environment import get_environment
 
