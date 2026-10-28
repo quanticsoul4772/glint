@@ -709,3 +709,87 @@ def test_dispute_merchant_contact_only_required_for_non_fraud():
     assert _dispute(db, "unauthorized_fraudulent_charge", contacted=False)["eligible_for_provisional_credit"] is True
     assert _dispute(db, "duplicate_charge", contacted=False)["eligible_for_provisional_credit"] is False
     assert _dispute(db, "duplicate_charge", contacted=True)["eligible_for_provisional_credit"] is True
+
+
+# Refusal paths: the inputs a model most often gets wrong (a wrong id, another user's record). The verdict text is
+# what the model reads, so each test asserts it exactly (coverage review 2026-10-28).
+def test_banking_wrong_account_or_user_is_refused_with_the_reason():
+    from glint.assist import banking
+
+    db = _cli_db()
+    assert _cli_missing(banking, db, "cc_nope") == {
+        "verdict": "error", "reasons": ["credit card account cc_nope does not exist"]}
+    assert banking.check_credit_limit_increase(db, "someone_else", CLI_CARD, 1000) == {
+        "verdict": "error", "reasons": [f"credit card account {CLI_CARD} does not belong to user someone_else"]}
+    assert banking.check_dispute(db, CLI_USER, "cc_nope", "txn_584f9c5d00_001", "unauthorized_fraudulent_charge") == {
+        "ready": False, "reasons": ["credit card account cc_nope does not exist"]}
+
+
+def _cli_missing(banking, db, card_id):
+    return banking.check_credit_limit_increase(db, CLI_USER, card_id, 1000)
+
+
+def test_banking_dispute_of_a_transaction_not_on_record_is_refused():
+    from glint.assist import banking
+
+    res = banking.check_dispute(_cli_db(), CLI_USER, CLI_CARD, "txn_nope", "unauthorized_fraudulent_charge")
+    assert res == {"ready": False, "reasons": [f"transaction txn_nope does not exist for user {CLI_USER}"]}
+
+
+def test_banking_card_with_no_tier_asks_for_the_knowledge_base():
+    from glint.assist import banking
+
+    res = _cli(_cli_db("Mystery Card"))
+    assert res == {"verdict": "unknown", "reasons": [
+        "the knowledge base defines no CLI tier for Mystery Card; search it before deciding"]}
+    assert banking._tier("Mystery Card") is None
+
+
+def test_banking_dates_in_both_database_formats():
+    from glint.assist import banking
+
+    assert banking._date("") is None and banking._date(None) is None
+    assert banking._date("2025-11-14") == banking._date("11/14/2025") == date(2025, 11, 14)
+
+
+def test_retail_unknown_order_or_action_is_refused(rdb):
+    res = retail.check_eligibility(rdb, "#W9911714", "upgrade")
+    assert res["allowed"] is False and res["reasons"][0].startswith("unknown action 'upgrade'; one of [")
+    assert retail.check_eligibility(rdb, "#W0000000", "cancel") == {
+        "allowed": False, "reasons": ["order #W0000000 does not exist"]}
+
+
+def test_retail_modify_items_refuses_bad_item_lists(rdb):
+    def reasons(item_ids, new_item_ids):
+        return retail.check_eligibility(rdb, "#W9911714", "modify_items", item_ids=item_ids,
+                                        new_item_ids=new_item_ids)["reasons"]
+
+    assert "item_ids and new_item_ids must be non-empty and the same length" in reasons([], [])
+    assert "item_ids and new_item_ids must be non-empty and the same length" in reasons(["1763705424"], [])
+    assert "item 0000000000 is not in order #W9911714" in reasons(["0000000000"], ["2882812427"])
+    assert "1763705424 is the same item as 1763705424" in reasons(["1763705424"], ["1763705424"])
+    product = rdb.products["5149340237"]
+    gone = next(v for v, var in product.variants.items() if not var.available)
+    assert f"variant {gone} is not available" in reasons(["1763705424"], [gone])
+
+
+def test_retail_return_of_items_not_in_the_order_is_refused(rdb):
+    delivered = next(o for o in rdb.orders.values() if o.status == "delivered")
+    res = retail.check_eligibility(rdb, delivered.order_id, "return", item_ids=["0000000000"])
+    assert f"items ['0000000000'] are not in order {delivered.order_id}" in res["reasons"]
+
+
+def test_retail_find_items_unknown_user_and_status_filter(rdb):
+    assert retail.find_items(rdb, "nobody_0000") == {"items": [], "reasons": ["user nobody_0000 does not exist"]}
+    user_id = next(iter(rdb.users))
+    assert retail.find_items(rdb, user_id, order_status="no such status")["items"] == []
+
+
+def test_retail_find_variants_unknown_item_and_nothing_available(rdb):
+    assert retail.find_variants(rdb, "0000000000") == {"variants": [], "reasons": [
+        "item 0000000000 is not in the catalogue"]}
+    db = rdb.model_copy(deep=True)
+    for var in db.products["5149340237"].variants.values():
+        var.available = False
+    res = retail.find_variants(db, "1763705424", require={"brand": "Brand C"})
+    assert res["count"] == 0 and res["closest"] == {"variants": [], "note": "no available variant of this product"}
