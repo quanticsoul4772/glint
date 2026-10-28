@@ -4,7 +4,7 @@
 Glint makes two kinds of claims a bug can break: what it **spends** (Modal GPU time, Meta and DeepInfra credit) and what it **measured** (the numbers in the README and on the Results tab). The tests protect those first. On 2026-10-27 a refactor moved the tool-call count inside the wrong block of `tools_ab.analyze`, and only a new pipeline test caught it.
 
 ## Coverage goal
-1. **Spend and measurement code: 90% line coverage.**
+1. **Spend and measurement code: 90% coverage of lines and branches** (`branch = true`: every if/else arm counts).
    - Spend: `meter`, `glimmer_serve`, `desk/live`.
    - Measurement: `runlog`, `calllog`, `tools_ab`, `export_results`, `export_scenarios`, `gate_labels`, `wrong_writes`.
 2. **Every other module: at least 70%.**

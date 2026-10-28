@@ -1,7 +1,7 @@
 """Per-module coverage gate, run after `pytest --cov --cov-report=json:coverage.json`.
 
 The goal (2026-10-27):
-- Total line coverage of the library and the measurement pipeline: at least 85% (pyproject `fail_under`).
+- Total line and branch coverage of the library and the measurement pipeline: at least 85% (pyproject `fail_under`).
 - The code that spends money or produces the published numbers (CRITICAL): 90%.
 - Every other module: at least 70%.
 

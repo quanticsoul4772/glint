@@ -82,7 +82,10 @@ def test_live_session_streams_then_reports_outcomes():
     from glint.desk.live import LiveSession
 
     session = LiveSession("task_x", _fake_build, label=lambda sim: {0: {"tool": "x", "reasons": ["r"]}}).start()
-    time.sleep(0.2)
+    # wait for the first event with a deadline, not a fixed sleep: a fixed 0.2 s failed under load (2026-10-28)
+    deadline = time.time() + 5
+    while not session.snapshot()["alone"]["events"] and time.time() < deadline:
+        time.sleep(0.01)
     snap = session.snapshot()
     assert snap["done"] is False and snap["alone"]["status"] == "running"
     assert snap["alone"]["events"] == [{"kind": "customer", "text": "hi"}]
@@ -90,6 +93,8 @@ def test_live_session_streams_then_reports_outcomes():
         pane.orchestrator.gate.set()
     for pane in session.panes.values():
         pane.thread.join(5)
+    while not session.done and time.time() < deadline + 5:  # done is set after the panes end, not with them
+        time.sleep(0.01)
     snap = session.snapshot()
     assert snap["done"] and snap["alone"]["outcome"]["passed"] is False and snap["tools"]["outcome"]["passed"] is True
     assert snap["alone"]["overruled_writes"] == 1 and "overruled_writes" not in snap["tools"]
