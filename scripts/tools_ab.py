@@ -28,6 +28,8 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   failure inventory (twin-B 21, 44, 78 included) and every task of the first held-out draw; k=4.
 - `banking-other`: the other 10 banking tasks of `banking` (not tuned on), k=2.
 - `gate-banking`: activation-gate training data, no-tools arm only: the 12 banking tasks x 25 trials, concurrency 12.
+- `banking-high-alone`: Glimmer alone at high reasoning on the banking12 tasks, k=4, base arm only, Modal only. A
+  set's `strength` (low, medium or high; default medium) sets Glimmer's reasoning for every arm of that set.
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -45,7 +47,7 @@ log reports it). Sets without the key keep τ²'s client unchanged, so their run
 it.
 
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
-                           heldout2-gated]
+                           heldout2-gated|banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
 `--rerun-infrastructure-errors` (needs `--allow-mixed-code` when the code changed): the runs that ended in an
@@ -173,6 +175,12 @@ SETS = {
                       "gpu_usd": 12.0, "gates": True, "requires_modal": True,
                       "data": MEASURE / "tools_ab_banking12_gated", "out": RESULTS / "tools-ab-banking12-gated.json",
                       "save": "tools-ab-banking12-gated"},
+    # Glimmer alone at high reasoning on the banking12 tasks (decision 2026-10-28): the comparison point for "medium
+    # behind the gates" vs "high alone" (Meta reports τ³-Banking at high and xhigh only). Base arm only, Modal only.
+    "banking-high-alone": {"tasks": banking_tasks, "trials": 4, "arms": ("base",), "strength": "high",
+                           "concurrency": 12, "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0,
+                           "gates": False, "requires_modal": True, "data": MEASURE / "tools_ab_banking12_high",
+                           "out": RESULTS / "tools-ab-banking12-high.json", "save": "tools-ab-banking12-high"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
@@ -201,10 +209,11 @@ def _trials(cfg: dict, domain: str) -> int:
 
 def _agent(cfg: dict, domain: str, endpoint: str | None) -> tuple[str, dict]:
     if endpoint:
-        args = glimmer_serve.litellm_args(endpoint, os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"])
+        args = glimmer_serve.litellm_args(endpoint, os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"],
+                                          cfg.get("strength", "medium"))
         model = f"openai/{glimmer_serve.MODEL_NAME}"
     else:
-        model, args = GLIMMER, glimmer_args("medium")
+        model, args = GLIMMER, glimmer_args(cfg.get("strength", "medium"))
     if domain == "banking_knowledge":
         args = {**args, "max_tokens": 8192}  # without the cap the default 65,536 overflowed the context
     return model, args
