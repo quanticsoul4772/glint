@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "glint"
 version = "0.0.1"
-description = "Activation-gated agent harness on Meta's open-weight Muse Glimmer"
+description = "Deterministic decision tools that take over analytical decisions for Meta's open-weight Muse Glimmer 30B"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
@@ -18,7 +18,6 @@ dependencies = [
     "scikit-learn",
     "statsmodels",
     "python-dotenv",
-    "kaggle>=2.2.5",
     "mcp==2.3.0",
 ]
 
@@ -33,4 +32,4 @@ tau2 = { path = "../vendor/tau2-bench", editable = true }
 packages = ["src/glint"]
 
 [tool.ruff]
-line-length = 110
+line-length = 120
