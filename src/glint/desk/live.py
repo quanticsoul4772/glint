@@ -58,6 +58,7 @@ class LiveSession:
         self.max_seconds = max_seconds
         self.charged_s = 0.0
         self.stop_reason: str | None = None
+        self.done_error: str | None = None  # on_done (charging and logging the pair) failed
         self.halt = threading.Event()
         self._ended = threading.Event()
         self._view_lock = threading.Lock()
@@ -138,7 +139,12 @@ class LiveSession:
             self.ended = time.time()
             self._ended.set()
             if self._on_done is not None:
-                self._on_done(self)
+                # this daemon thread would drop an exception silently: it is printed and kept on the session
+                try:
+                    self._on_done(self)
+                except Exception as e:  # noqa: BLE001
+                    traceback.print_exc()
+                    self.done_error = f"finishing the live run failed: {type(e).__name__}: {e}"
 
     def _run(self, pane: Pane, run) -> None:
         try:
@@ -180,7 +186,8 @@ class LiveSession:
                 for name, p in self.panes.items()}
 
     def snapshot(self) -> dict:
-        out = {"id": self.id, "task_id": self.task_id, "done": self.done, "stopped": self.stop_reason}
+        out = {"id": self.id, "task_id": self.task_id, "done": self.done, "stopped": self.stop_reason,
+               "done_error": self.done_error}
         for name, pane in self.panes.items():
             view = {"status": "error" if pane.error else ("done" if pane.finished else
                                                            ("waking" if self.waking else "running")),
@@ -212,6 +219,7 @@ class DeskBudget:
         self.gpu_usd_per_day, self.pairs_per_day = gpu_usd_per_day, pairs_per_day
         self.ledger = ledger or DEFAULT_LEDGER
         self.log_path = log_path
+        self.broken: str | None = None  # a pair could not be charged or logged: live mode refuses new pairs
 
     def _meter(self):
         from glint.meter import Caps, Meter
@@ -241,6 +249,8 @@ class DeskBudget:
                        "session": session.id, "task_id": session.task_id})
 
     def check(self) -> None:
+        if self.broken:
+            raise BudgetExceeded(f"live mode is paused until this is fixed: {self.broken}")
         self._meter().check_gpu()
         if self.pairs_today() >= self.pairs_per_day:
             raise BudgetExceeded(f"the daily limit of {self.pairs_per_day} live runs is reached")
@@ -254,6 +264,15 @@ class DeskBudget:
         meter.check_gpu()
 
     def record(self, session: LiveSession) -> None:
+        """Charge the rest of the pair's GPU time and log it. If that fails, the spend is uncertain: live mode stops
+        taking pairs (check() refuses) until the desk is restarted, and the error is raised."""
+        try:
+            self._record(session)
+        except Exception as e:
+            self.broken = f"recording live run {session.id} failed ({type(e).__name__}: {e})"
+            raise
+
+    def _record(self, session: LiveSession) -> None:
         from glint.glimmer_serve import GPU, GPU_USD_PER_HOUR
 
         wall = (session.ended or time.time()) - session.started

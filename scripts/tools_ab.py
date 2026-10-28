@@ -308,6 +308,12 @@ def analyze(cfg: dict) -> None:
             row["tool_calls"] = dict(row["tool_calls"])
             row["pass_rate"] = round(row["passes"] / row["runs"], 3) if row["runs"] else None
     cfg["out"].write_text(json.dumps(report, indent=1), encoding="utf-8")
+    # a tools arm that never called a Glint tool most likely ran without them (an install that did not take)
+    for domain in domains:
+        rows = [arms["tools"] for key, arms in report.items() if key.startswith(f"{domain}-") and "tools" in arms]
+        if rows and not any(row["tool_calls"] for row in rows):
+            print(f"WARNING: the tools arm for {domain} made 0 Glint tool calls in {sum(r['runs'] for r in rows)} "
+                  "runs: check that the tools were installed", flush=True)
     print(json.dumps(report, indent=1))
     # Loud summary: infrastructure errors are excluded, so arms can end up with different run counts
     for key, arms in sorted(report.items()):

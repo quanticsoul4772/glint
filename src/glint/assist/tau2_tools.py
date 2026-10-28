@@ -200,4 +200,7 @@ def install(domain: str) -> None:
         return assist_environment(base(*args, **kwargs), domain)
 
     constructor.glint_assisted = True
-    registry._domains[domain] = constructor
+    registry._domains[domain] = constructor  # τ²'s registry has no public setter: checked right below
+    if not getattr(registry.get_env_constructor(domain), "glint_assisted", False):
+        raise RuntimeError(f"installing the Glint tools for {domain} did not take effect (τ²'s registry changed?); "
+                           "the tools arm would run without its tools")
