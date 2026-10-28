@@ -4,154 +4,355 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Glint Bank Desk</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23B45309' d='M12 1c.6 5.6 2.4 8.4 11 11-8.6 2.6-10.4 5.4-11 11-.6-5.6-2.4-8.4-11-11 8.6-2.6 10.4-5.4 11-11z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* Spacing, type, radius, shadow, motion and neutral color values follow Astryx's neutral theme
+     (github.com/facebook/astryx, MIT, Copyright (c) 2026 Meta Platforms, Inc.). Glint's own accent: amber. */
   :root {
-    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2330; --muted: #5d6878; --line: #dfe3ea;
-    --customer: #eef2ff; --agent: #f3f5f8; --lookup: #f7f7f2; --action: #fff6e6; --verdict: #e9f8ef;
-    --verdict-line: #2f9e5b; --bad: #c6283a; --bad-bg: #fdecee; --good: #1f8a4c; --accent: #3355dd;
+    color-scheme: light dark;
+    --font: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Monaco, Consolas, "Liberation Mono", monospace;
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
+    --t-xs: 10px; --t-sm: 12px; --t-base: 14px; --t-lg: 17px; --t-xl: 20px; --t-2xl: 24px;
+    --r-inner: 6px; --r-element: 10px; --r-container: 12px; --r-chat: 28px; --r-full: 9999px;
+    --h-sm: 28px; --h-md: 32px; --h-lg: 36px;
+    --fast: 125ms; --medium: 300ms; --ease: cubic-bezier(0.24, 1, 0.4, 1);
+
+    --body: #f1f1f1; --card: #ffffff; --surface: #ffffff; --muted-bg: #f1f1f1; --chip: #e2e2e2;
+    --border: #00000014; --border-strong: #d4d4d4;
+    --text: #000000; --text-2: #474747; --text-3: #919191;
+    --accent: #B45309; --accent-ink: #ffffff; --accent-soft: #fdf1e3; --accent-ring: #b453094d;
+    --ok: #00490b; --ok-bg: #bce0bb; --bad: #76000c; --bad-bg: #ffc4be; --bad-ring: #de47454D;
+    --warn: #4b3900; --warn-bg: #fae19e;
+    --shadow-low: 0 2px 4px oklch(0 0 0 / 5%), 0 4px 8px oklch(0 0 0 / 10%);
+    --shadow-med: 0 2px 4px oklch(0 0 0 / 5%), 0 4px 12px oklch(0 0 0 / 10%);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #11151c; --panel: #171c25; --ink: #e6e9ef; --muted: #9aa4b2; --line: #2a3140;
-      --customer: #1c2440; --agent: #1d222c; --lookup: #22231d; --action: #2d2618; --verdict: #16301f;
-      --verdict-line: #49c27a; --bad: #ff6b7d; --bad-bg: #3a1c22; --good: #4fd18a; --accent: #7d95ff;
+      --body: #1b1b1b; --card: #1b1b1b; --surface: #262626; --muted-bg: #262626; --chip: #303030;
+      --border: #ffffff1A; --border-strong: #525252;
+      --text: #ffffff; --text-2: #9e9e9e; --text-3: #6e6e6e;
+      --accent: #F5B54A; --accent-ink: #1b1b1b; --accent-soft: #3a2c14; --accent-ring: #f5b54a66;
+      --ok: #90ca90; --ok-bg: #2b422b; --bad: #ffaea7; --bad-bg: #5b2b28; --bad-ring: #fa676266;
+      --warn: #f8d36a; --warn-bg: #453a1c;
+      --shadow-low: 0 2px 4px oklch(0 0 0 / 25%), 0 4px 8px oklch(0 0 0 / 40%), inset 0 0 0 1px oklch(1 0 0 / 8%);
+      --shadow-med: 0 2px 4px oklch(0 0 0 / 35%), 0 4px 12px oklch(0 0 0 / 50%), inset 0 0 0 1px oklch(1 0 0 / 12%);
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { padding: 18px 20px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  h1 { margin: 0; font-size: 20px; }
-  .sub { color: var(--muted); margin-top: 4px; font-size: 13.5px; }
-  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 20px; }
-  select, button { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
-                   background: var(--panel); color: var(--ink); cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .goal { margin: 0 20px 10px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line);
-          border-radius: 8px; font-size: 13.5px; color: var(--muted); }
-  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 20px 24px; }
-  @media (max-width: 860px) { .panes { grid-template-columns: 1fr; } }
-  .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex;
-          flex-direction: column; min-height: 420px; max-height: 78vh; }
-  .pane h2 { margin: 0; padding: 12px 14px; font-size: 15px; border-bottom: 1px solid var(--line);
-             display: flex; justify-content: space-between; gap: 8px; }
-  .pane h2 small { color: var(--muted); font-weight: 400; }
-  .feed { overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
-  .ev { border-radius: 8px; padding: 8px 10px; border: 1px solid var(--line); white-space: pre-wrap;
-        word-break: break-word; font-size: 13.5px; }
-  .ev .tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 2px; }
-  .customer { background: var(--customer); }
-  .agent { background: var(--agent); }
-  .lookup { background: var(--lookup); font-size: 12.5px; }
-  .action { background: var(--action); font-weight: 500; }
-  .verdict { background: var(--verdict); border-left: 4px solid var(--verdict-line); }
-  .overruled { border: 2px solid var(--bad); background: var(--bad-bg); }
-  .overruled .why { color: var(--bad); margin-top: 6px; font-weight: 600; }
-  .err { color: var(--bad); }
-  .args { color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-  .outcome { margin: 0 14px 14px; padding: 10px 12px; border-radius: 8px; font-weight: 600; display: none; }
-  .outcome.pass { display: block; background: var(--verdict); color: var(--good); }
-  .outcome.fail { display: block; background: var(--bad-bg); color: var(--bad); }
-  footer { color: var(--muted); font-size: 12.5px; padding: 0 20px 24px; }
-  .tabs { display: flex; gap: 6px; padding: 10px 20px 0; }
-  .tab { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-  .tab.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .set { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 14px; }
-  .set h3 { margin: 0 0 4px; font-size: 15px; }
-  .role { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; border-radius: 4px;
-          background: var(--agent); color: var(--muted); margin-left: 6px; }
-  table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 13.5px; }
-  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-  td.improved { color: var(--good); font-weight: 600; } td.worse { color: var(--bad); font-weight: 600; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--body); color: var(--text); font: 400 var(--t-base)/1.43 var(--font);
+         -webkit-font-smoothing: antialiased; }
+  button, select, input { font: inherit; color: inherit; }
+
+  /* top bar */
+  .top { height: 56px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--s4);
+         padding: 0 var(--s6); background: var(--card); box-shadow: 0 1px 0 var(--border); position: relative; z-index: 2; }
+  .brand { display: flex; align-items: center; gap: var(--s2); font-weight: 700; font-size: var(--t-lg); letter-spacing: -0.01em; }
+  .brand svg { width: 20px; height: 20px; fill: var(--accent); }
+  .brand span { color: var(--text-2); font-weight: 500; }
+  .seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--muted-bg); border-radius: var(--r-full); }
+  .seg button { height: var(--h-sm); padding: 0 var(--s4); border: 0; border-radius: var(--r-full); background: transparent;
+                color: var(--text-2); font-weight: 500; cursor: pointer; transition: background var(--fast) var(--ease); }
+  .seg button.on { background: var(--card); color: var(--text); box-shadow: var(--shadow-low); }
+  .pill { justify-self: end; display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px;
+          border-radius: var(--r-full); background: var(--muted-bg); color: var(--text-2); font-size: var(--t-sm); font-weight: 500; }
+  .pill i { width: 6px; height: 6px; border-radius: var(--r-full); background: var(--text-3); }
+  .pill.live i { background: var(--ok); }
+
+  main { padding: var(--s5) var(--s6) var(--s6); }
+
+  /* scenario strip */
+  .strip { display: flex; gap: var(--s6); align-items: flex-start; justify-content: space-between; margin-bottom: var(--s4); }
+  .scn { min-width: 0; flex: 1; }
+  .scn-row { display: flex; align-items: center; gap: var(--s2); }
+  .scn select { appearance: none; border: 0; background: transparent; font-size: var(--t-xl); font-weight: 600;
+                letter-spacing: -0.01em; padding: 0 22px 0 0; cursor: pointer; max-width: 100%;
+                background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
+                background-position: right 6px top 55%, right 1px top 55%; background-size: 5px 5px; background-repeat: no-repeat; }
+  .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--r-full);
+         font-size: var(--t-xs); font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+         background: var(--muted-bg); color: var(--text-2); white-space: nowrap; }
+  .tag.tuned { background: var(--warn-bg); color: var(--warn); }
+  .brief { margin-top: var(--s1); color: var(--text-2); max-width: 900px; display: -webkit-box; -webkit-line-clamp: 2;
+           -webkit-box-orient: vertical; overflow: hidden; }
+  .brief.open { -webkit-line-clamp: unset; display: block; }
+  .link { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 500; cursor: pointer; font-size: var(--t-sm); }
+  .ctl { display: flex; align-items: center; gap: var(--s2); flex-shrink: 0; padding-top: 2px; }
+  .btn { height: var(--h-md); padding: 0 var(--s3); border-radius: var(--r-element); border: 0; background: var(--card); box-shadow: var(--shadow-low);
+         color: var(--text); font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+         transition: filter var(--fast) var(--ease), transform var(--fast) var(--ease); }
+  .btn:hover { filter: brightness(0.96); }
+  .btn:active { transform: scale(0.98); }
+  .btn.primary { height: var(--h-lg); padding: 0 var(--s5); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .btn svg { width: 14px; height: 14px; fill: currentColor; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .sel { height: var(--h-md); border-radius: var(--r-element); border: 0; background: var(--card); box-shadow: var(--shadow-low); padding: 0 var(--s2); cursor: pointer; }
+  .switch { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: var(--t-sm); cursor: pointer; user-select: none; }
+  .switch input { appearance: none; width: 28px; height: 16px; border-radius: var(--r-full); background: var(--border-strong);
+                  position: relative; margin: 0; cursor: pointer; transition: background var(--fast) var(--ease); }
+  .switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: var(--r-full);
+                         background: #fff; transition: transform var(--fast) var(--ease); }
+  .switch input:checked { background: var(--accent); }
+  .switch input:checked::after { transform: translateX(12px); }
+  .note { color: var(--text-2); font-size: var(--t-sm); }
+
+  /* step cursor */
+  .cursor { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); color: var(--text-2); font-size: var(--t-sm); font-weight: 500; }
+  .cursor input { flex: 1; accent-color: var(--accent); height: 4px; }
+  .cursor b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  /* panes */
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); }
+  @media (max-width: 860px) { .panes { grid-template-columns: 1fr; } .strip { flex-direction: column; } }
+  .pane { background: var(--card); border-radius: var(--r-container); box-shadow: var(--shadow-low); display: flex; flex-direction: column;
+          height: calc(100vh - 320px); min-height: 380px; overflow: hidden; }
+  .pane.tools { box-shadow: var(--shadow-low), inset 0 0 0 1px var(--accent-ring); }
+  .ph { padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: 2px; box-shadow: 0 1px 0 var(--border); }
+  .ph-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+  .ph h2 { margin: 0; font-size: var(--t-base); font-weight: 600; display: flex; align-items: center; gap: var(--s2); }
+  .ph h2 svg { width: 14px; height: 14px; fill: var(--accent); }
+  .ph small { color: var(--text-3); font-size: var(--t-sm); font-weight: 500; }
+  .status { font-size: var(--t-sm); color: var(--text-2); min-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status.busy { background: linear-gradient(90deg, var(--text-2) 0%, var(--text-2) 40%, var(--text-3) 50%, var(--text-2) 60%, var(--text-2) 100%);
+                 background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+                 animation: glimmer 1.6s linear infinite; }
+  @keyframes glimmer { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+  .feed { flex: 1; overflow-y: auto; padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2); scroll-behavior: smooth; }
+
+  .msg { display: flex; gap: var(--s2); align-items: flex-end; max-width: 86%; animation: rise var(--medium) var(--ease); }
+  .msg.customer { align-self: flex-end; flex-direction: row-reverse; }
+  .av { width: 24px; height: 24px; border-radius: var(--r-full); flex-shrink: 0; display: grid; place-items: center;
+        font-size: var(--t-xs); font-weight: 700; background: var(--chip); color: var(--text-2); }
+  .av.agent { background: var(--text); color: var(--card); }
+  .bubble { padding: 10px 14px; border-radius: 20px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .msg.agent .bubble { background: var(--muted-bg); border-bottom-left-radius: var(--r-inner); }
+  .msg.customer .bubble { background: var(--chip); border-bottom-right-radius: var(--r-inner); }
+  @media (prefers-color-scheme: dark) { .msg.customer .bubble { background: #3a3a3a; } }
+
+  .row { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); color: var(--text-2); padding: 2px var(--s1);
+         animation: rise var(--medium) var(--ease); }
+  .row details { min-width: 0; flex: 1; }
+  .row summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+  .row summary::-webkit-details-marker { display: none; }
+  .row summary::after { content: "›"; color: var(--text-3); transition: transform var(--fast) var(--ease); }
+  .row details[open] summary::after { transform: rotate(90deg); }
+  .row .ic { width: 16px; height: 16px; border-radius: var(--r-full); display: grid; place-items: center; flex-shrink: 0; background: var(--muted-bg); }
+  .row .ic svg { width: 9px; height: 9px; fill: var(--text-2); }
+  .row.action { color: var(--text); font-weight: 500; }
+  .row.action .ic { background: var(--text); }
+  .row.action .ic svg { fill: var(--card); }
+  .args { margin-top: var(--s1); padding: var(--s2); border-radius: var(--r-inner); background: var(--muted-bg); font: 400 11.5px/1.5 var(--mono);
+          color: var(--text-2); white-space: pre-wrap; word-break: break-word; font-weight: 400; }
+  .row.overruled { display: block; padding: var(--s2) var(--s3); border-radius: var(--r-container); background: var(--bad-bg);
+                   box-shadow: inset 0 0 0 1px var(--bad-ring); color: var(--bad); }
+  .row.overruled .why { margin-top: var(--s1); font-weight: 600; font-size: var(--t-sm); }
+  .err { color: var(--bad); margin-top: var(--s1); }
+
+  .verdict { background: var(--surface); border-radius: var(--r-container); box-shadow: var(--shadow-med), inset 0 0 0 1px var(--accent-ring);
+             padding: var(--s3) var(--s4); margin: var(--s1) 0; animation: rise var(--medium) var(--ease); }
+  .v-head { display: flex; align-items: center; gap: var(--s2); font-size: var(--t-sm); font-weight: 600; color: var(--accent); margin-bottom: var(--s2); }
+  .v-head svg { width: 14px; height: 14px; fill: var(--accent); }
+  .v-lines { display: flex; flex-direction: column; gap: 2px; }
+  .v-lines div::before { content: "✓"; color: var(--accent); font-weight: 700; margin-right: var(--s2); }
+  .v-lines div.no::before { content: "✕"; }
+  .v-seq { margin-top: var(--s2); padding: var(--s2) var(--s3); border-radius: var(--r-inner); background: var(--accent-soft); font-weight: 600; }
+  .verdict details { margin-top: var(--s2); font-size: var(--t-sm); color: var(--text-2); }
+  .verdict summary { cursor: pointer; }
+
+  .outcome { display: none; margin: 0 var(--s4) var(--s4); padding: 10px var(--s3); border-radius: var(--r-element); font-weight: 600;
+             align-items: center; gap: var(--s2); animation: rise var(--medium) var(--ease); }
+  .outcome.pass { display: flex; background: var(--ok-bg); color: var(--ok); }
+  .outcome.fail { display: flex; background: var(--bad-bg); color: var(--bad); }
+
+  .summary { display: none; margin-top: var(--s4); padding: var(--s3) var(--s4); background: var(--card); border-radius: var(--r-container);
+             box-shadow: var(--shadow-low); grid-template-columns: 1fr 1fr; gap: var(--s4); animation: rise var(--medium) var(--ease); }
+  .summary.on { display: grid; }
+  .summary div { display: flex; align-items: center; gap: var(--s2); font-weight: 500; }
+  .dot { width: 8px; height: 8px; border-radius: var(--r-full); flex-shrink: 0; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); }
+
+  .caveat { margin-top: var(--s3); padding: var(--s3) var(--s4); border-radius: var(--r-container); background: var(--muted-bg);
+            color: var(--text-2); font-size: var(--t-sm); display: flex; gap: var(--s2); }
+  .caveat b { color: var(--text); font-weight: 600; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+
+  /* results */
+  .r-intro { color: var(--text-2); margin: 0 0 var(--s4); max-width: 900px; }
+  .sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: var(--s4); }
+  .set { background: var(--card); border-radius: var(--r-container); box-shadow: var(--shadow-low); padding: var(--s4); }
+  .set h3 { margin: 0; font-size: var(--t-lg); font-weight: 600; display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+  .set .snote { color: var(--text-2); font-size: var(--t-sm); margin-top: var(--s1); }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr) 1.6fr; gap: var(--s3); margin: var(--s4) 0 var(--s3); }
+  .stat { background: var(--muted-bg); border-radius: var(--r-element); padding: var(--s2) var(--s3); }
+  .stat b { display: block; font-size: var(--t-2xl); font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: var(--t-sm); color: var(--text-2); }
+  .stat.up b { color: var(--ok); } .stat.down b { color: var(--bad); }
+  .runs { display: flex; flex-direction: column; justify-content: center; gap: 6px; font-size: var(--t-sm); color: var(--text-2); }
+  .bar { display: grid; grid-template-columns: 72px 1fr 52px; align-items: center; gap: var(--s2); }
+  .bar i { height: 6px; border-radius: var(--r-full); background: var(--muted-bg); position: relative; overflow: hidden; }
+  .bar i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w); background: var(--text-2); border-radius: var(--r-full); }
+  .bar.tools i::after { background: var(--accent); }
+  .bar em { font-style: normal; font-variant-numeric: tabular-nums; text-align: right; color: var(--text); }
+  table { border-collapse: collapse; width: 100%; font-size: var(--t-sm); }
+  th { text-align: left; font-weight: 500; color: var(--text-3); padding: 6px var(--s2); }
+  td { padding: 6px var(--s2); box-shadow: inset 0 1px 0 var(--border); }
+  .dots { display: inline-flex; gap: 3px; vertical-align: middle; margin-right: 6px; }
+  .dots i { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--chip); }
+  .dots i.on { background: var(--text-2); }
+  .dots.tools i.on { background: var(--accent); }
+  .chg { font-weight: 600; } .chg.improved { color: var(--ok); } .chg.worse { color: var(--bad); } .chg.tied { color: var(--text-3); font-weight: 500; }
 </style>
 </head>
 <body>
-<header>
-  <h1>Glint Bank Desk</h1>
-  <div class="sub">One customer, two agents. Left: Meta's open-weight Muse Glimmer 30B alone. Right: the same model
-    with Glint's decision tools, which take over the policy decisions. Replay recorded runs, run a task live, or see the measured results.</div>
+<header class="top">
+  <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1c.6 5.6 2.4 8.4 11 11-8.6 2.6-10.4 5.4-11 11-.6-5.6-2.4-8.4-11-11 8.6-2.6 10.4-5.4 11-11z"/></svg>Glint <span>Bank Desk</span></div>
+  <nav class="seg" aria-label="View"><button id="tab-desk" class="on">Bank Desk</button><button id="tab-results">Results</button></nav>
+  <div class="pill" id="mode"><i></i><span>Replay · recorded runs</span></div>
 </header>
-<nav class="tabs"><button id="tab-desk" class="tab on">Bank Desk</button><button id="tab-results" class="tab">Results</button></nav>
+
+<main>
 <div id="desk-view">
-<div class="controls">
-  <select id="scenario" aria-label="Scenario"></select>
-  <button class="primary" id="play">Play</button>
-  <button id="step">Step</button>
-  <button id="all">Show all</button>
-  <button id="live" title="Run this task now on Glimmer 30B (Modal)">Run live</button>
-  <span id="live-note" class="sub"></span>
-  <label>Speed <select id="speed"><option value="1400">slow</option><option value="700" selected>normal</option><option value="250">fast</option></select></label>
-  <label><input type="checkbox" id="lookups" checked> show lookups</label>
+  <section class="strip">
+    <div class="scn">
+      <div class="scn-row"><select id="scenario" aria-label="Scenario"></select><span id="tuned"></span></div>
+      <div class="brief" id="goal"></div>
+      <button class="link" id="brief-toggle">Show full brief</button>
+    </div>
+    <div class="ctl">
+      <button class="btn primary" id="play"><svg viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z"/></svg><span>Play</span></button>
+      <button class="btn" id="step" title="One step">Step</button>
+      <button class="btn" id="all" title="Show the whole conversation">Show all</button>
+      <select class="sel" id="speed" aria-label="Speed"><option value="1400">Slow</option><option value="700" selected>Normal</option><option value="250">Fast</option></select>
+      <label class="switch"><input type="checkbox" id="lookups" checked> Lookups</label>
+      <button class="btn" id="live" title="Run this task now on Glimmer 30B (Modal)" hidden>Run live</button>
+    </div>
+  </section>
+  <div class="note" id="live-note"></div>
+  <div class="cursor"><span>Step <b id="pos">0</b> of <b id="total">0</b></span><input type="range" id="scrub" min="0" max="0" value="0" aria-label="Step"></div>
+
+  <div class="panes">
+    <section class="pane">
+      <div class="ph"><div class="ph-row"><h2>Glimmer alone</h2><small id="alone-meta"></small></div><div class="status" id="alone-status"></div></div>
+      <div class="feed" id="alone"></div><div class="outcome" id="alone-out"></div>
+    </section>
+    <section class="pane tools">
+      <div class="ph"><div class="ph-row"><h2>Glimmer + Glint tools <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1c.6 5.6 2.4 8.4 11 11-8.6 2.6-10.4 5.4-11 11-.6-5.6-2.4-8.4-11-11 8.6-2.6 10.4-5.4 11-11z"/></svg></h2><small id="tools-meta"></small></div><div class="status" id="tools-status"></div></div>
+      <div class="feed" id="tools"></div><div class="outcome" id="tools-out"></div>
+    </section>
+  </div>
+  <div class="summary" id="summary"></div>
+  <div class="caveat"><span>ⓘ</span><div id="source"></div></div>
 </div>
-<div class="goal" id="goal"></div>
-<div class="panes">
-  <section class="pane"><h2>Glimmer alone <small id="alone-meta"></small></h2>
-    <div class="feed" id="alone"></div><div class="outcome" id="alone-out"></div></section>
-  <section class="pane"><h2>Glimmer + Glint tools <small id="tools-meta"></small></h2>
-    <div class="feed" id="tools"></div><div class="outcome" id="tools-out"></div></section>
-</div>
-<footer id="source" style="font-weight:500"></footer>
-</div>
-<div id="results-view" style="display:none; padding: 0 20px 24px"></div>
+<div id="results-view" hidden></div>
+</main>
+
 <script>
 const $ = (id) => document.getElementById(id);
 let data = null, pos = 0, timer = null;
+const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1c.6 5.6 2.4 8.4 11 11-8.6 2.6-10.4 5.4-11 11-.6-5.6-2.4-8.4-11-11 8.6-2.6 10.4-5.4 11-11z"/></svg>';
+const ICON = {
+  lookup: '<svg viewBox="0 0 16 16"><path d="M7 2a5 5 0 014 8l3 3-1 1-3-3A5 5 0 117 2zm0 2a3 3 0 100 6 3 3 0 000-6z"/></svg>',
+  action: '<svg viewBox="0 0 16 16"><path d="M6 11L2.5 7.5 4 6l2 2 6-6L13.5 3.5z"/></svg>',
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+// tool names carry a numeric suffix in τ² (order_replacement_credit_card_7291); show them as words
+const toolWords = (t) => { const w = String(t || "").replace(/^check_/, "").replace(/_\d+$/, "").replace(/_/g, " ");
+                           return w.charAt(0).toUpperCase() + w.slice(1); };
+const words = (v) => String(v).replace(/_/g, " ");
+const money = (v) => isNaN(Number(v)) ? words(v) : "$" + Number(v).toLocaleString("en-US", {maximumFractionDigits: 2});
 
 function argText(args) {
   if (!args) return "";
-  const s = JSON.stringify(args);
-  return s.length > 260 ? s.slice(0, 260) + " …" : s;
+  const s = typeof args === "string" ? args : JSON.stringify(args, null, 1);
+  return s.length > 600 ? s.slice(0, 600) + " …" : s;
 }
-function verdictText(result) {
-  try {
-    const v = JSON.parse(result);
-    const parts = [];
-    for (const k of ["verdict", "card_action", "eligible_for_provisional_credit", "new_credit_limit", "denial_reason",
-                     "max_increase", "sequencing"]) if (v[k] !== undefined && v[k] !== null) parts.push(`${k}: ${v[k]}`);
-    if (v.reasons && v.reasons.length) parts.push(`reasons: ${v.reasons.join("; ")}`);
-    return parts.join("\n") || result;
-  } catch (e) { return result; }
+function verdictBody(result) {
+  let v;
+  try { v = JSON.parse(result); } catch (e) { return `<div class="v-lines"><div>${esc(result)}</div></div>`; }
+  const lines = [], yes = (x) => String(x) === "True" || x === true;
+  if (v.verdict != null) lines.push(["", `Decision: ${words(v.verdict)}`]);
+  if (v.card_action != null) lines.push(["", `Card: ${words(v.card_action)}`]);
+  if (v.eligible_for_provisional_credit != null)
+    lines.push(yes(v.eligible_for_provisional_credit) ? ["", "Eligible for provisional credit"] : ["no", "Not eligible for provisional credit"]);
+  if (v.new_credit_limit != null) lines.push(["", `New credit limit: ${money(v.new_credit_limit)}`]);
+  if (v.max_increase != null) lines.push(["", `Largest allowed increase: ${money(v.max_increase)}`]);
+  if (v.denial_reason) lines.push(["no", `Denied: ${words(v.denial_reason)}`]);
+  if (v.reasons && v.reasons.length) v.reasons.forEach((r) => lines.push(["", r]));
+  let html = `<div class="v-lines">${lines.map(([c, t]) => `<div class="${c}">${esc(t)}</div>`).join("")}</div>`;
+  if (v.sequencing) html += `<div class="v-seq">${esc(v.sequencing)}</div>`;
+  return html + `<details><summary>All fields</summary><div class="args">${esc(JSON.stringify(v, null, 1))}</div></details>`;
 }
+// the agent writes markdown: bold and list markers are rendered, everything else stays plain escaped text
+const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[-*] /gm, "• ");
+
 function render(ev) {
   const d = document.createElement("div");
-  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
-  const tag = (t) => `<div class="tag">${esc(t)}</div>`;
-  // the agent writes markdown: bold and list markers are rendered, everything else stays plain escaped text
-  const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[-*] /gm, "• ");
-  if (ev.kind === "customer") { d.className = "ev customer"; d.innerHTML = tag("Customer") + md(ev.text); }
-  else if (ev.kind === "agent") { d.className = "ev agent"; d.innerHTML = tag("Agent") + md(ev.text); }
-  else if (ev.kind === "verdict") {
-    d.className = "ev verdict";
-    d.innerHTML = tag("Glint verdict · " + ev.tool) + esc(verdictText(ev.result));
+  if (ev.kind === "customer" || ev.kind === "agent") {
+    d.className = "msg " + ev.kind;
+    d.innerHTML = `<div class="av ${ev.kind}">${ev.kind === "agent" ? "G" : "C"}</div><div class="bubble">${md(ev.text)}</div>`;
+  } else if (ev.kind === "verdict") {
+    d.className = "verdict";
+    d.innerHTML = `<div class="v-head">${STAR}Glint verdict · ${esc(toolWords(ev.tool))}</div>` + verdictBody(ev.result);
   } else {
-    d.className = "ev " + ev.kind + (ev.overruled ? " overruled" : "");
+    d.className = "row " + ev.kind + (ev.overruled ? " overruled" : "");
     d.dataset.kind = ev.kind;
-    d.innerHTML = tag((ev.kind === "action" ? "Action · " : "Lookup · ") + ev.tool) +
-      `<div class="args">${esc(argText(ev.args))}</div>` +
-      (ev.error ? `<div class="err">${esc(ev.result)}</div>` : "") +
-      (ev.overruled ? `<div class="why">A Glint tool would have overruled this: ${esc(ev.overruled.join("; "))}</div>` : "");
+    const label = (ev.kind === "action" ? "" : "Looked up · ") + toolWords(ev.tool);
+    d.innerHTML = (ev.overruled ? "" : `<span class="ic">${ICON[ev.kind] || ICON.lookup}</span>`) +
+      `<details><summary>${esc(label)}</summary>` +
+      `<div class="args">${esc(argText(ev.args))}</div></details>` +
+      (ev.error && ev.error !== "False" ? `<div class="err">${esc(ev.result)}</div>` : "") +
+      (ev.overruled ? `<div class="why">A Glint check would have overruled this: ${esc([].concat(ev.overruled).join("; "))}</div>` : "");
   }
   return d;
 }
+function statusOf(ev) {
+  if (!ev) return "";
+  if (ev.kind === "verdict") return "Glint verdict: " + toolWords(ev.tool).toLowerCase();
+  if (ev.kind === "lookup") return "Looking up " + toolWords(ev.tool).toLowerCase() + "…";
+  if (ev.kind === "action") return toolWords(ev.tool) + "…";
+  if (ev.kind === "customer") return "Customer is replying…";
+  return "Agent is replying…";
+}
+function outcomeText(side, o, overruled) {
+  if (o.passed) return "Task completed correctly: the bank's records match the correct outcome.";
+  return "Task failed: the bank's records do not match the correct outcome." +
+    (side === "alone" && overruled !== undefined
+      ? (overruled ? ` ${overruled} action(s) a Glint tool would have overruled.` : " No action here is one Glint's tools judge; it failed for another reason.")
+      : "");
+}
+function setOutcome(side, o, overruled) {
+  const out = $(side + "-out");
+  out.className = "outcome " + (o.passed ? "pass" : "fail");
+  out.innerHTML = `<span class="dot ${o.passed ? "ok" : "bad"}"></span>${esc(outcomeText(side, o, overruled))}`;
+}
+function summarize(alone, tools, overruled) {
+  const line = (name, o, extra) => `<div><span class="dot ${o.passed ? "ok" : "bad"}"></span>${esc(name)}: ${o.passed ? "passed" : "failed"}${esc(extra)}</div>`;
+  $("summary").innerHTML = line("Glimmer alone", alone, !alone.passed && overruled ? `, ${overruled} action(s) a Glint check would overrule` : "") +
+                           line("Glimmer + Glint tools", tools, "");
+  $("summary").classList.add("on");
+}
 function steps() { return Math.max(data.alone.events.length, data.tools.events.length); }
 function showUpTo(n) {
+  $("pos").textContent = n; $("scrub").value = n;
   for (const side of ["alone", "tools"]) {
-    const feed = $(side); feed.innerHTML = "";
-    data[side].events.slice(0, n).forEach((ev) => {
-      if (ev.kind === "lookup" && !$("lookups").checked) return;
-      feed.appendChild(render(ev));
-    });
+    const feed = $(side), evs = data[side].events;
+    feed.innerHTML = "";
+    evs.slice(0, n).forEach((ev) => { if (ev.kind !== "lookup" || $("lookups").checked) feed.appendChild(render(ev)); });
     feed.scrollTop = feed.scrollHeight;
-    const out = $(side + "-out");
-    out.className = "outcome";
-    if (n >= data[side].events.length) {
-      const o = data[side].outcome;
-      out.className = "outcome " + (o.passed ? "pass" : "fail");
-      out.textContent = o.passed ? "Task completed correctly: the bank's records match the correct outcome."
-        : "Task failed: the bank's records do not match the correct outcome." +
-          (side === "alone" ? (data.alone.overruled_writes ? ` ${data.alone.overruled_writes} action(s) a Glint tool would have overruled.`
-                                                           : " No action here is one Glint's tools judge; it failed for another reason.") : "");
-    }
+    const done = n >= evs.length;
+    $(side + "-status").textContent = done ? "Finished" : statusOf(evs[n]);  // what comes next
+    $(side + "-status").classList.toggle("busy", !!timer && !done);
+    $(side + "-out").className = "outcome";
+    if (done) setOutcome(side, data[side].outcome, data.alone.overruled_writes ?? 0);
   }
+  $("summary").classList.remove("on");
+  if (n >= steps()) summarize(data.alone.outcome, data.tools.outcome, data.alone.overruled_writes);
 }
 let liveTimer = null;
 function showLive(snap) {
@@ -161,18 +362,15 @@ function showLive(snap) {
     pane.events.forEach((ev) => { if (ev.kind !== "lookup" || $("lookups").checked) feed.appendChild(render(ev)); });
     feed.scrollTop = feed.scrollHeight;
     $(side + "-meta").textContent = `live · ${pane.status} · ${pane.elapsed_s} s`;
+    const st = $(side + "-status");
+    st.textContent = pane.outcome || pane.error ? "Finished" : statusOf(pane.events[pane.events.length - 1]) || "Starting…";
+    st.classList.toggle("busy", !(pane.outcome || pane.error));
     const out = $(side + "-out");
     out.className = "outcome";
     if (pane.error) { out.className = "outcome fail"; out.textContent = "Error: " + pane.error; }
-    else if (pane.outcome) {
-      out.className = "outcome " + (pane.outcome.passed ? "pass" : "fail");
-      out.textContent = pane.outcome.passed ? "Task completed correctly: the bank's records match the correct outcome."
-        : "Task failed: the bank's records do not match the correct outcome." +
-          (side === "alone" && pane.overruled_writes !== undefined
-            ? (pane.overruled_writes ? ` ${pane.overruled_writes} action(s) a Glint tool would have overruled.`
-                                     : " No action here is one Glint's tools judge; it failed for another reason.") : "");
-    }
+    else if (pane.outcome) setOutcome(side, pane.outcome, pane.overruled_writes);
   }
+  if (snap.alone.outcome && snap.tools.outcome) summarize(snap.alone.outcome, snap.tools.outcome, snap.alone.overruled_writes);
 }
 async function runLive() {
   stop(); clearInterval(liveTimer);
@@ -181,6 +379,8 @@ async function runLive() {
                                             body: JSON.stringify({task_id: id})});
   const body = await r.json();
   if (!r.ok) { $("live-note").textContent = body.detail || "live run failed to start"; return; }
+  $("mode").classList.add("live"); $("mode").querySelector("span").textContent = "Live · Glimmer 30B on Modal";
+  $("summary").classList.remove("on");
   $("live-note").textContent = "Live run started: both agents are talking to a simulated customer now.";
   $("source").textContent = "Live: Muse Glimmer 30B bf16 on Modal; customer played by Muse Spark (Meta Model API).";
   liveTimer = setInterval(async () => {
@@ -195,51 +395,71 @@ async function runLive() {
     }
   }, 2000);
 }
-function stop() { clearInterval(timer); timer = null; $("play").textContent = "Play"; }
+function setPlayLabel(t) { $("play").querySelector("span").textContent = t; }
+function stop() { clearInterval(timer); timer = null; setPlayLabel("Play"); document.querySelectorAll(".status").forEach((s) => s.classList.remove("busy")); }
 function play() {
   if (timer) return stop();
   if (pos >= steps()) pos = 0;
-  $("play").textContent = "Pause";
+  setPlayLabel("Pause");
   timer = setInterval(() => { pos++; showUpTo(pos); if (pos >= steps()) stop(); }, Number($("speed").value));
+  showUpTo(pos);
 }
+// open on the customer's first message, so neither pane starts empty
+function opening() { const i = data.alone.events.findIndex((e) => e.kind === "customer"); return i < 0 ? 0 : i + 1; }
 async function load(id) {
   stop();
   data = await (await fetch(`/api/scenarios/${id}`)).json();
-  pos = 0; showUpTo(0);
-  $("goal").textContent = "Customer: " + data.customer;
+  $("total").textContent = steps(); $("scrub").max = steps();
+  pos = opening(); showUpTo(pos);
+  $("goal").textContent = data.customer || "";
+  $("goal").classList.remove("open"); $("brief-toggle").textContent = "Show full brief";
+  $("tuned").innerHTML = data.tuned ? '<span class="tag tuned">Tuned task</span>' : '<span class="tag">Untuned task</span>';
   $("alone-meta").textContent = `trial ${data.alone.trial}`;
   $("tools-meta").textContent = `trial ${data.tools.trial}`;
   const rec = data.recorded;
-  $("source").textContent = "Selected pair, not a typical run: a recorded run where Glimmer alone failed, beside one " +
+  $("source").innerHTML = "<b>Selected pair, not a typical run:</b> " + esc("a recorded run where Glimmer alone failed, beside one " +
     `where Glimmer with Glint's tools passed. All recorded runs of this task: alone ${rec.base.passed}/${rec.base.runs}` +
     ` passed, with tools ${rec.tools.passed}/${rec.tools.runs} passed. Source: ${data.source}; τ²-bench banking task ` +
     `${data.id} (MIT).` + (data.tuned ? " A tuned task: the tools were refined after reading its runs, so this " +
-    "pair is not evidence that the tools generalize." : "");
+    "pair is not evidence that the tools generalize." : ""));
+}
+function dots(score, cls) {
+  const m = /^(\d+)\/(\d+)$/.exec(String(score || ""));
+  if (!m || Number(m[2]) > 12) return esc(score);
+  const k = Number(m[1]), n = Number(m[2]);
+  return `<span class="dots ${cls}">${Array.from({length: n}, (_, i) => `<i class="${i < k ? "on" : ""}"></i>`).join("")}</span>${esc(score)}`;
+}
+function bar(label, [k, n], cls) {
+  const w = n ? (100 * k / n).toFixed(1) + "%" : "0%";
+  return `<div class="bar ${cls}"><span>${esc(label)}</span><i style="--w:${w}"></i><em>${k}/${n}</em></div>`;
 }
 async function showResults() {
   const sets = await (await fetch("/api/results")).json();
-  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
-  let html = `<p class="sub">Measured on τ²-bench with Muse Glimmer 30B, with and without the Glint tools, same seeds.
-    Counted by task: runs of one task are not independent. A task "improved" if its pass rate rose with the tools.</p>`;
+  let html = `<p class="r-intro">Measured on τ²-bench with Muse Glimmer 30B, with and without the Glint tools, same seeds.
+    Counted by task: runs of one task are not independent. A task "improved" if its pass rate rose with the tools.</p><div class="sets">`;
   for (const s of sets) {
-    html += `<div class="set"><h3>${esc(s.title)}<span class="role">${esc(s.role)}</span></h3>
-      <div class="sub">${esc(s.note)}</div>
-      <div style="margin-top:6px"><b>By task:</b> ${s.by_task.improved} improved, ${s.by_task.tied} tied,
-        ${s.by_task.worse} worse${s.by_task["no data"] ? `, ${s.by_task["no data"]} with no data` : ""}. <b>All runs:</b> alone ${s.runs.alone[0]}/${s.runs.alone[1]} passed,
-        with tools ${s.runs.tools[0]}/${s.runs.tools[1]}.</div>
+    const b = s.by_task;
+    html += `<div class="set"><h3>${esc(s.title)}<span class="tag">${esc(s.role)}</span></h3>
+      <div class="stats">
+        <div class="stat up"><b>${b.improved}</b><span>improved</span></div>
+        <div class="stat"><b>${b.tied}</b><span>tied</span></div>
+        <div class="stat down"><b>${b.worse}</b><span>worse${b["no data"] ? ` · ${b["no data"]} no data` : ""}</span></div>
+        <div class="runs">${bar("Alone", s.runs.alone, "")}${bar("With Glint", s.runs.tools, "tools")}<span>runs passed</span></div>
+      </div>
+      <div class="snote">${esc(s.note)}</div>
       <table><tr><th>Task</th><th>Glimmer alone</th><th>Glimmer + Glint tools</th><th>Change</th></tr>`;
     for (const r of s.tasks) {
       const extra = r.overflows ? ` (${r.overflows} context overflow${r.overflows > 1 ? "s" : ""})` : "";
-      html += `<tr><td>${esc(r.task)}${esc(extra)}</td><td>${esc(r.alone)}</td><td>${esc(r.tools)}</td>
-        <td class="${esc(r.change)}">${esc(r.change === "no data" ? `no data (${r.no_data_reason})` : r.change)}</td></tr>`;
+      html += `<tr><td>${esc(r.task)}${esc(extra)}</td><td>${dots(r.alone, "")}</td><td>${dots(r.tools, "tools")}</td>
+        <td class="chg ${esc(r.change)}">${esc(r.change === "no data" ? `no data (${r.no_data_reason})` : r.change)}</td></tr>`;
     }
     html += `</table></div>`;
   }
-  $("results-view").innerHTML = html;
+  $("results-view").innerHTML = html + "</div>";
 }
 function tab(which) {
-  $("desk-view").style.display = which === "desk" ? "" : "none";
-  $("results-view").style.display = which === "results" ? "" : "none";
+  $("desk-view").hidden = which !== "desk";
+  $("results-view").hidden = which !== "results";
   $("tab-desk").classList.toggle("on", which === "desk");
   $("tab-results").classList.toggle("on", which === "results");
   if (which === "results") showResults();
@@ -247,18 +467,21 @@ function tab(which) {
 async function init() {
   $("tab-desk").onclick = () => tab("desk");
   $("tab-results").onclick = () => tab("results");
+  $("brief-toggle").onclick = () => { const g = $("goal"); g.classList.toggle("open");
+    $("brief-toggle").textContent = g.classList.contains("open") ? "Show less" : "Show full brief"; };
   const list = await (await fetch("/api/scenarios")).json();
   for (const s of list) {
-    const o = document.createElement("option"); o.value = s.id; o.textContent = s.title + (s.tuned ? " (tuned task)" : ""); $("scenario").appendChild(o);
+    const o = document.createElement("option"); o.value = s.id; o.textContent = s.title; $("scenario").appendChild(o);
   }
   $("scenario").onchange = (e) => load(e.target.value);
   $("play").onclick = play;
   $("step").onclick = () => { stop(); pos = Math.min(pos + 1, steps()); showUpTo(pos); };
   $("all").onclick = () => { stop(); pos = steps(); showUpTo(pos); };
+  $("scrub").oninput = (e) => { stop(); pos = Number(e.target.value); showUpTo(pos); };
   $("lookups").onchange = () => showUpTo(pos);
   $("live").onclick = runLive;
   const status = await (await fetch("/api/live/status")).json();
-  if (!status.available) { $("live").disabled = true; $("live").title = "Live mode needs: " + status.missing.join(", "); }
+  $("live").hidden = !status.available;  // shown only when live mode can run
   if (list.length) load(list[0].id);
 }
 init();
