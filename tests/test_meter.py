@@ -271,3 +271,46 @@ def test_guarded_paces_calls_through_a_real_rate_limiter(tmp_path):
     for _ in range(6):
         fn(model="muse-spark-1.3-contributor")
     assert time.monotonic() - t0 >= 0.45
+
+
+# --- Mutation-testing gaps (cosmic-ray on main, 2026-10-28: 86 of 334 mutants survived) -----------------------------
+def test_every_model_price_is_the_published_one():
+    # $ per 1M tokens: Meta's pricing page and Baseten's Spark Open page (2026-10-26), DeepInfra's estimated_cost for
+    # Glimmer. The caps add up these numbers, so a changed price must be a deliberate edit here too.
+    from glint.meter import META_PRICES
+
+    spark = {"input": 1.25, "cached": 0.15, "output": 4.25}
+    contributor = {"input": 0.10, "cached": 0.002, "output": 0.20}
+    assert META_PRICES == {
+        "muse-spark-1.3": spark, "muse-spark-1.2": spark, "muse-spark-1.1": spark,
+        "muse-spark-1.3-contributor": contributor, "muse-spark-1.2-contributor": contributor,
+        "muse-wonder-1.0": {"input": 4.00, "cached": 0.20, "output": 20.00},
+        "muse-spark-open-1026": spark,
+        "Muse-Glimmer-30B": {"input": 0.30, "cached": 0.04, "output": 1.20},
+        "Muse-Glimmer-30B-modal": {"input": 0.0, "cached": 0.0, "output": 0.0}}
+    # cached tokens are billed at the cached price, the rest of the prompt at the input price
+    assert meta_cost("muse-spark-1.3", 1_000_000, 400_000, 0) == pytest.approx(0.6 * 1.25 + 0.4 * 0.15)
+    assert meta_cost("openai/meta-models/Muse-Glimmer-30B-modal", 10**6, 10**5, 10**6) == 0.0
+
+
+def test_litellm_gets_the_cached_price_per_token():
+    import litellm
+
+    from glint.meter import register_litellm_prices
+
+    register_litellm_prices()
+    info = litellm.get_model_info("openai/muse-wonder-1.0")
+    assert (info["input_cost_per_token"], info["cache_read_input_token_cost"], info["output_cost_per_token"]) == (
+        pytest.approx(4.00e-6), pytest.approx(0.20e-6), pytest.approx(20.00e-6))
+
+
+def test_a_response_with_missing_token_counts_records_zero_not_one(tmp_path):
+    from types import SimpleNamespace
+
+    meter = Meter(Caps(meta_usd=5.0, gpu_usd=0.0), tmp_path / "ledger.jsonl")
+    logger = litellm_callback((meter, ("muse-spark",)))
+    usage = SimpleNamespace(prompt_tokens=1000, completion_tokens=None)  # no details objects at all
+    logger._meter_call({}, SimpleNamespace(usage=usage), "muse-spark-1.3", True)
+    (rec,) = [json.loads(line) for line in (tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert (rec["prompt"], rec["cached"], rec["completion"], rec["reasoning"]) == (1000, 0, 0, 0)
+    assert rec["usd"] == pytest.approx(meta_cost("muse-spark-1.3", 1000, 0, 0))
