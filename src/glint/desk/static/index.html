@@ -77,7 +77,7 @@
   <section class="pane"><h2>Glimmer + Glint tools <small id="tools-meta"></small></h2>
     <div class="feed" id="tools"></div><div class="outcome" id="tools-out"></div></section>
 </div>
-<footer id="source"></footer>
+<footer id="source" style="font-weight:500"></footer>
 <script>
 const $ = (id) => document.getElementById(id);
 let data = null, pos = 0, timer = null;
@@ -189,7 +189,11 @@ async function load(id) {
   $("goal").textContent = "Customer: " + data.customer;
   $("alone-meta").textContent = `trial ${data.alone.trial}`;
   $("tools-meta").textContent = `trial ${data.tools.trial}`;
-  $("source").textContent = "Recorded runs: " + data.source + ". τ²-bench banking task " + data.id + " (MIT).";
+  const rec = data.recorded;
+  $("source").textContent = "Selected pair, not a typical run: a recorded run where Glimmer alone failed, beside one " +
+    `where Glimmer with Glint's tools passed. All recorded runs of this task: alone ${rec.base.passed}/${rec.base.runs}` +
+    ` passed, with tools ${rec.tools.passed}/${rec.tools.runs} passed. Source: ${data.source}; τ²-bench banking task ` +
+    `${data.id} (MIT).`;
 }
 async function init() {
   const list = await (await fetch("/api/scenarios")).json();

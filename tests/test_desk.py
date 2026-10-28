@@ -163,3 +163,12 @@ def test_live_start_is_refused_when_the_budget_is_spent(monkeypatch):
     monkeypatch.setattr(desk_app.budget, "check", spent)
     r = client.post("/api/live/start", json={"task_id": "task_054"})
     assert r.status_code == 429 and "Replay mode still works" in r.json()["detail"]
+
+
+def test_replay_discloses_the_pair_is_selected_with_real_pass_counts():
+    # each replay pair is chosen (failed alone, passed with tools); the page must say so and give all recorded runs
+    assert "Selected pair, not a typical run" in client.get("/").text
+    for s in client.get("/api/scenarios").json():
+        rec = client.get(f"/api/scenarios/{s['id']}").json()["recorded"]
+        assert rec["base"]["runs"] >= 2 and rec["tools"]["runs"] >= 2
+        assert rec["base"]["passed"] < rec["base"]["runs"] and rec["tools"]["passed"] >= 1

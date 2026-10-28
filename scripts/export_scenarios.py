@@ -49,6 +49,9 @@ def main():
             "id": task_id, "title": TITLES.get(task_id, task_id),
             "customer": customer_summary(str(task.user_scenario.instructions)),
             "source": f"{folder} (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
+            # the pair is chosen (a failed run alone, a passed run with tools); these are all the recorded runs
+            "recorded": {arm: {"passed": sum(outcome(x)["passed"] for x in runs if x["messages"]),
+                               "runs": sum(1 for x in runs if x["messages"])} for arm, runs in arms.items()},
             "alone": {"trial": alone["trial"], "events": timeline(alone["messages"], overrules), "outcome": outcome(alone),
                       "overruled_writes": len(overrules)},
             "tools": {"trial": helped["trial"], "events": timeline(helped["messages"]), "outcome": outcome(helped)},
