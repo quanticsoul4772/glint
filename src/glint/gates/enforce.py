@@ -5,7 +5,8 @@
 instance's `get_response`. Only `requestor == "assistant"` calls to WRITE tools are gated; a banking
 `call_discoverable_agent_tool` is unwrapped and its hidden tool gated. On a deny the write does not run and the agent
 gets an error message carrying the reason, purpose, fix and verdict; arguments are never rewritten. τ²'s gold actions
-go through `make_tool_call`, not `get_response`, so they stay ungated.
+go through `make_tool_call`, not `get_response`, so they stay ungated. A few GENERIC tools that end or change the
+conversation are gated like writes (rules.GATED_GENERIC: banking's transfer_to_human_agents).
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from tau2.environment.toolkit import ToolType
 
 from glint.gates.core import GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
-from glint.gates.rules import REQUIRED_GATES, build_registry, manifest, parse_hidden_arguments
+from glint.gates.rules import GATED_GENERIC, REQUIRED_GATES, build_registry, manifest, parse_hidden_arguments
 
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
@@ -44,12 +45,15 @@ class Enforcer:
         name, args = call.name, call.arguments or {}
         if name == WRAPPER:
             name, args = str(args.get("agent_tool_name", "")), parse_hidden_arguments(args.get("arguments", "{}"))
-        if not env.tools.has_tool(name) or env.tools.tool_type(name) != ToolType.WRITE or name == WRAPPER:
+        if not env.tools.has_tool(name) or name == WRAPPER:
+            return None
+        if env.tools.tool_type(name) != ToolType.WRITE and name not in GATED_GENERIC.get(self.domain, ()):
             return None
         return name, args
 
-    def check(self, tool: str, args: dict | None, db, replay: bool = False) -> GateResult:
-        """Run every gate on the write; the first deny wins. Each gate's decision is logged as gate.fired."""
+    def check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None) -> GateResult:
+        """Run every gate on the write; the first deny wins. Each gate's decision is logged as gate.fired. A gate with
+        `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`."""
         if args is None:
             result = deny("unparsed_arguments", "glint.gates.enforce", "the hidden tool's arguments are not a JSON "
                           "object", "Pass `arguments` as a JSON object string.")
@@ -57,7 +61,11 @@ class Enforcer:
             return result
         final = None
         for gate in self.registry.for_tool(tool):
-            result, ms = run_gate(gate, db, args)
+            if gate.toolkit and toolkit is None:
+                result, ms = deny("gate_error", gate.name, f"gate {gate.name!r} needs the environment's toolkit and "
+                                  "was given none", "Call Enforcer.check with toolkit=env.tools."), 0.0
+            else:
+                result, ms = run_gate(gate, toolkit if gate.toolkit else db, args)
             if not self._log(tool, args, result, ms, replay, gate.name):
                 result = deny("audit_failed", gate.name, f"gate {gate.name!r} fired but its event could not be "
                               "logged; denying rather than allowing a write with no audit trail",
@@ -94,7 +102,7 @@ class Enforcer:
             write = self.write_call(env, message)
             if write is None:
                 return original_response(message)
-            result = self.check(*write, env.tools.db, replay=state["replay"])
+            result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
                 return original_response(message)
             return ToolMessage(id=message.id, content=result.message(), requestor=message.requestor,

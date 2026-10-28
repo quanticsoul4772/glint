@@ -1,0 +1,301 @@
+[
+ {
+  "set": "btest",
+  "dom": "banking_knowledge",
+  "arm": "base",
+  "task": "task_022",
+  "trial": 0,
+  "outcome": "fail",
+  "writes": [
+   {
+    "i": 12,
+    "role": "assistant",
+    "name": "log_verification",
+    "args": {
+     "name": "Isabella Fernandez",
+     "user_id": "f9bf8de0be",
+     "address": "742 Sunset Boulevard, Miami, FL 33101",
+     "email": "bella_fernandez92@yahoo.com",
+     "phone_number": "305-555-0729",
+     "date_of_birth": "12/19/1992",
+     "time_verified": "2025-11-14 03:40:00 EST"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 43,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_30cb41175311",
+     "new_rewards_earned": "5342 points"
+    },
+    "st": "extra"
+   },
+   {
+    "i": 47,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_097c072e7df3",
+     "new_rewards_earned": "3870 points"
+    },
+    "st": "extra"
+   },
+   {
+    "i": 51,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_508e275e27af",
+     "new_rewards_earned": "5000 points"
+    },
+    "st": "extra"
+   },
+   {
+    "i": 55,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_4f5e249acc6c",
+     "new_rewards_earned": "78 points"
+    },
+    "st": "extra"
+   }
+  ]
+ },
+ {
+  "set": "btest",
+  "dom": "banking_knowledge",
+  "arm": "tools",
+  "task": "task_043",
+  "trial": 0,
+  "outcome": "fail",
+  "writes": [
+   {
+    "i": 12,
+    "role": "assistant",
+    "name": "log_verification",
+    "args": {
+     "name": "Yuki Nakamura",
+     "user_id": "224959b99e",
+     "address": "3421 Sakura Avenue, Portland, OR 97205",
+     "email": "yuki.nakamura@simba.com",
+     "phone_number": "503-555-0842",
+     "date_of_birth": "05/12/1991",
+     "time_verified": "2025-11-14 03:40:00 EST"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 31,
+    "role": "assistant",
+    "name": "apply_credit_card_account_flag_6147",
+    "args": {
+     "credit_card_account_id": "cc_224959b99e_plat",
+     "user_id": "224959b99e",
+     "flag_type": "annual_fee_waived",
+     "expiration_date": "11/14/2026",
+     "reason": "loyalty_benefit"
+    },
+    "st": "ok"
+   }
+  ]
+ },
+ {
+  "set": "btest",
+  "dom": "banking_knowledge",
+  "arm": "base",
+  "task": "task_074",
+  "trial": 0,
+  "outcome": "fail",
+  "writes": [
+   {
+    "i": 22,
+    "role": "assistant",
+    "name": "log_verification",
+    "args": {
+     "name": "Ahmad Razali bin Mohd Yusof",
+     "user_id": "ar72c5d8e3",
+     "address": "1245 Pioneer Road, Denver, CO 80203",
+     "email": "ahmad.razali@gmail.com",
+     "phone_number": "303-555-0821",
+     "date_of_birth": "06/15/1989",
+     "time_verified": "2025-11-14 03:40:00 EST"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 40,
+    "role": "assistant",
+    "name": "get_all_user_accounts_by_user_id_3847",
+    "args": {
+     "user_id": "ar72c5d8e3"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 48,
+    "role": "assistant",
+    "name": "get_bank_account_transactions_9173",
+    "args": {
+     "account_id": "chk_ar72c5d8e3_1"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 50,
+    "role": "assistant",
+    "name": "get_bank_account_transactions_9173",
+    "args": {
+     "account_id": "chk_ar72c5d8e3_2"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 52,
+    "role": "assistant",
+    "name": "get_bank_account_transactions_9173",
+    "args": {
+     "account_id": "chk_ar72c5d8e3_3"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 54,
+    "role": "assistant",
+    "name": "get_bank_account_transactions_9173",
+    "args": {
+     "account_id": "chk_ar72c5d8e3_4"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 70,
+    "role": "assistant",
+    "name": "apply_checking_account_credit_5829",
+    "args": {
+     "account_id": "chk_ar72c5d8e3_1",
+     "amount": 24.5,
+     "credit_type": "fee_refund"
+    },
+    "st": "wrongarg"
+   },
+   {
+    "i": 72,
+    "role": "assistant",
+    "name": "apply_checking_account_credit_5829",
+    "args": {
+     "account_id": "chk_ar72c5d8e3_3",
+     "amount": 7.5,
+     "credit_type": "fee_refund"
+    },
+    "st": "wrongarg"
+   },
+   {
+    "i": 74,
+    "role": "assistant",
+    "name": "apply_checking_account_credit_5829",
+    "args": {
+     "account_id": "chk_ar72c5d8e3_4",
+     "amount": 10.0,
+     "credit_type": "fee_refund"
+    },
+    "st": "wrongarg"
+   }
+  ]
+ },
+ {
+  "set": "banking12",
+  "dom": "banking_knowledge",
+  "arm": "base",
+  "task": "task_081",
+  "trial": 0,
+  "outcome": "context_overflow",
+  "writes": []
+ },
+ {
+  "set": "heldout2",
+  "dom": "retail",
+  "arm": "tools",
+  "task": "50",
+  "trial": 2,
+  "outcome": "pass",
+  "writes": [
+   {
+    "i": 18,
+    "role": "assistant",
+    "name": "transfer_to_human_agents",
+    "args": {
+     "summary": "User requests reinstatement of cancelled order #W8859225, which cannot be reinstated via system tools per policy."
+    },
+    "st": "ok"
+   }
+  ]
+ },
+ {
+  "set": "synthetic",
+  "dom": "banking_knowledge",
+  "arm": "base",
+  "task": "task_022",
+  "trial": 0,
+  "outcome": "pass",
+  "writes": [
+   {
+    "i": 12,
+    "role": "assistant",
+    "name": "log_verification",
+    "args": {
+     "name": "Isabella Fernandez",
+     "user_id": "f9bf8de0be",
+     "address": "742 Sunset Boulevard, Miami, FL 33101",
+     "email": "bella_fernandez92@yahoo.com",
+     "phone_number": "305-555-0729",
+     "date_of_birth": "12/19/1992",
+     "time_verified": "2025-11-14 03:40:00 EST"
+    },
+    "st": "ok"
+   },
+   {
+    "i": 43,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_30cb41175311",
+     "new_rewards_earned": "5342 points"
+    },
+    "st": "extra"
+   },
+   {
+    "i": 47,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_097c072e7df3",
+     "new_rewards_earned": "3870 points"
+    },
+    "st": "extra"
+   },
+   {
+    "i": 51,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_508e275e27af",
+     "new_rewards_earned": "5000 points"
+    },
+    "st": "extra"
+   },
+   {
+    "i": 55,
+    "role": "assistant",
+    "name": "update_transaction_rewards_3847",
+    "args": {
+     "transaction_id": "txn_4f5e249acc6c",
+     "new_rewards_earned": "78 points"
+    },
+    "st": "extra"
+   }
+  ]
+ }
+]

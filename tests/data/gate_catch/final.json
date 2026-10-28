@@ -1,0 +1,30 @@
+[
+ {
+  "set": "btest",
+  "arm": "base",
+  "task": "task_022",
+  "trial": 0,
+  "cause": "c"
+ },
+ {
+  "set": "btest",
+  "arm": "tools",
+  "task": "task_043",
+  "trial": 0,
+  "cause": "b"
+ },
+ {
+  "set": "btest",
+  "arm": "base",
+  "task": "task_074",
+  "trial": 0,
+  "cause": "a"
+ },
+ {
+  "set": "banking12",
+  "arm": "base",
+  "task": "task_081",
+  "trial": 0,
+  "cause": "e"
+ }
+]

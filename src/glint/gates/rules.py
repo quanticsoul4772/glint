@@ -5,13 +5,19 @@ Every gate reads only the live database and the write's own arguments, so the sa
 gets the same decision (τ²'s evaluator replays the agent's writes). Where a check depends on something the database
 cannot show (the user's stated cancellation reason, a replacement card ordered later in the conversation), the gate
 allows and says so in its rule_id; it never guesses. Writes no rule covers yet are allowed and logged under
-`no_rule_yet` (NO_RULE_YET below names each one).
+`no_rule_yet` (NO_RULE_REASONS below names each one and why).
+
+Phase 2 (2026-10-28) adds the debit card rules (glint.gates.debit), the other banking writes (glint.gates.banking),
+the procedure gates (glint.gates.procedure: verification, recorded lookups, order, the transfer reason) and the
+airline and retail writes (glint.gates.travel). Rules are per write tool, never per task.
 """
 from __future__ import annotations
 
 import json
 
 from glint.assist import airline, as_flag, banking, retail
+from glint.gates import banking as bank_rules
+from glint.gates import debit, procedure, travel
 from glint.gates.core import NO_RULE, Gate, GateRegistry, GateResult, allow, deny
 
 RETAIL_ACTIONS = {
@@ -26,23 +32,45 @@ SUBMIT, APPROVE, DENY = ("submit_credit_limit_increase_request_7392", "approve_c
                          "deny_credit_limit_increase_5848")
 BANKING_GATED = (DISPUTE, REPLACE, SUBMIT, APPROVE, DENY)
 
-# Writes with no rule yet (phase 2 adds them): allowed, and logged as such
+# Writes with no rule of their own yet: allowed, and logged under no_rule_yet (each with the reason it has none)
+NO_RULE_REASONS = {
+    "example_agent_tool_0000": "a placeholder tool in the toolkit; no procedure uses it",
+    "file_debit_card_transaction_dispute_6281": ("its policy values (category, liability, provisional credit, "
+                                                 "card action) come from the user's account of what happened; the "
+                                                 "procedure gates still require verification and the lookups"),
+    "set_debit_card_recurring_block_7382": "the merchant and the block are the user's request",
+    "pay_credit_card_from_checking_9182": "the amount is the user's choice; the procedure gates require verification",
+    "open_bank_account_4821": ("the account class follows the user's stated needs; the tool checks eligibility "
+                               "(the 14-day checking tenure)"),
+    "close_bank_account_7392": ("whether the user also wants a savings account (task_060: open it first) is not "
+                                "in the database"),
+    "transfer_funds_between_bank_accounts_7291": "the amount and accounts are the user's choice",
+    "apply_savings_account_credit_6831": ("the interest correction amount needs the rate tables; the procedure gates "
+                                          "require the lookups"),
+    "submit_interest_discrepancy_report_7294": "the discrepancy is computed from rate tables; lookups are gated",
+    "clear_debit_card_fraud_alert_4892": "the fraud score inputs are the user's answers",
+    "reset_debit_card_pin_6284": "the PIN rules are checked by the tool; verification is gated",
+    "change_debit_card_pin_6285": "the PIN rules are checked by the tool; verification is gated",
+    "request_temporary_debit_card_limit_increase_8374": "the amount and travel facts are the user's statement",
+}
 NO_RULE_YET = {
+    "retail": (),
+    "airline": (),
+    "banking_knowledge": tuple(NO_RULE_REASONS),
+}
+# GENERIC (not WRITE) tools gated like writes: they end or redirect the conversation
+GATED_GENERIC = {"banking_knowledge": ("transfer_to_human_agents",)}
+PHASE2 = {
     "retail": ("modify_user_address",),
     "airline": ("book_reservation", "send_certificate"),
     "banking_knowledge": (
-        "change_user_email", "log_verification", "example_agent_tool_0000", "update_transaction_rewards_3847",
-        "file_debit_card_transaction_dispute_6281", "set_debit_card_recurring_block_7382",
+        "log_verification", "change_user_email", "update_transaction_rewards_3847",
         "log_credit_card_closure_reason_4521", "apply_statement_credit_8472", "apply_credit_card_account_flag_6147",
-        "close_credit_card_account_7834", "pay_credit_card_from_checking_9182", "open_bank_account_4821",
-        "close_bank_account_7392", "transfer_funds_between_bank_accounts_7291", "apply_checking_account_credit_5829",
-        "apply_savings_account_credit_6831", "submit_interest_discrepancy_report_7294", "order_debit_card_5739",
-        "activate_debit_card_8291", "activate_debit_card_8292", "activate_debit_card_8293", "close_debit_card_4721",
-        "freeze_debit_card_3892", "unfreeze_debit_card_3893", "clear_debit_card_fraud_alert_4892",
-        "reset_debit_card_pin_6284", "change_debit_card_pin_6285", "request_temporary_debit_card_limit_increase_8374",
-    ),
+        "close_credit_card_account_7834", "apply_checking_account_credit_5829", *debit.DEBIT_TOOLS,
+        "transfer_to_human_agents"),
 }
-RULED = {"retail": tuple(RETAIL_ACTIONS), "airline": AIRLINE_GATED, "banking_knowledge": BANKING_GATED}
+RULED = {"retail": tuple(RETAIL_ACTIONS) + PHASE2["retail"], "airline": AIRLINE_GATED + PHASE2["airline"],
+         "banking_knowledge": BANKING_GATED + PHASE2["banking_knowledge"]}
 # Boot check: every one of these write tools must have a gate before the first call is served
 REQUIRED_GATES = {d: set(RULED[d]) | set(NO_RULE_YET[d]) for d in RULED}
 
@@ -239,8 +267,63 @@ def _replacement(db, a: dict) -> GateResult:
 
 def _no_rule(tool: str):
     def gate(db, a: dict) -> GateResult:
-        return allow(NO_RULE, "glint.gates.rules.NO_RULE_YET", reason=f"no rule covers {tool} yet (phase 2)")
+        return allow(NO_RULE, "glint.gates.rules.NO_RULE_YET", reason=f"no rule covers {tool} yet: "
+                     f"{NO_RULE_REASONS.get(tool, 'not written')}")
     return gate
+
+
+def _register_banking(reg: GateRegistry) -> None:
+    reg.register(Gate("banking_dispute_gate", (DISPUTE,), "Knowledge base credit_cards_(general)_014/_015: the "
+                      "card_action and provisional credit a dispute must carry.", _dispute))
+    reg.register(Gate("banking_cli_submit_gate", (SUBMIT,), "credit_card_account_logistics_005: the maximum "
+                      "increase per tier.", _submit))
+    reg.register(Gate("banking_cli_approve_gate", (APPROVE,), "credit_card_account_logistics_006/_007: approve "
+                      "only when every check passes, with the submitted amount.",
+                      lambda db, a: _decision(db, a, True)))
+    reg.register(Gate("banking_cli_deny_gate", (DENY,), "credit_card_account_logistics_006/_007: deny only when "
+                      "a check fails, with the first failing reason.", lambda db, a: _decision(db, a, False)))
+    reg.register(Gate("banking_replacement_gate", (REPLACE,), "credit_card_account_logistics_007: a pending "
+                      "replacement makes a credit limit increase fail, so the increase is decided first.",
+                      _replacement))
+    debit_gates = ((debit.FREEZE, debit.freeze, "_026: only an ACTIVE card is frozen."),
+                   (debit.UNFREEZE, debit.unfreeze, "_026: only a FROZEN card on an OPEN account is unfrozen."),
+                   (debit.CLOSE, debit.close, ("_025: no pending transactions, the 14-day card age, a "
+                    "frozen card unfrozen first.")),
+                   (debit.ORDER, debit.order, ("_023/_029: fees, the replacement limit and the entry-tier wait by "
+                    "checking tier.")))
+    for tool, fn, purpose in debit_gates:
+        reg.register(Gate(f"debit_{tool}_gate", (tool,), f"Knowledge base bank_accounts_(general){purpose}", fn))
+    for tool in debit.ACTIVATE:
+        reg.register(Gate(f"debit_{tool}_gate", (tool,), "Knowledge base bank_accounts_(general)_024: the activation "
+                          "variant follows the card's issue_reason; the card is PENDING and unexpired.",
+                          debit.activate(tool)))
+    others = (("log_verification", bank_rules.log_verification, ("Verification records the user's details as on "
+               "file at the domain's current time.")),
+              ("change_user_email", bank_rules.change_email, "An email change sets a different address."),
+              ("update_transaction_rewards_3847", bank_rules.update_rewards, ("credit_cards_(general)_004: rewards "
+               "are corrected only after an approved cash back dispute.")),
+              ("apply_checking_account_credit_5829", bank_rules.checking_credit, ("bank_accounts_(general)_017: one "
+               "credit per account per interaction, a 14-day cooldown, a fee refund within the fees charged.")),
+              ("log_credit_card_closure_reason_4521", bank_rules.log_closure_reason, ("credit_card_account_logistics"
+               "_003 step 1: closure eligibility before the reason and retention steps.")),
+              ("close_credit_card_account_7834", bank_rules.close_card, ("credit_card_account_logistics_002/_003: "
+               "closure eligibility and a logged reason.")),
+              ("apply_credit_card_account_flag_6147", bank_rules.account_flag, ("credit_card_account_logistics_003 "
+               "step 4: an annual fee waiver answers a logged annual_fee reason, once a year.")),
+              ("apply_statement_credit_8472", bank_rules.statement_credit, ("credit_card_account_logistics_003 step 5: "
+               "the retention credit by card tier, after a logged reason, once a year.")),
+              ("transfer_to_human_agents", procedure.transfer, ("bank_accounts_(general)_042: the transfer reason "
+               "tier; a submitted credit limit increase is decided before a transfer.")))
+    for tool, fn, purpose in others:
+        reg.register(Gate(f"banking_{tool}_gate", (tool,), purpose, fn))
+    # procedure gates: every banking write acting for a user, and every write whose procedure names lookups
+    reg.register(Gate("procedure_verified_gate", procedure.VERIFIED_WRITES, "Every procedure starts with a verified "
+                      "customer: the user's log_verification record from this conversation.", procedure.verified))
+    for tool in procedure.REQUIRED_LOOKUPS:
+        reg.register(Gate(f"procedure_lookups_{tool}", (tool,), "The lookups the procedure names, recorded in the "
+                          "database before this write.", procedure.lookups(tool), toolkit=True))
+    reg.register(Gate("procedure_increase_first_gate", (DISPUTE,), "credit_card_account_logistics_007: a submitted "
+                      "credit limit increase is decided before a dispute.", procedure.increase_first))
 
 
 def build_registry(domain: str) -> GateRegistry:
@@ -249,24 +332,19 @@ def build_registry(domain: str) -> GateRegistry:
         for tool, action in RETAIL_ACTIONS.items():
             reg.register(Gate(f"retail_{action}_gate", (tool,), f"Retail policy for '{action}': order status, items "
                               "of the same product, and the payment methods allowed.", _retail_gate(action)))
+        reg.register(Gate("retail_modify_user_address_gate", ("modify_user_address",), "Retail policy: a complete "
+                          "default address.", travel.modify_user_address))
     elif domain == "airline":
         purpose = "Airline policy: who may cancel, basic economy, flown segments, bags, passenger count."
         for tool, fn in zip(AIRLINE_GATED, (_airline_cancel, _airline_flights, _airline_baggages,
                                             _airline_passengers)):
             reg.register(Gate(f"airline_{tool}_gate", (tool,), purpose, fn))
+        reg.register(Gate("airline_book_reservation_gate", ("book_reservation",), "Airline policy, Book flight: "
+                          "passengers, payment method counts, free bag allowance.", travel.book_reservation))
+        reg.register(Gate("airline_send_certificate_gate", ("send_certificate",), "Airline policy, Refunds and "
+                          "Compensation: who may get a certificate, and for what.", travel.send_certificate))
     elif domain == "banking_knowledge":
-        reg.register(Gate("banking_dispute_gate", (DISPUTE,), "Knowledge base credit_cards_(general)_014/_015: the "
-                          "card_action and provisional credit a dispute must carry.", _dispute))
-        reg.register(Gate("banking_cli_submit_gate", (SUBMIT,), "credit_card_account_logistics_005: the maximum "
-                          "increase per tier.", _submit))
-        reg.register(Gate("banking_cli_approve_gate", (APPROVE,), "credit_card_account_logistics_006/_007: approve "
-                          "only when every check passes, with the submitted amount.",
-                          lambda db, a: _decision(db, a, True)))
-        reg.register(Gate("banking_cli_deny_gate", (DENY,), "credit_card_account_logistics_006/_007: deny only when "
-                          "a check fails, with the first failing reason.", lambda db, a: _decision(db, a, False)))
-        reg.register(Gate("banking_replacement_gate", (REPLACE,), "credit_card_account_logistics_007: a pending "
-                          "replacement makes a credit limit increase fail, so the increase is decided first.",
-                          _replacement))
+        _register_banking(reg)
     else:
         raise ValueError(f"no gates for domain {domain!r}")
     for tool in NO_RULE_YET[domain]:
@@ -277,6 +355,7 @@ def build_registry(domain: str) -> GateRegistry:
 
 def manifest(domain: str, reg: GateRegistry) -> dict:
     return {"domain": domain, "required": sorted(REQUIRED_GATES[domain]), "no_rule_yet": list(NO_RULE_YET[domain]),
+            "gated_generic": list(GATED_GENERIC.get(domain, ())),
             "gates": [{"name": g.name, "tools": list(g.tools), "purpose": g.purpose, "timeout_s": g.timeout_s}
                       for g in reg.gates()]}
 

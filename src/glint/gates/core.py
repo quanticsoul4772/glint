@@ -59,11 +59,14 @@ GateFn = Callable[[Any, dict], GateResult]
 
 @dataclass(frozen=True)
 class Gate:
+    """One gate. `fn(db, args)` judges the write; with `toolkit=True` it gets the environment's toolkit instead of its
+    database (a procedure gate reads `toolkit.db` and which hidden reads that environment records)."""
     name: str
     tools: tuple[str, ...]
     purpose: str
     fn: GateFn
     timeout_s: float = DEFAULT_TIMEOUT_S
+    toolkit: bool = False
 
 
 class GateRegistry:
