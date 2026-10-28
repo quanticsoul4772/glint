@@ -369,3 +369,14 @@ def test_review_banking_string_flags_and_cooldown():
                             "submitted_date": "2025-10-01", "requested_increase_amount": 500}
     assert banking.check_credit_limit_increase(tools.db, "5e4c1a83b0", acc, 500)["checks"][
         "cooldown_period_active"]["passed"] is True
+
+
+def test_assisting_an_environment_twice_is_a_no_op():
+    # an installed constructor already assists the environment; the desk's tools pane assists it again
+    from tau2.domains.banking_knowledge.environment import get_environment
+
+    from glint.assist.tau2_tools import assist_environment
+
+    env = assist_environment(get_environment(retrieval_variant="bm25_grep"), "banking_knowledge")
+    cls = type(env.tools)
+    assert type(assist_environment(env, "banking_knowledge").tools) is cls

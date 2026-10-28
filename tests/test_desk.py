@@ -360,3 +360,63 @@ def test_a_failed_record_pauses_live_mode_and_is_kept_on_the_session(tmp_path):
     assert "OSError: volume gone" in session.done_error
     with pytest.raises(live.BudgetExceeded, match="live mode is paused"):
         budget.check()
+
+
+def test_a_pane_that_raises_shows_the_error_and_the_other_pane_finishes():
+    import time
+
+    from glint.desk import live
+
+    def build(name):
+        orch, run = _fake_build(name)
+        if name == "alone":
+            def run(o):
+                raise ConnectionError("Glimmer endpoint reset")
+        return orch, run
+
+    session = live.LiveSession("task_054", build)
+    session.panes["tools"].orchestrator.gate.set()
+    session.start()
+    deadline = time.time() + 5
+    while not session.done and time.time() < deadline:
+        time.sleep(0.01)
+    snap = session.snapshot()
+    assert snap["alone"]["status"] == "error" and "ConnectionError: Glimmer endpoint reset" in snap["alone"]["error"]
+    assert snap["tools"]["outcome"]["passed"] is True
+
+
+def test_the_real_builder_gives_only_the_tools_pane_the_decision_tools():
+    # τ²'s own build functions on a real banking task; nothing runs, no model is called
+    from glint.desk import app as desk_app
+    from glint.desk import live
+
+    task = desk_app.banking_tasks()["task_054"]
+    build = live.tau2_builder(task, {"api_base": "http://unused"}, "openai/Muse-Glimmer-30B-modal",
+                              {"api_key": "unused"}, seed=1)
+    tools = {name: {t.name for t in build(name)[0].environment.get_tools()} for name in ("alone", "tools")}
+    assert "check_card_dispute" in tools["tools"] and "check_card_dispute" not in tools["alone"]
+    assert tools["alone"] < tools["tools"]
+    assert live.tau2_labeler(task)({"task_id": "task_054", "trial": 0, "messages": []}) == {}
+
+
+def test_configure_routes_glimmer_and_caps_meta_once_per_process(monkeypatch):
+    import litellm
+    from tau2.utils import llm_utils
+
+    from glint.desk import live
+
+    for obj, attr in ((llm_utils, "completion"), (litellm, "callbacks")):
+        monkeypatch.setattr(obj, attr, getattr(obj, attr))
+    monkeypatch.setattr(live, "_configured", {})
+    for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY"):
+        monkeypatch.setenv(k, "https://x.modal.run" if k == "GLINT_GLIMMER_URL" else "placeholder")
+    first = live.configure()
+    assert first["glimmer_model"].endswith("Muse-Glimmer-30B-modal")
+    assert first["glimmer_args"]["api_base"] == "https://x.modal.run/v1"
+    assert live.configure() is first  # once per process: a second call does not wrap the completion again
+    monkeypatch.setattr(live, "_configured", {})
+    monkeypatch.delenv("MODEL_API_KEY")
+    import pytest
+
+    with pytest.raises(KeyError, match="MODEL_API_KEY"):
+        live.configure()

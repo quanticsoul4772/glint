@@ -16,7 +16,8 @@ Glint: MCP decision tools that take over analytical decisions for Meta's open-we
 
 ## Code and git
 - **One branch per change, from `origin/main`.** Push with `scripts/push_pr.sh`: it refuses a branch whose PR is merged or closed (two commits were lost that way).
-- **Before a PR:** `.venv/Scripts/python.exe -X utf8 -m pytest -q` and `.venv/Scripts/ruff.exe check src tests scripts --line-length 120`.
+- **Before a PR:** `.venv/Scripts/python.exe -X utf8 -m pytest -q --cov --cov-report=json:coverage.json`, then `.venv/Scripts/python.exe scripts/coverage_gate.py`, then `.venv/Scripts/ruff.exe check src tests scripts --line-length 120`. CI runs the same three steps on every PR.
+- **Coverage goal** (`docs/testing-strategy.md`): spend and measurement code 90%, every other module 70%, total 85%; never lower a floor. Every bug fix ships with a regression test. Tests never touch the real workspace or a paid service.
 - **No secrets in the repo.** Keys live in `<workspace>\.env`; never print them.
 - **Never edit the folder a run loads.** While a run is running or queued (a chained run starts each later program fresh, loading the folder's code at that moment), keep `<workspace>\glint` on `main` and develop in a worktree: `git worktree add ../glint-dev -b BRANCH origin/main`, with tests run as `PYTHONPATH=<worktree>/src .venv/Scripts/python.exe -m pytest` so they test the worktree's code.
 - **Long jobs:** start them only with `scripts/launch.sh LOG -- command ...`, which detaches just the job and checks it is alive. Run checks (git pull, greps) as separate commands first; never chain them into a background `&` list, which backgrounds the checks too and loses their output. Keep the machine awake (the driver runs locally).

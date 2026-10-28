@@ -1,0 +1,32 @@
+# Tests, the coverage goal and lint on every pull request and on main.
+# τ²-bench is checked out next to the repo at the pinned v1.0.1 commit, where pyproject's path source expects it.
+name: tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: glint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: glint
+      - uses: actions/checkout@v4
+        with:
+          repository: sierra-research/tau2-bench
+          ref: fc0055dc4e0a316c3f83133267fbd6faaa770992
+          path: vendor/tau2-bench
+      - uses: astral-sh/setup-uv@v6
+      - name: Install
+        run: uv sync --extra dev --python 3.12
+      - name: Tests with coverage (total goal 85%)
+        run: uv run --no-sync python -X utf8 -m pytest -q --cov --cov-report=term --cov-report=json:coverage.json
+      - name: Per-module coverage floors
+        run: uv run --no-sync python scripts/coverage_gate.py
+      - name: Lint
+        run: uv run --no-sync ruff check src tests scripts --line-length 120
