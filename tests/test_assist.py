@@ -1,5 +1,7 @@
 """The decision tools on the real τ² databases, including the cases where Glimmer decided wrong in recorded runs."""
 
+from datetime import date, timedelta
+
 import pytest
 from tau2.domains.airline.data_model import FlightDB
 from tau2.domains.retail.data_model import RetailDB
@@ -49,9 +51,16 @@ def test_retail_held_out_19_return_and_exchange_exclude_each_other(rdb):
 
 
 def test_airline_fixed_rules(adb):
-    assert airline.check_eligibility(adb, "XEHM4B", "remove_baggage")["allowed"] is False
-    assert airline.check_eligibility(adb, "XEHM4B", "add_insurance")["allowed"] is False
-    assert airline.check_eligibility(adb, "NOPE00", "cancel")["allowed"] is False
+    # airline/policy.md "Modify flight > Change baggage and insurance": "The user can add but not remove checked bags."
+    bags = airline.check_eligibility(adb, "XEHM4B", "remove_baggage")
+    assert bags["allowed"] is False and bags["reasons"] == ["bags can be added but not removed"]
+    assert bags["rules"] == ["The user can add but not remove checked bags."]
+    # same section: "The user cannot add insurance after initial booking."
+    ins = airline.check_eligibility(adb, "XEHM4B", "add_insurance")
+    assert ins["allowed"] is False and ins["reasons"] == ["insurance cannot be added after booking"]
+    assert ins["rules"] == ["The user cannot add insurance after initial booking."]
+    missing = airline.check_eligibility(adb, "NOPE00", "cancel")
+    assert missing["allowed"] is False and missing["reasons"] == ["reservation NOPE00 does not exist"]
 
 
 def test_retail_task82_refund_only_to_original_or_gift_card(rdb):
@@ -66,9 +75,15 @@ def test_retail_task82_refund_only_to_original_or_gift_card(rdb):
 
 
 def test_retail_status_rules(rdb):
-    assert retail.check_eligibility(rdb, "#W9571698", "cancel")["allowed"] is False      # delivered
-    assert retail.check_eligibility(rdb, "#W9911714", "cancel")["allowed"] is True       # pending
-    assert retail.check_eligibility(rdb, "#W9911714", "return")["allowed"] is False
+    # retail/policy.md "Cancel pending order": "An order can only be cancelled if its status is 'pending'"
+    delivered = retail.check_eligibility(rdb, "#W9571698", "cancel")
+    assert delivered["allowed"] is False
+    assert delivered["reasons"] == ["status is 'delivered', action requires 'pending'"]
+    pending = retail.check_eligibility(rdb, "#W9911714", "cancel")
+    assert pending["allowed"] is True and pending["reasons"] == []
+    # retail/policy.md "Return delivered order": "An order can only be returned if its status is 'delivered'"
+    ret = retail.check_eligibility(rdb, "#W9911714", "return")
+    assert ret["allowed"] is False and ret["reasons"] == ["status is 'pending', action requires 'delivered'"]
 
 
 def test_retail_task93_find_the_laptop_the_user_described(rdb):
@@ -107,12 +122,19 @@ def test_airline_task7_upcoming_trips_total(adb):
 
 
 def test_retail_exchange_checks_items_and_difference(rdb):
+    # retail/policy.md "Modify items": the user pays or is refunded "the price difference" between the new item and
+    # the one it replaces: makeup kit 2882812427 at $261.11 replaces 1763705424, bought at $235.44 in #W9911714
     res = retail.check_eligibility(rdb, "#W9911714", "modify_items", item_ids=["1763705424"],
                                    new_item_ids=["2882812427"])
-    assert res["allowed"] is True and "price_difference" in res["details"]
+    old_price = next(i.price for i in rdb.orders["#W9911714"].items if i.item_id == "1763705424")
+    new_price = rdb.products["5149340237"].variants["2882812427"].price
+    assert (old_price, new_price) == (235.44, 261.11)
+    assert res["allowed"] is True and res["details"]["price_difference"] == round(new_price - old_price, 2) == 25.67
+    # same section: "There cannot be any change of product types, e.g. modify shirt to shoe."
     wrong = retail.check_eligibility(rdb, "#W9911714", "modify_items", item_ids=["1763705424"],
                                      new_item_ids=["4107812777"])  # a shoe variant, not a makeup kit
     assert wrong["allowed"] is False
+    assert wrong["reasons"] == ["4107812777 is not a variant of the same product as 1763705424"]
 
 
 def test_tau2_environment_exposes_and_runs_the_tools():
@@ -380,3 +402,310 @@ def test_assisting_an_environment_twice_is_a_no_op():
     env = assist_environment(get_environment(retrieval_variant="bm25_grep"), "banking_knowledge")
     cls = type(env.tools)
     assert type(assist_environment(env, "banking_knowledge").tools) is cls
+
+
+
+# --- Airline rules the policy states, each checked for the reason that fires -------------------------------------
+# Reservations from τ²'s airline db (now = 2024-05-15 15:00 EST, airline/policy.md "Domain Basic"):
+# EMZ7JS business, all four segments landed; PLRJB9 basic economy, HAT176 2024-05-12 landed, HAT191 ahead;
+# CDXEBS economy with insurance, regular member, booked 2024-05-08, nothing flown or cancelled;
+# VAAOXJ economy, no insurance, regular member; SF5VA1 economy, no insurance, silver member.
+
+
+def test_airline_cancel_after_a_flown_segment_needs_transfer(adb):
+    # airline/policy.md "Cancel flight": "If any portion of the flight has already been flown, the agent cannot help
+    # and transfer is needed." This comes before the grounds ("Otherwise, flight can be cancelled if..."), so even a
+    # business reservation (otherwise cancellable) is refused
+    res = airline.check_eligibility(adb, "EMZ7JS", "cancel", reason="change of plan")
+    assert res["allowed"] is False and res["reasons"][0].startswith("segments already flown:")
+    assert res["rules"] == [airline.RULES["flown_cancel"]] and "cancellation_grounds" not in res["details"]
+
+
+def test_airline_change_cabin_after_a_flown_segment(adb):
+    # airline/policy.md "Change cabin": "Cabin cannot be changed if any flight in the reservation has already been
+    # flown." PLRJB9 has flown one of its two segments
+    res = airline.check_eligibility(adb, "PLRJB9", "change_cabin")
+    assert res["allowed"] is False and res["reasons"] == ["segments already flown: ['HAT176 2024-05-12 (landed)']"]
+    # "In other cases, all reservations, including basic economy, can change cabin without changing the flights."
+    assert airline.check_eligibility(adb, "VAAOXJ", "change_cabin")["allowed"] is True
+
+
+def test_airline_already_cancelled_reservation(adb):
+    # airline/policy.md "Cancel flight" cancels an active reservation; none of its actions applies to one whose
+    # status is already "cancelled". A business reservation, cancellable while active, is refused once cancelled
+    db = adb.model_copy(deep=True)
+    assert airline.check_eligibility(db, "VAAOXJ", "cancel", reason="change of plan")["allowed"] is False
+    db.reservations["VAAOXJ"].cabin = "business"
+    assert airline.check_eligibility(db, "VAAOXJ", "cancel", reason="change of plan")["allowed"] is True
+    db.reservations["VAAOXJ"].status = "cancelled"
+    for action in ("cancel", "change_cabin"):
+        res = airline.check_eligibility(db, "VAAOXJ", action, reason="change of plan")
+        assert res["allowed"] is False and res["reasons"] == ["reservation is already cancelled"]
+
+
+@pytest.mark.parametrize("reason, allowed", [("health", True), ("weather", True), ("change of plan", False)])
+def test_airline_cancel_with_insurance_and_a_covered_reason(adb, reason, allowed):
+    # airline/policy.md "Cancel flight": allowed if "The user has travel insurance and the reason for cancellation is
+    # covered by insurance"; "Book flight > Travel insurance": insurance "enables full refund if the user needs to
+    # cancel the flight given health or weather reasons". CDXEBS has insurance and no other ground
+    res = airline.check_eligibility(adb, "CDXEBS", "cancel", reason=reason)
+    assert res["allowed"] is allowed
+    grounds = res["details"]["cancellation_grounds"]
+    assert grounds["insurance covers the reason"] is allowed and sum(grounds.values()) == int(allowed)
+    assert res["reasons"] == ([] if allowed else ["none of the cancellation conditions holds"])
+    # without insurance the same reason is not a ground
+    assert airline.check_eligibility(adb, "VAAOXJ", "cancel", reason=reason)["allowed"] is False
+
+
+def test_airline_compensation_eligibility(adb):
+    # airline/policy.md "Refunds and Compensation": "Only compensate if the user is a silver/gold member or has travel
+    # insurance or flies business." and "Do not compensate if the user is regular member and has no travel insurance
+    # and flies (basic) economy."
+    regular = airline.check_eligibility(adb, "VAAOXJ", "compensation")
+    assert regular["allowed"] is False
+    assert regular["reasons"] == ["regular member, no insurance and not business: no compensation"]
+    assert airline.check_eligibility(adb, "SF5VA1", "compensation")["allowed"] is True   # silver
+    assert airline.check_eligibility(adb, "CDXEBS", "compensation")["allowed"] is True   # regular, insured
+    db = adb.model_copy(deep=True)
+    db.reservations["VAAOXJ"].cabin = "business"                                            # regular, business
+    assert airline.check_eligibility(db, "VAAOXJ", "compensation")["allowed"] is True
+
+
+# --- Banking credit limit increase: every check, at its threshold, and the order of the checks ---------------------
+# Policy: banking_knowledge/documents credit_card_account_logistics_005 (account age, cooldown, utilization by tier),
+# _006 (on-time payment months, maximum increase share), _007 (the order of the checks). "Today" is
+# 2025-11-14 (τ² banking get_current_time: "The current time is 2025-11-14 03:40:00 EST").
+# Base: task_054's starting database, card cc_584f9c5d00_gold ($5,000 limit, $487.50 balance, opened 03/20/2023,
+# six ON_TIME payments 05/2025-10/2025, no requests, disputes or orders); the tier is set through card_type, using
+# card names listed under each tier in credit_cards_(general)_015.
+POLICY_TODAY = date(2025, 11, 14)
+CLI_USER, CLI_CARD = "584f9c5d00", "cc_584f9c5d00_gold"
+# card: (min account age days, cooldown days, utilization must be below, consecutive on-time months, max share)
+CLI_POLICY = {"Bronze Rewards Card": (120, 120, 0.70, 6, 0.25), "Silver Rewards Card": (90, 90, 0.80, 3, 0.50),
+              "Gold Rewards Card": (60, 60, 0.90, 3, 0.50)}
+
+
+def _cli_db(card_type: str = "Gold Rewards Card"):
+    tools, _ = _banking_episode("task_054")
+    tools.db.credit_card_accounts.data[CLI_CARD]["card_type"] = card_type
+    return tools.db
+
+
+def _days_ago(n: int) -> str:
+    return (POLICY_TODAY - timedelta(days=n)).strftime("%m/%d/%Y")
+
+
+def _cli(db, amount: float = 1000):
+    from glint.assist import banking
+
+    return banking.check_credit_limit_increase(db, CLI_USER, CLI_CARD, amount)
+
+
+def _assert_cli(res, reason):
+    if reason is None:
+        assert res["verdict"] == "approve", res.get("denial_reason")
+    else:
+        assert (res["verdict"], res.get("denial_reason")) == ("deny", reason)
+
+
+def test_cli_base_account_is_approved_in_every_tier():
+    for card in CLI_POLICY:
+        res = _cli(_cli_db(card))
+        assert res["verdict"] == "approve" and res["new_credit_limit"] == 6000
+
+
+@pytest.mark.parametrize("card", CLI_POLICY)
+def test_cli_max_increase_boundary(card):
+    # logistics_006 "Maximum Credit Limit Increase Amounts": entry 25%, mid and premium 50% of the current limit;
+    # "If the customer requests more than the maximum allowed ... inform them of the maximum" (_007 Step 0: do not
+    # submit it). At the maximum is allowed; a cent over is not
+    top = 5000 * CLI_POLICY[card][4]
+    at = _cli(_cli_db(card), top)
+    assert at["max_increase"] == top and at["verdict"] == "approve" and at["new_credit_limit"] == 5000 + top
+    assert _cli(_cli_db(card), top + 0.01)["verdict"] == "reduce_amount"
+    assert _cli(_cli_db(card), top - 1)["verdict"] == "approve"
+
+
+@pytest.mark.parametrize("card", CLI_POLICY)
+@pytest.mark.parametrize("offset, reason", [(-1, "insufficient_account_age"), (0, None), (1, None)])
+def test_cli_account_age_boundary(card, offset, reason):
+    # logistics_005 §1: "You qualify on or after the day the minimum is reached." (120 / 90 / 60 days; "An entry-tier
+    # account open for 119 days does not qualify; on day 120 and beyond it does")
+    db = _cli_db(card)
+    db.credit_card_accounts.data[CLI_CARD]["date_of_account_open"] = _days_ago(CLI_POLICY[card][0] + offset)
+    _assert_cli(_cli(db), reason)
+
+
+@pytest.mark.parametrize("card", CLI_POLICY)
+@pytest.mark.parametrize("offset, reason", [(-1, "cooldown_period_active"), (0, None), (1, None)])
+def test_cli_cooldown_boundary(card, offset, reason):
+    # logistics_005 §2: wait 120 / 90 / 60 days between submissions, counted "from the date you last submitted",
+    # "until 90 full days have passed"; it "applies only if your most recent request was approved"
+    db = _cli_db(card)
+    db.credit_limit_increase_requests.data["cli_prev"] = {
+        "request_id": "cli_prev", "credit_card_account_id": CLI_CARD, "user_id": CLI_USER,
+        "requested_increase_amount": "$500.00", "status": "approved",
+        "submitted_date": (POLICY_TODAY - timedelta(days=CLI_POLICY[card][1] + offset)).isoformat()}
+    _assert_cli(_cli(db), reason)
+    db.credit_limit_increase_requests.data["cli_prev"]["status"] = "denied"  # "Denied requests do not trigger"
+    _assert_cli(_cli(db), None)
+
+
+@pytest.mark.parametrize("card", CLI_POLICY)
+@pytest.mark.parametrize("cents, reason", [(-1, None), (0, "high_utilization"), (1, "high_utilization")])
+def test_cli_utilization_boundary(card, cents, reason):
+    # logistics_005 §3: utilization "must be below the maximum threshold ... Utilization at or above the threshold does
+    # not qualify" ("If your premium-tier utilization is exactly 90%, it does not meet the 'below' requirement")
+    db = _cli_db(card)
+    balance = 5000 * CLI_POLICY[card][2] + cents / 100
+    db.credit_card_accounts.data[CLI_CARD]["current_balance"] = f"${balance:,.2f}"
+    _assert_cli(_cli(db), reason)
+
+
+def _payments(db, statuses: list[str]):
+    """Replace the card's payment history with one payment a month, newest (10/15/2025) first."""
+    table = db.payment_history.data
+    for k in [k for k, p in table.items() if p.get("credit_card_account_id") == CLI_CARD]:
+        del table[k]
+    for i, status in enumerate(statuses):
+        table[f"pay_test_{i}"] = {"payment_id": f"pay_test_{i}", "credit_card_account_id": CLI_CARD,
+                                  "user_id": CLI_USER, "payment_date": f"{10 - i:02d}/15/2025", "amount": "$100.00",
+                                  "status": status}
+
+
+@pytest.mark.parametrize("card", CLI_POLICY)
+def test_cli_payment_history_boundary(card):
+    # logistics_006 "Payment History Requirements": 6 (entry) / 3 (mid, premium) consecutive months of on-time payments
+    need = CLI_POLICY[card][3]
+    db = _cli_db(card)
+    _payments(db, ["ON_TIME"] * need + ["LATE"])  # exactly the required run, a late payment before it
+    _assert_cli(_cli(db), None)
+    _payments(db, ["ON_TIME"] * (need + 1))
+    _assert_cli(_cli(db), None)
+    _payments(db, ["ON_TIME"] * (need - 1) + ["LATE"] + ["ON_TIME"] * 3)  # the latest run is one month short
+    _assert_cli(_cli(db), "insufficient_payment_history")
+    _payments(db, ["ON_TIME"] * (need - 1))  # only need - 1 months on record
+    _assert_cli(_cli(db), "insufficient_payment_history")
+
+
+def test_cli_pending_dispute_and_past_due_balance():
+    # logistics_007 Step 2.3 "No Pending Disputes: Verify the account has no active disputes."
+    db = _cli_db()
+    db.transaction_disputes.data["dsp_test"] = {"dispute_id": "dsp_test", "transaction_id": "txn_584f9c5d00_001",
+                                                "user_id": CLI_USER, "card_last_4_digits": "7823",
+                                                "submitted_at": "11/12/2025", "status": "UNDER_REVIEW"}
+    _assert_cli(_cli(db), "pending_disputes")
+    db.transaction_disputes.data["dsp_test"]["status"] = "RESOLVED"
+    _assert_cli(_cli(db), None)
+    # Step 2.5 "Account Good Standing: The account must be current with no past-due balance."
+    db.credit_card_accounts.data[CLI_CARD]["past_due_amount"] = "$0.01"
+    _assert_cli(_cli(db), "past_due_balance")
+    db.credit_card_accounts.data[CLI_CARD]["past_due_amount"] = "$0.00"
+    _assert_cli(_cli(db), None)
+
+
+def _break(db, check: str):
+    acc = db.credit_card_accounts.data[CLI_CARD]
+    if check == "insufficient_account_age":
+        acc["date_of_account_open"] = _days_ago(10)
+    elif check == "cooldown_period_active":
+        db.credit_limit_increase_requests.data["cli_prev"] = {
+            "credit_card_account_id": CLI_CARD, "user_id": CLI_USER, "status": "approved",
+            "submitted_date": (POLICY_TODAY - timedelta(days=10)).isoformat()}
+    elif check == "pending_disputes":
+        db.transaction_disputes.data["dsp_test"] = {"dispute_id": "dsp_test", "transaction_id": "txn_584f9c5d00_001",
+                                                    "user_id": CLI_USER, "submitted_at": "11/12/2025",
+                                                    "status": "UNDER_REVIEW"}
+    elif check == "pending_replacement_card":
+        db.credit_card_orders.data["ccord_test"] = {"order_id": "ccord_test", "credit_card_account_id": CLI_CARD,
+                                                    "user_id": CLI_USER, "order_date": "11/10/2025",
+                                                    "status": "SHIPPED"}
+    elif check == "past_due_balance":
+        acc["past_due_amount"] = "$50.00"
+    elif check == "high_utilization":
+        acc["current_balance"] = "$4,900.00"
+    elif check == "insufficient_payment_history":
+        _payments(db, ["LATE"] * 6)
+
+
+# logistics_007: "These steps MUST be followed in the exact order listed": Step 2 checks 1-6 (account age, cooldown,
+# pending disputes, pending replacement, good standing, utilization), then Step 3 (payment history). The denial
+# reason is the first requirement in that order that is not met.
+CLI_ORDER = ["insufficient_account_age", "cooldown_period_active", "pending_disputes", "pending_replacement_card",
+             "past_due_balance", "high_utilization", "insufficient_payment_history"]
+
+
+@pytest.mark.parametrize("first, second", [(a, b) for i, a in enumerate(CLI_ORDER) for b in CLI_ORDER[i + 1:]])
+def test_cli_denial_reason_follows_the_policy_order(first, second):
+    db = _cli_db()
+    _break(db, second)
+    _assert_cli(_cli(db), second)  # each break alone fires its own reason
+    _break(db, first)
+    res = _cli(db)
+    _assert_cli(res, first)
+    assert not res["checks"][first]["passed"] and not res["checks"][second]["passed"]
+
+
+# --- Banking dispute: provisional credit criteria at their thresholds ---------------------------------------------
+# credit_cards_(general)_015 "Provisional Credit Eligibility Guidelines": eligible only if ALL criteria hold.
+# Base: task_054, txn_584f9c5d00_001 ($487.50 on 11/11/2025, Gold card = premium tier, max $10,000), no prior disputes.
+
+
+def _dispute(db, reason="unauthorized_fraudulent_charge", contacted=False):
+    from glint.assist import banking
+
+    return banking.check_dispute(db, CLI_USER, CLI_CARD, "txn_584f9c5d00_001", reason, contacted)
+
+
+@pytest.mark.parametrize("days, eligible", [(59, False), (60, True), (61, True)])
+def test_dispute_account_open_60_days(days, eligible):
+    # criterion 1 "Account Standing: The customer's credit card account has been open for at least 60 days"
+    db = _cli_db()
+    db.credit_card_accounts.data[CLI_CARD]["date_of_account_open"] = _days_ago(days)
+    res = _dispute(db)
+    assert res["provisional_credit_criteria"]["account_open_60_days"] is eligible
+    assert res["eligible_for_provisional_credit"] is eligible
+
+
+@pytest.mark.parametrize("amount, eligible", [("$24.99", False), ("$25.00", True), ("$10,000.00", True),
+                                              ("$10,000.01", False)])
+def test_dispute_amount_range(amount, eligible):
+    # criterion 3: "at least $25.00 and must not exceed the card's maximum provisional credit limit" (Premium Tier,
+    # Gold Rewards Card: Maximum $10000.00)
+    db = _cli_db()
+    db.credit_card_transaction_history.data["txn_584f9c5d00_001"]["transaction_amount"] = amount
+    res = _dispute(db)
+    assert res["provisional_credit_criteria"]["amount_in_range"] is eligible
+    assert res["eligible_for_provisional_credit"] is eligible
+
+
+@pytest.mark.parametrize("days, eligible", [(30, False), (31, True)])
+def test_dispute_goods_not_received_needs_more_than_30_days(days, eligible):
+    # criterion 2: "'goods_services_not_received' (only if purchase was made more than 30 days ago)"
+    db = _cli_db()
+    db.credit_card_transaction_history.data["txn_584f9c5d00_001"]["transaction_date"] = _days_ago(days)
+    res = _dispute(db, "goods_services_not_received", contacted=True)
+    assert res["provisional_credit_criteria"]["reason_qualifies"] is eligible
+    assert res["eligible_for_provisional_credit"] is eligible
+
+
+@pytest.mark.parametrize("prior, eligible", [(2, True), (3, False)])
+def test_dispute_at_most_two_prior_disputes(prior, eligible):
+    # criterion 4: "The customer has not filed more than 2 disputes in the past 12 months"
+    db = _cli_db()
+    for i in range(prior):
+        db.transaction_disputes.data[f"dsp_prior_{i}"] = {"dispute_id": f"dsp_prior_{i}", "user_id": CLI_USER,
+                                                          "transaction_id": f"txn_other_{i}",
+                                                          "submitted_at": "06/01/2025", "status": "RESOLVED"}
+    res = _dispute(db)
+    assert res["provisional_credit_criteria"]["at_most_2_disputes_past_12_months"] is eligible
+    assert res["eligible_for_provisional_credit"] is eligible
+
+
+def test_dispute_merchant_contact_only_required_for_non_fraud():
+    # criterion 5: "For non-fraud disputes (anything other than 'unauthorized_fraudulent_charge'), the customer must
+    # have attempted to resolve with the merchant first"
+    db = _cli_db()
+    assert _dispute(db, "unauthorized_fraudulent_charge", contacted=False)["eligible_for_provisional_credit"] is True
+    assert _dispute(db, "duplicate_charge", contacted=False)["eligible_for_provisional_credit"] is False
+    assert _dispute(db, "duplicate_charge", contacted=True)["eligible_for_provisional_credit"] is True
