@@ -340,13 +340,13 @@ def analyze(cfg: dict) -> None:
                 row["glint_errors"] += kind == "glint_error"
                 row["runs"] += 1
                 row["passes"] += kind == "pass"
-            if beyond_k:
-                print(f"NOTE: {arm} {domain}: {beyond_k} runs beyond k={_trials(cfg, domain)} left out (a resumed "
-                      "checkpoint)", flush=True)
                 for m in s["messages"]:
                     for tc in (m.get("tool_calls") or []) if m["role"] == "assistant" else []:
                         if tc["name"] in TOOL_NAMES:
                             row["tool_calls"][tc["name"]] += 1
+            if beyond_k:
+                print(f"NOTE: {arm} {domain}: {beyond_k} runs beyond k={_trials(cfg, domain)} left out (a resumed "
+                      "checkpoint)", flush=True)
     for arms in report.values():
         for row in arms.values():
             row["tool_calls"] = dict(row["tool_calls"])

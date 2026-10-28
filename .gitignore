@@ -18,3 +18,8 @@ activations/
 *.safetensors
 *.pt
 meter/*.jsonl
+.pytest_home/
+.pytest_tmp/
+coverage.json
+.coverage
+!tests/data/

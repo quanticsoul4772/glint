@@ -182,6 +182,8 @@ def assist_environment(env, domain: str):
         # The banking toolkit class is composed per retrieval variant and holds per-episode state, so keep the
         # instance and put the decision tools ahead of its class in the MRO
         cls = type(env.tools)
+        if issubclass(cls, BankingDecisionTools):  # already assisted (an installed constructor built it): no-op
+            return env
         if cls not in _ASSISTED_BANKING:
             _ASSISTED_BANKING[cls] = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
         env.tools.__class__ = _ASSISTED_BANKING[cls]

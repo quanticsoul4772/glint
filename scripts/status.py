@@ -85,7 +85,7 @@ def report(name: str, cfg: dict) -> list[str]:
                              "stopped; check the run log")
             lines.append(line)
             for e in evs:
-                if e["outcome"] in ("infrastructure_error", "context_overflow"):
+                if e["outcome"] not in ("pass", "fail"):  # every other outcome is shown with its cause
                     lines.append(f"      {e['outcome']}: {e['task_id']} trial {e['trial']}: {(e['error'] or '')[:110]}")
     spend = _spend(cfg["save"], stamp)
     if spend:

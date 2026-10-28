@@ -42,7 +42,7 @@ image = (modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_p
               volumes={"/vol": weights, "/root/.cache/vllm": vllm_cache})
 @modal.concurrent(max_inputs=32)
 @modal.web_server(8000, startup_timeout=900, requires_proxy_auth=True)
-def serve():
+def serve():  # pragma: no cover  (runs only inside the Modal GPU container)
     if not Path(f"/vol/weights/.complete-{REVISION}").exists():
         raise RuntimeError("Glimmer weights are missing on the glint-glimmer Volume")
     cmd = [
