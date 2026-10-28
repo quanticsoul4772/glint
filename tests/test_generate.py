@@ -135,6 +135,23 @@ def test_the_agent_uses_the_endpoint_and_caps_banking_output(monkeypatch):
     assert "max_tokens" not in args and "Muse-Glimmer" in model
 
 
+def test_a_sets_reasoning_strength_reaches_glimmer_and_defaults_to_medium(monkeypatch):
+    # decision 2026-10-28: comparisons stay at medium; banking-high-alone runs Glimmer alone at high
+    monkeypatch.setenv("MODAL_PROXY_KEY", "k")
+    monkeypatch.setenv("MODAL_PROXY_SECRET", "s")
+    strength = lambda args: args["extra_body"]["chat_template_kwargs"]["reasoning_strength"]
+    assert strength(tools_ab._agent({}, "banking_knowledge", "https://x.modal.run")[1]) == "medium"
+    assert strength(tools_ab._agent({"strength": "high"}, "banking_knowledge", "https://x.modal.run")[1]) == "high"
+    high = tools_ab.SETS["banking-high-alone"]
+    assert high["strength"] == "high" and high["arms"] == ("base",) and high["tasks"] is tools_ab.banking_tasks
+    assert high["trials"] == tools_ab.SETS["banking-gated"]["trials"]  # same tasks and k as the gated comparison
+    with pytest.raises(SystemExit, match="Modal only"):
+        tools_ab.for_backend(high, False)
+    for name, cfg in tools_ab.SETS.items():  # every other set keeps medium, so earlier runs stay comparable
+        if name != "banking-high-alone":
+            assert cfg.get("strength", "medium") == "medium", name
+
+
 GLIMMER_MODEL, SPARK_MODEL = "openai/meta-models/Muse-Glimmer-30B", "openai/muse-spark-1.3-contributor"
 
 
