@@ -43,6 +43,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }  /* class display rules (.btn) must not reveal a hidden element */
   html, body { height: 100%; }
   body { margin: 0; background: var(--body); color: var(--text); font: 400 var(--t-base)/1.43 var(--font);
          -webkit-font-smoothing: antialiased; }
