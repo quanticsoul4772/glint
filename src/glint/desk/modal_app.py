@@ -2,7 +2,7 @@
 
 Deploy: MODAL_CONFIG_PATH=... modal deploy src/glint/desk/modal_app.py
 Replay and results need only FastAPI and the bundled JSON (no τ², no keys, no GPU). Live mode stays off here: its
-"Run live" button is disabled until live mode is deployed with τ² and the keys as Modal secrets (a separate step).
+"Run live" button is hidden until live mode is deployed with τ² and the keys as Modal secrets (a separate step).
 Cost: CPU only, scales to zero when idle.
 One container at most: live mode's one-pair lock, its running sessions and the polls that read them live in that
 process. The spend ledger and the pair log sit on a Volume (GLINT_HOME=/state), so a cold start cannot reset the daily
