@@ -98,6 +98,8 @@ def main():
     names = args or list(tools_ab.SETS)
     for name in names:
         for modal in (False, True):
+            if tools_ab.SETS[name].get("requires_modal") and not modal:
+                continue  # a Modal-only set has no other backend to report
             for line in report(f"{name}{' --modal' if modal else ''}", tools_ab.for_backend(tools_ab.SETS[name], modal)):
                 print(line)
     if "--modal" in sys.argv:
