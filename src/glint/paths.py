@@ -11,7 +11,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-HOME = Path(os.environ.get("GLINT_HOME") or Path(__file__).resolve().parents[3])
+
+def _default_home() -> Path:
+    """The folder that contains the repo (this file is <home>/<repo>/src/glint/paths.py); the current folder when
+    the package is installed somewhere shallower (a deployed container puts it at /root/glint/paths.py)."""
+    parents = Path(__file__).resolve().parents
+    return parents[3] if len(parents) > 3 and parents[1].name == "src" else Path.cwd()
+
+
+HOME = Path(os.environ.get("GLINT_HOME") or _default_home())
 MEASURE = HOME / "measure" / "data"
 LEDGER = HOME / "measure" / "meter" / "ledger.jsonl"
 RESULTS = HOME / "research" / "5-measurements"
