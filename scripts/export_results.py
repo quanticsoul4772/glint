@@ -1,0 +1,65 @@
+"""Export the measured with/without results for the Bank Desk results tab (src/glint/desk/results.json).
+
+Re-runs tools_ab's analysis for each comparison set (so context overflows count as failed runs), then writes, per
+set: its role (held-out, untuned, tuned, design), backend, k, and per task the pass counts of both arms and whether
+the task improved, tied or got worse; plus the set's totals by task. Numbers come only from the run data on disk.
+
+Usage: python export_results.py
+"""
+import json
+from pathlib import Path
+
+from loguru import logger
+
+logger.remove()  # τ² logs its registry at DEBUG on import
+
+import tools_ab  # after the log setup above
+
+OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "results.json"
+SETS = [  # (set, Modal backend, title, role, note)
+    ("heldout", False, "Retail and airline, held-out tasks", "held-out",
+     ("Tasks drawn at random, excluding the tasks the tools were built from. Retail k=4, airline k=2. Glimmer on "
+      "DeepInfra.")),
+    ("banking-other", True, "Banking, untuned tasks", "untuned",
+     ("The banking tasks with a dispute or credit-limit step that no tool change came from. The tools' rules were "
+      "checked against these tasks' correct answers, so they are not fully held-out. k=2. Glimmer on Modal.")),
+    ("banking-failures", True, "Banking, tuned tasks", "tuned",
+     ("Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their "
+      "runs. Do not read as general evidence. k=4. Glimmer on Modal.")),
+    ("design", False, "Retail and airline, design tasks", "design",
+     "The tasks the tools were built from. k=8. Glimmer on DeepInfra."),
+]
+
+
+def main():
+    out = []
+    for name, modal, title, role, note in SETS:
+        cfg = tools_ab.for_backend(tools_ab.SETS[name], modal)
+        if not cfg["data"].exists():
+            continue
+        tools_ab.analyze(cfg)
+        report = json.loads(cfg["out"].read_text(encoding="utf-8"))
+        rows, tally = [], {"improved": 0, "tied": 0, "worse": 0}
+        for key in sorted(report, key=lambda k: (k.split("-")[0], k)):
+            arms = report[key]
+            if "base" not in arms or "tools" not in arms:
+                continue
+            b, t = arms["base"], arms["tools"]
+            rb = b["passes"] / b["runs"] if b["runs"] else 0.0
+            rt = t["passes"] / t["runs"] if t["runs"] else 0.0
+            change = "improved" if rt > rb else ("worse" if rt < rb else "tied")
+            tally[change] += 1
+            rows.append({"task": key, "alone": f"{b['passes']}/{b['runs']}", "tools": f"{t['passes']}/{t['runs']}",
+                         "change": change, "overflows": b.get("context_overflows", 0) + t.get("context_overflows", 0),
+                         "infra_errors": b["infra_errors"] + t["infra_errors"]})
+        runs = {arm: [sum(report[k][arm]["passes"] for k in report if arm in report[k]),
+                      sum(report[k][arm]["runs"] for k in report if arm in report[k])] for arm in ("base", "tools")}
+        out.append({"set": name, "title": title, "role": role, "note": note, "tasks": rows, "by_task": tally,
+                    "runs": {"alone": runs["base"], "tools": runs["tools"]}})
+        print(f"{name}: {tally}, runs alone {runs['base']}, with tools {runs['tools']}")
+    OUT.write_text(json.dumps(out, indent=1), encoding="utf-8")
+    print(f"wrote {OUT}")
+
+
+if __name__ == "__main__":
+    main()

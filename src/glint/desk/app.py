@@ -40,6 +40,12 @@ def list_scenarios():
              "tools_passed": s["tools"]["outcome"]["passed"]} for s in scenarios()]
 
 
+@app.get("/api/results")
+def results():
+    """The measured with/without results by task (scripts/export_results.py)."""
+    return json.loads((HERE / "results.json").read_text(encoding="utf-8"))
+
+
 @app.get("/api/scenarios/{scenario_id}")
 def get_scenario(scenario_id: str):
     for s in scenarios():

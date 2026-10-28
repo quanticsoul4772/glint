@@ -172,3 +172,12 @@ def test_replay_discloses_the_pair_is_selected_with_real_pass_counts():
         rec = client.get(f"/api/scenarios/{s['id']}").json()["recorded"]
         assert rec["base"]["runs"] >= 2 and rec["tools"]["runs"] >= 2
         assert rec["base"]["passed"] < rec["base"]["runs"] and rec["tools"]["passed"] >= 1
+
+
+def test_results_tab_reports_by_task_with_roles():
+    sets = client.get("/api/results").json()
+    roles = {s["role"] for s in sets}
+    assert {"held-out", "untuned", "tuned"} <= roles
+    for s in sets:
+        assert sum(s["by_task"].values()) == len(s["tasks"])
+        assert all(r["change"] in ("improved", "tied", "worse") for r in s["tasks"])

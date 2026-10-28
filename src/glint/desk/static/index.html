@@ -52,14 +52,26 @@
   .outcome.pass { display: block; background: var(--verdict); color: var(--good); }
   .outcome.fail { display: block; background: var(--bad-bg); color: var(--bad); }
   footer { color: var(--muted); font-size: 12.5px; padding: 0 20px 24px; }
+  .tabs { display: flex; gap: 6px; padding: 10px 20px 0; }
+  .tab { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .tab.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .set { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-top: 14px; }
+  .set h3 { margin: 0 0 4px; font-size: 15px; }
+  .role { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; border-radius: 4px;
+          background: var(--agent); color: var(--muted); margin-left: 6px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; font-size: 13.5px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  td.improved { color: var(--good); font-weight: 600; } td.worse { color: var(--bad); font-weight: 600; }
 </style>
 </head>
 <body>
 <header>
   <h1>Glint Bank Desk</h1>
   <div class="sub">One customer, two agents. Left: Meta's open-weight Muse Glimmer 30B alone. Right: the same model
-    with Glint's decision tools, which take over the policy decisions. Replay of recorded runs.</div>
+    with Glint's decision tools, which take over the policy decisions. Replay recorded runs, run a task live, or see the measured results.</div>
 </header>
+<nav class="tabs"><button id="tab-desk" class="tab on">Bank Desk</button><button id="tab-results" class="tab">Results</button></nav>
+<div id="desk-view">
 <div class="controls">
   <select id="scenario" aria-label="Scenario"></select>
   <button class="primary" id="play">Play</button>
@@ -78,6 +90,8 @@
     <div class="feed" id="tools"></div><div class="outcome" id="tools-out"></div></section>
 </div>
 <footer id="source" style="font-weight:500"></footer>
+</div>
+<div id="results-view" style="display:none; padding: 0 20px 24px"></div>
 <script>
 const $ = (id) => document.getElementById(id);
 let data = null, pos = 0, timer = null;
@@ -195,7 +209,37 @@ async function load(id) {
     ` passed, with tools ${rec.tools.passed}/${rec.tools.runs} passed. Source: ${data.source}; τ²-bench banking task ` +
     `${data.id} (MIT).`;
 }
+async function showResults() {
+  const sets = await (await fetch("/api/results")).json();
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+  let html = `<p class="sub">Measured on τ²-bench with Muse Glimmer 30B, with and without the Glint tools, same seeds.
+    Counted by task: runs of one task are not independent. A task "improved" if its pass rate rose with the tools.</p>`;
+  for (const s of sets) {
+    html += `<div class="set"><h3>${esc(s.title)}<span class="role">${esc(s.role)}</span></h3>
+      <div class="sub">${esc(s.note)}</div>
+      <div style="margin-top:6px"><b>By task:</b> ${s.by_task.improved} improved, ${s.by_task.tied} tied,
+        ${s.by_task.worse} worse. <b>All runs:</b> alone ${s.runs.alone[0]}/${s.runs.alone[1]} passed,
+        with tools ${s.runs.tools[0]}/${s.runs.tools[1]}.</div>
+      <table><tr><th>Task</th><th>Glimmer alone</th><th>Glimmer + Glint tools</th><th>Change</th></tr>`;
+    for (const r of s.tasks) {
+      const extra = r.overflows ? ` (${r.overflows} context overflow${r.overflows > 1 ? "s" : ""})` : "";
+      html += `<tr><td>${esc(r.task)}${esc(extra)}</td><td>${r.alone}</td><td>${r.tools}</td>
+        <td class="${r.change}">${r.change}</td></tr>`;
+    }
+    html += `</table></div>`;
+  }
+  $("results-view").innerHTML = html;
+}
+function tab(which) {
+  $("desk-view").style.display = which === "desk" ? "" : "none";
+  $("results-view").style.display = which === "results" ? "" : "none";
+  $("tab-desk").classList.toggle("on", which === "desk");
+  $("tab-results").classList.toggle("on", which === "results");
+  if (which === "results") showResults();
+}
 async function init() {
+  $("tab-desk").onclick = () => tab("desk");
+  $("tab-results").onclick = () => tab("results");
   const list = await (await fetch("/api/scenarios")).json();
   for (const s of list) {
     const o = document.createElement("option"); o.value = s.id; o.textContent = s.title; $("scenario").appendChild(o);
