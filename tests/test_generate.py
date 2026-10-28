@@ -102,6 +102,10 @@ def test_the_task_draws_reproduce_the_recorded_sets():
     assert tools_ab.banking_tasks() == {"banking_knowledge": [
         "task_031", "task_037", "task_038", "task_039", "task_040", "task_041", "task_050", "task_051", "task_052",
         "task_053", "task_054", "task_081"]}
+    # the final check runs on the whole untouched test split, and on nothing the tools were built or tuned on
+    test = tools_ab.banking_test_tasks()["banking_knowledge"]
+    assert len(test) == 20 and not set(test) & set(tools_ab.banking_tasks()["banking_knowledge"])
+    assert "task_080" in test and tools_ab.SETS["banking-test"]["tasks"] is tools_ab.banking_test_tasks
 
 
 def test_the_modal_backend_keeps_its_data_apart():
