@@ -28,10 +28,11 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   failure inventory (twin-B 21, 44, 78 included) and every task of the first held-out draw; k=4.
 - `banking-other`: the other 10 banking tasks of `banking` (not tuned on), k=2.
 - `gate-banking`: activation-gate training data, no-tools arm only: the 12 banking tasks x 25 trials, concurrency 12.
-- `banking-gated`, `heldout2-gated`, `banking-test-gated`: the same tasks, k and caps as `banking`, `heldout2` and
-  `banking-test`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
+- `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
+  There is deliberately no gated set on the banking test split: it was read once, as the final check, and the gate
+  rules were shaped partly by its failures (decision 2026-10-28).
 
 Set key `gates` (default true): the tools arm enforces the write gates. The sets recorded before the gates existed set
 it to false, so a resume of one of them stays comparable with its recorded runs.
@@ -44,7 +45,7 @@ log reports it). Sets without the key keep τ²'s client unchanged, so their run
 it.
 
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
-                           heldout2-gated|banking-test-gated]
+                           heldout2-gated]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
 `--rerun-infrastructure-errors` (needs `--allow-mixed-code` when the code changed): the runs that ended in an
@@ -176,10 +177,6 @@ SETS = {
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
                        "save": "tools-ab-heldout2-gated"},
-    "banking-test-gated": {"tasks": banking_test_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.0,
-                           "meta_usd": 2.0, "gpu_usd": 20.0, "gates": True, "requires_modal": True,
-                           "data": MEASURE / "tools_ab_banking_test_gated",
-                           "out": RESULTS / "tools-ab-banking-test-gated.json", "save": "tools-ab-banking-test-gated"},
 }
 # Recorded before the gates existed: their tools arm stays ungated so a resume matches the recorded runs
 for _name in ("design", "heldout", "heldout2", "banking", "banking-test", "banking-other", "gate-banking",
