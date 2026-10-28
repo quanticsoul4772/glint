@@ -1,7 +1,11 @@
 # /// script
-# requires-python = ">=3.12,<3.14"
+# requires-python = ">=3.12,<3.13"
 # dependencies = [
 #     "glint @ git+https://github.com/quanticsoul4772/glint@glint-bank-v0.1.0",
+#     "tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a316c3f83133267fbd6faaa770992",
+# ]
+# [tool.uv]
+# override-dependencies = [
 #     "tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a316c3f83133267fbd6faaa770992",
 # ]
 # ///
@@ -12,8 +16,9 @@ the launcher points it at the banking data bundled in this plugin (data/, MIT, s
 is already set. τ² opens its task and document files with the platform's default encoding; on Windows that is not
 UTF-8, so the launcher restarts itself in UTF-8 mode with the same stdin and stdout.
 
-The direct tau2 reference is needed because Glint's own `tool.uv.sources` path entry does not apply when Glint is
-installed as a dependency.
+uv applies Glint's own `tool.uv.sources` entry (a path to a sibling τ² checkout) when it builds Glint from git, and
+that path does not exist in the git source; the override replaces Glint's tau2 requirement with the pinned τ² commit.
+Python stays below 3.13: τ² imports audioop, which 3.13 removed.
 """
 import os
 import subprocess

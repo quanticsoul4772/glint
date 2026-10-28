@@ -67,7 +67,11 @@ INSTRUCTIONS = ("A live bank (τ²-bench banking_knowledge). You are the bank's 
 
 
 def bank_home() -> Path:
-    return Path(os.environ.get("GLINT_BANK_HOME") or Path.home() / ".glint-bank")
+    """GLINT_BANK_HOME, else ~/.glint-bank. Muse starts stdio servers in a cleared environment that keeps HOME but not
+    USERPROFILE, and on Windows Path.home() reads only USERPROFILE, so HOME is read first."""
+    if os.environ.get("GLINT_BANK_HOME"):
+        return Path(os.environ["GLINT_BANK_HOME"])
+    return (Path(os.environ["HOME"]) if os.environ.get("HOME") else Path.home()) / ".glint-bank"
 
 
 def default_session_id() -> str:

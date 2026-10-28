@@ -196,7 +196,13 @@ def test_session_ids_and_home(monkeypatch, tmp_path):
     monkeypatch.delenv("MUSE_SESSION_ID")
     monkeypatch.delenv("GLINT_BANK_HOME")
     assert bank.default_session_id() == f"local-{os.getpid()}"
+    monkeypatch.delenv("HOME", raising=False)
     assert bank.bank_home() == Path.home() / ".glint-bank"
+    # Muse's cleared server environment (2026-10-28): HOME but no USERPROFILE, where Path.home() raises on Windows
+    for var in ("USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    assert bank.bank_home() == tmp_path / "h" / ".glint-bank"
     assert bank.session_dir(tmp_path, "../x y") == tmp_path / "sessions" / ".._x_y"
 
 
@@ -369,10 +375,11 @@ def test_manifest_names_files_that_exist_and_the_launcher_pins_its_dependencies(
     start = (PLUGIN / "commands" / "start.md").read_text(encoding="utf-8")
     assert "$ARGUMENTS" in start and bank.LOAD in start and bank.POLICY in start
     launcher = (PLUGIN / "mcp" / "glint_bank.py").read_text(encoding="utf-8")
-    assert 'requires-python = ">=3.12,<3.14"' in launcher
+    assert 'requires-python = ">=3.12,<3.13"' in launcher  # τ² imports audioop, which Python 3.13 removed
     assert "glint @ git+https://github.com/quanticsoul4772/glint@" in launcher
     tau2 = "tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a316c3f83133267fbd6faaa770992"
-    assert tau2 in launcher
+    # in the dependencies, and as the override of Glint's own tau2 source (a sibling path absent from Glint's git tree)
+    assert launcher.count(tau2) == 2 and "# [tool.uv]\n# override-dependencies = [\n" in launcher
 
 
 def test_launcher_points_tau2_at_the_bundled_data_and_runs_utf8(tmp_path):
