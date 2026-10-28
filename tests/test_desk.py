@@ -31,3 +31,144 @@ def test_task054_shows_the_overruled_dispute_before_the_increase():
 
 def test_unknown_scenario_is_404():
     assert client.get("/api/scenarios/nope").status_code == 404
+
+
+class _FakeMessage:
+    def __init__(self, d):
+        self.d = d
+
+    def model_dump(self):
+        return self.d
+
+
+class _FakeOrchestrator:
+    def __init__(self, gate):
+        self.trajectory = []
+        self.gate = gate
+
+
+def _fake_build(name):
+    import threading
+    import types
+
+    orch = _FakeOrchestrator(threading.Event())
+
+    def run(o):
+        o.trajectory.append(_FakeMessage({"role": "user", "content": "hi"}))
+        o.gate.wait(5)  # the test reads a snapshot while the pane is still running
+        msgs = [m.model_dump() for m in o.trajectory] + [{"role": "assistant", "content": f"{name} done"}]
+        reward = 1.0 if name == "tools" else 0.0
+        return types.SimpleNamespace(model_dump=lambda: {"messages": msgs, "reward_info": {"reward": reward}})
+
+    return orch, run
+
+
+def test_live_session_streams_then_reports_outcomes():
+    import time
+
+    from glint.desk.live import LiveSession
+
+    session = LiveSession("task_x", _fake_build, label=lambda sim: {0: {"tool": "x", "reasons": ["r"]}}).start()
+    time.sleep(0.2)
+    snap = session.snapshot()
+    assert snap["done"] is False and snap["alone"]["status"] == "running"
+    assert snap["alone"]["events"] == [{"kind": "customer", "text": "hi"}]
+    for pane in session.panes.values():
+        pane.orchestrator.gate.set()
+    for pane in session.panes.values():
+        pane.thread.join(5)
+    snap = session.snapshot()
+    assert snap["done"] and snap["alone"]["outcome"]["passed"] is False and snap["tools"]["outcome"]["passed"] is True
+    assert snap["alone"]["overruled_writes"] == 1 and "overruled_writes" not in snap["tools"]
+
+
+def test_live_endpoints_refuse_when_not_configured(monkeypatch):
+    for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    assert client.get("/api/live/status").json()["available"] is False
+    r = client.post("/api/live/start", json={"task_id": "task_054"})
+    assert r.status_code == 503 and "GLINT_GLIMMER_URL" in r.json()["detail"]
+
+
+def test_live_endpoints_run_one_pair_at_a_time(monkeypatch):
+    from glint.desk import app as desk_app
+    from glint.desk.live import LiveSession
+
+    for k in desk_app.LIVE_ENV:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(desk_app, "_new_session", lambda task_id: LiveSession(task_id, _fake_build))
+    monkeypatch.setattr(desk_app, "_sessions", {})
+    first = client.post("/api/live/start", json={"task_id": "task_054"})
+    assert first.status_code == 200
+    assert client.post("/api/live/start", json={"task_id": "task_038"}).status_code == 409
+    assert client.get(f"/api/live/{first.json()['id']}").json()["task_id"] == "task_054"
+    for s in desk_app._sessions.values():
+        for pane in s.panes.values():
+            pane.orchestrator.gate.set()
+
+
+def test_desk_budget_records_gpu_and_refuses_past_the_caps(tmp_path):
+    import json
+    import types
+
+    import pytest
+
+    from glint.desk.live import BudgetExceeded, DeskBudget
+
+    log, ledger = tmp_path / "sessions.jsonl", tmp_path / "ledger.jsonl"
+    budget = DeskBudget(gpu_usd_per_day=0.25, pairs_per_day=2, ledger=ledger, log_path=log)
+    budget.check()
+    snap = {"alone": {"elapsed_s": 60}, "tools": {"elapsed_s": 70, "outcome": {"passed": True}}}
+    session = types.SimpleNamespace(id="s1", task_id="task_054", started=0.0, ended=180.0, wake_error=None,
+                                    snapshot=lambda: snap)
+    budget.record(session)  # 180 s + 120 s scale-down = 300 s at $2.94/h = $0.245
+    row = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
+    assert row["gpu_seconds"] == 300 and row["tools_outcome"] is True and row["alone_outcome"] is None
+    budget.check()  # $0.245 < $0.25, 1 pair < 2
+    budget.record(session)
+    with pytest.raises(BudgetExceeded):
+        budget.check()
+
+
+def test_a_failed_wake_ends_both_panes_with_the_error():
+    import time
+
+    from glint.desk.live import LiveSession
+
+    done = []
+
+    def wake():
+        raise TimeoutError("not ready after 900 s")
+
+    session = LiveSession("task_x", _fake_build, wake=wake, on_done=done.append).start()
+    deadline = time.time() + 5
+    while not session.done and time.time() < deadline:
+        time.sleep(0.05)
+    snap = session.snapshot()
+    assert snap["done"] and done == [session]
+    assert all("did not start" in snap[p]["error"] for p in ("alone", "tools"))
+
+
+def test_live_start_is_refused_when_the_budget_is_spent(monkeypatch):
+    from glint.desk import app as desk_app
+    from glint.desk.live import BudgetExceeded
+
+    for k in desk_app.LIVE_ENV:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(desk_app, "_sessions", {})
+
+    def spent():
+        raise BudgetExceeded("GPU spend $3.00 reached cap $3")
+
+    monkeypatch.setattr(desk_app.budget, "check", spent)
+    r = client.post("/api/live/start", json={"task_id": "task_054"})
+    assert r.status_code == 429 and "Replay mode still works" in r.json()["detail"]
+
+
+def test_replay_discloses_the_pair_is_selected_with_real_pass_counts():
+    # each replay pair is chosen (failed alone, passed with tools); the page must say so and give all recorded runs
+    assert "Selected pair, not a typical run" in client.get("/").text
+    for s in client.get("/api/scenarios").json():
+        rec = client.get(f"/api/scenarios/{s['id']}").json()["recorded"]
+        assert rec["base"]["runs"] >= 2 and rec["tools"]["runs"] >= 2
+        assert rec["base"]["passed"] < rec["base"]["runs"] and rec["tools"]["passed"] >= 1
