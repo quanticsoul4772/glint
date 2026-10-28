@@ -55,6 +55,7 @@ from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
+from glint.runlog import RunEvents, outcome
 
 TOOL_NAMES = {"check_order_action", "find_user_items", "find_variants", "check_reservation_action",
               "get_upcoming_trips_cost", "check_credit_limit_increase", "check_card_dispute"}
@@ -157,6 +158,13 @@ def _agent(cfg: dict, domain: str, endpoint: str | None) -> tuple[str, dict]:
     return model, args
 
 
+def _save_dir(cfg: dict, arm: str, domain: str, stamp: str) -> Path:
+    """τ²'s checkpoint folder for one arm, the same path run_domain derives from save_to."""
+    from tau2.utils.utils import DATA_DIR
+
+    return DATA_DIR / "simulations" / f"glint-{cfg['save']}-{arm}-{domain}-{stamp}"
+
+
 def _run(cfg: dict, domain: str, ids: list[str], arm: str, stamp: str, endpoint: str | None):
     model, args = _agent(cfg, domain, endpoint)
     common = {"domain": domain, "agent": "llm_agent", "llm_agent": model, "llm_args_agent": args,
@@ -167,7 +175,11 @@ def _run(cfg: dict, domain: str, ids: list[str], arm: str, stamp: str, endpoint:
     if domain == "banking_knowledge":
         by_id = {t["id"]: t for t in json.loads(BANKING_TASKS.read_text(encoding="utf-8"))}
         config = TextRunConfig(**common, retrieval_config="bm25_grep")
-        return run_tasks(config, [Task.model_validate(by_id[i]) for i in ids])
+        # run_tasks persists nothing without save_path (its docstring), so banking runs had no checkpoint: a crash
+        # lost every finished run and resume could not work. Pass the paths run_domain would derive.
+        save_dir = _save_dir(cfg, arm, domain, stamp)
+        return run_tasks(config, [Task.model_validate(by_id[i]) for i in ids], save_path=save_dir / "results.json",
+                         save_dir=save_dir)
     return run_domain(TextRunConfig(**common, task_split_name="train", task_ids=ids))
 
 
@@ -233,9 +245,12 @@ def generate(cfg: dict) -> None:
             if arm == "tools":
                 install(domain)
             glim_before, meta_before = glim.meta_usd, meta.meta_usd
-            results = _run(cfg, domain, ids, arm, stamp, endpoint)
+            events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
+                               label=f"{arm} {domain}")
+            with events:
+                results = _run(cfg, domain, ids, arm, stamp, endpoint)
             (data / f"{arm}-{domain}.json").write_text(results.model_dump_json(), encoding="utf-8")
-            errors = sum("infrastructure" in str(s.termination_reason) for s in results.simulations)
+            errors = sum("infrastructure" in str(s.termination_reason).lower() for s in results.simulations)
             if errors:
                 print(f"WARNING: {arm} {domain}: {errors} of {len(results.simulations)} runs ended in an infrastructure "
                       "error; they are excluded from the analysis and are not retried", flush=True)
@@ -261,10 +276,14 @@ def analyze(cfg: dict) -> None:
                     continue
                 key = f"{domain}-{s['task_id']}"
                 row = report.setdefault(key, {}).setdefault(arm, {"passes": 0, "runs": 0, "tool_calls": Counter(),
-                                                                   "infra_errors": 0})
-                if str(s.get("termination_reason")) == "infrastructure_error":
+                                                                   "infra_errors": 0, "context_overflows": 0})
+                kind = outcome(s)
+                if kind == "infrastructure_error":
                     row["infra_errors"] += 1
                     continue
+                # a context overflow is the model's own conversation outgrowing the context: a failed run (τ² files
+                # it as an infrastructure error; the cause is in info.error)
+                row["context_overflows"] += kind == "context_overflow"
                 row["runs"] += 1
                 row["passes"] += (s.get("reward_info") or {}).get("reward") == 1.0
                 for m in s["messages"]:
