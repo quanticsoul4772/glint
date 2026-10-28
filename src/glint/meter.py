@@ -50,7 +50,10 @@ def register_litellm_prices() -> None:
 
 
 class BudgetExceeded(RuntimeError):
-    pass
+    # τ² keeps only str(exception) of a failed run: the class name goes first so runlog.outcome can tell a cap stop
+    # from an infrastructure error
+    def __str__(self) -> str:
+        return f"BudgetExceeded: {super().__str__()}"
 
 
 @dataclass(frozen=True)

@@ -11,12 +11,14 @@ Usage: python export_scenarios.py
 import json
 from pathlib import Path
 
+import tools_ab  # its analysis gives the counts the Results tab shows
 from tau2.data_model.tasks import Task
 from tau2.domains.banking_knowledge.environment import get_environment
 
 from glint import paths
 from glint.decisions import label_run
 from glint.desk.events import customer_summary, outcome, timeline
+from glint.runlog import NOT_RESULTS
 from glint.runlog import outcome as run_outcome
 
 DATA = paths.MEASURE
@@ -24,8 +26,8 @@ TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.js
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "scenarios.json"
 # (task, folder, tuned) for tasks whose base arm failed and tools arm passed at least once; tuned = the tools were
 # refined after reading the task's runs
-SOURCES = [("task_054", "tools_ab_banking_failures_modal", True), ("task_038", "tools_ab_banking_failures_modal", True),
-           ("task_050", "tools_ab_banking_other_modal", False), ("task_052", "tools_ab_banking_other_modal", False)]
+SOURCES = [("task_054", "banking-failures", True), ("task_038", "banking-failures", True),
+           ("task_050", "banking-other", False), ("task_052", "banking-other", False)]
 TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increase",
           "task_038": "Three disputed charges on a card that is being reissued",
           "task_050": "Credit limit increase request",
@@ -34,17 +36,25 @@ TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increa
 
 def main():
     tasks = {t["id"]: t for t in json.loads(TASKS.read_text(encoding="utf-8"))}
-    scenarios = []
-    for task_id, folder, tuned in SOURCES:
+    scenarios, reports = [], {}
+    for task_id, set_name, tuned in SOURCES:
+        cfg = tools_ab.for_backend(tools_ab.SETS[set_name], True)
+        if set_name not in reports:
+            tools_ab.analyze(cfg)
+            reports[set_name] = json.loads(cfg["out"].read_text(encoding="utf-8"))
+        counts = reports[set_name][f"banking_knowledge-{task_id}"]
+        folder, k = cfg["data"].name, tools_ab._trials(cfg, "banking_knowledge")
         task = Task.model_validate(tasks[task_id])
+        # the same runs the analysis counts: trials below k, and no run that is not a result
         arms = {arm: [s for s in json.loads((DATA / folder / f"{arm}-banking_knowledge.json")
                                             .read_text(encoding="utf-8"))["simulations"]
-                      if s["task_id"] == task_id and s["messages"] and run_outcome(s) != "infrastructure_error"]
+                      if s["task_id"] == task_id and s["trial"] < k and run_outcome(s) not in NOT_RESULTS]
                 for arm in ("base", "tools")}
-        alone = next((s for s in arms["base"] if not outcome(s)["passed"]), None)
-        helped = next((s for s in arms["tools"] if outcome(s)["passed"]), None)
+        alone = next((s for s in arms["base"] if not outcome(s)["passed"] and s["messages"]), None)
+        helped = next((s for s in arms["tools"] if outcome(s)["passed"] and s["messages"]), None)
         if alone is None or helped is None:
-            print(f"skip {task_id}: no failed-alone / passed-with-tools pair")
+            print(f"WARNING: {task_id} left out of the replay: no failed-alone / passed-with-tools pair in "
+                  f"{folder}", flush=True)
             continue
         decisions = label_run(alone, task, get_environment(retrieval_variant="bm25_grep"))
         overrules = {d.message_index: {"tool": d.tool, "reasons": d.reasons}
@@ -54,9 +64,8 @@ def main():
             "customer": customer_summary(str(task.user_scenario.instructions)),
             "source": f"{folder} (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
             # the pair is chosen (a failed run alone, a passed run with tools); these are all the recorded runs,
-            # counted as the Results tab counts them (infrastructure errors excluded)
-            "recorded": {arm: {"passed": sum(outcome(x)["passed"] for x in runs), "runs": len(runs)}
-                         for arm, runs in arms.items()},
+            # taken from the same analysis as the Results tab
+            "recorded": {arm: {"passed": counts[arm]["passes"], "runs": counts[arm]["runs"]} for arm in arms},
             "alone": {"trial": alone["trial"], "events": timeline(alone["messages"], overrules), "outcome": outcome(alone),
                       "overruled_writes": len(overrules)},
             "tools": {"trial": helped["trial"], "events": timeline(helped["messages"]), "outcome": outcome(helped)},

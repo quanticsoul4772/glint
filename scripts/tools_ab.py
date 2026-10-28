@@ -54,7 +54,7 @@ from glint import glimmer_serve, paths
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import recording
-from glint.meter import Caps, Meter, guarded, litellm_callback, register_litellm_prices
+from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
 from glint.runlog import RunEvents, outcome
 
@@ -236,7 +236,7 @@ def generate(cfg: dict) -> None:
         return (glimmer if "Muse-Glimmer" in kwargs.get("model", "") else base)(*args, **kwargs)
 
     # every Glimmer call's exact prompt and completion token ids (τ²'s saved runs keep neither), for activation capture
-    recorded = recording(route, data / "calls.jsonl")
+    recorded = recording(route, data / "calls.jsonl", require_ids=bool(cfg.get("modal")))
     llm_utils.completion = guarded(guarded(recorded, glim, only=("Muse-Glimmer",)), meta, RateLimiter(per_minute=120),
                                    only=("muse-spark", "muse-wonder"))
     nl.DEFAULT_LLM_NL_ASSERTIONS, nl.DEFAULT_LLM_NL_ASSERTIONS_ARGS = SPARK, {**META, "temperature": 0.0}
@@ -258,8 +258,23 @@ def generate(cfg: dict) -> None:
                                label=f"{arm} {domain}")
             with events:
                 results = _run(cfg, domain, ids, arm, stamp, endpoint)
-            (data / f"{arm}-{domain}.json").write_text(results.model_dump_json(), encoding="utf-8")
             kinds = Counter(outcome(s.model_dump(mode="json")) for s in results.simulations)
+            if kinds["budget_stop"]:  # cap-stopped runs are not results: no arm file, so a resume reruns this arm
+                raise BudgetExceeded(f"{arm} {domain}: {kinds['budget_stop']} runs were stopped by a spend cap; the "
+                                     "arm file is not written and a resumed run starts this arm again")
+            expected = len(ids) * _trials(cfg, domain)
+            if len(results.simulations) < expected:
+                print(f"WARNING: {arm} {domain}: {len(results.simulations)} simulations, expected {expected} "
+                      f"({len(ids)} tasks x k={_trials(cfg, domain)}); the missing runs are not in this arm",
+                      flush=True)
+            (data / f"{arm}-{domain}.json").write_text(results.model_dump_json(), encoding="utf-8")
+            if kinds["glint_error"]:
+                print(f"WARNING: {arm} {domain}: {kinds['glint_error']} of {len(results.simulations)} runs failed in "
+                      "Glint's own code (atem or call recording); they count as failed runs. Causes are in "
+                      "info.error and events.jsonl", flush=True)
+            if kinds["eval_error"]:
+                print(f"WARNING: {arm} {domain}: {kinds['eval_error']} of {len(results.simulations)} runs have no "
+                      "reward (τ²'s evaluation failed); they are excluded from the analysis", flush=True)
             if kinds["infrastructure_error"]:
                 print(f"WARNING: {arm} {domain}: {kinds['infrastructure_error']} of {len(results.simulations)} runs "
                       "ended in an infrastructure error; they are excluded from the analysis and are not retried",
@@ -283,22 +298,34 @@ def analyze(cfg: dict) -> None:
         for domain in domains:
             path = cfg["data"] / f"{arm}-{domain}.json"
             if not path.exists():
+                print(f"WARNING: no {arm} arm for {domain} ({path.name} missing): its tasks have one arm only and "
+                      "are left out of the comparison", flush=True)
                 continue
+            beyond_k = 0
             for s in json.loads(path.read_text(encoding="utf-8"))["simulations"]:
                 if s["trial"] >= _trials(cfg, domain):  # a resumed checkpoint can hold trials beyond this k
+                    beyond_k += 1
                     continue
                 key = f"{domain}-{s['task_id']}"
                 row = report.setdefault(key, {}).setdefault(arm, {"passes": 0, "runs": 0, "tool_calls": Counter(),
-                                                                   "infra_errors": 0, "context_overflows": 0})
+                                                                   "infra_errors": 0, "context_overflows": 0,
+                                                                   "glint_errors": 0, "eval_errors": 0,
+                                                                   "budget_stops": 0})
                 kind = outcome(s)
-                if kind == "infrastructure_error":
-                    row["infra_errors"] += 1
+                if kind in ("infrastructure_error", "eval_error", "budget_stop"):  # not results; counted below
+                    row[{"infrastructure_error": "infra_errors", "eval_error": "eval_errors",
+                         "budget_stop": "budget_stops"}[kind]] += 1
                     continue
-                # a context overflow is the model's own conversation outgrowing the context: a failed run (τ² files
-                # it as an infrastructure error; the cause is in info.error)
+                # a context overflow is the model's own conversation outgrowing the context, and a Glint error is
+                # Glint's own failure: both are failed runs (τ² files them as infrastructure errors; the cause is in
+                # info.error)
                 row["context_overflows"] += kind == "context_overflow"
+                row["glint_errors"] += kind == "glint_error"
                 row["runs"] += 1
-                row["passes"] += (s.get("reward_info") or {}).get("reward") == 1.0
+                row["passes"] += kind == "pass"
+            if beyond_k:
+                print(f"NOTE: {arm} {domain}: {beyond_k} runs beyond k={_trials(cfg, domain)} left out (a resumed "
+                      "checkpoint)", flush=True)
                 for m in s["messages"]:
                     for tc in (m.get("tool_calls") or []) if m["role"] == "assistant" else []:
                         if tc["name"] in TOOL_NAMES:
@@ -309,12 +336,19 @@ def analyze(cfg: dict) -> None:
             row["pass_rate"] = round(row["passes"] / row["runs"], 3) if row["runs"] else None
     cfg["out"].write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(json.dumps(report, indent=1))
-    # Loud summary: infrastructure errors are excluded, so arms can end up with different run counts
+    # Loud summary: excluded runs (infrastructure, evaluation, cap) can leave arms with different run counts, a task
+    # can have one arm only, and Glint errors count against the tools
     for key, arms in sorted(report.items()):
+        if set(arms) != {"base", "tools"}:
+            print(f"WARNING: {key}: only the {', '.join(arms)} arm has runs; the task is not compared", flush=True)
         runs = {arm: row["runs"] for arm, row in arms.items()}
-        errors = {arm: row["infra_errors"] for arm, row in arms.items() if row["infra_errors"]}
-        if errors or len(set(runs.values())) > 1:
-            print(f"WARNING: {key}: runs per arm {runs}, infrastructure errors {errors or 'none'}", flush=True)
+        excluded = {arm: {k: row[k] for k in ("infra_errors", "eval_errors", "budget_stops") if row[k]}
+                    for arm, row in arms.items()}
+        excluded = {arm: e for arm, e in excluded.items() if e}
+        glint = {arm: row["glint_errors"] for arm, row in arms.items() if row["glint_errors"]}
+        if excluded or glint or len(set(runs.values())) > 1:
+            print(f"WARNING: {key}: runs per arm {runs}, excluded {excluded or 'none'}, Glint errors (failed runs) "
+                  f"{glint or 'none'}", flush=True)
 
 
 if __name__ == "__main__":
