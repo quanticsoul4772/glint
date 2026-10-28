@@ -14,11 +14,12 @@ from pathlib import Path
 from tau2.data_model.tasks import Task
 from tau2.domains.banking_knowledge.environment import get_environment
 
+from glint import paths
 from glint.decisions import label_run
 from glint.desk.events import customer_summary, outcome, timeline
 
-DATA = Path(r"<workspace>\measure\data")
-TASKS = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains\banking_knowledge\tasks.json")
+DATA = paths.MEASURE
+TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.json"
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "scenarios.json"
 # (task, folder) pairs whose base arm failed and tools arm passed at least once
 SOURCES = [("task_054", "tools_ab_banking_failures_modal"), ("task_038", "tools_ab_banking_failures_modal"),

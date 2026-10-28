@@ -4,7 +4,6 @@ hand-computed cost from the raw usage fields. Meta API cap for this run: $1.
 """
 import json
 import sys
-from pathlib import Path
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
@@ -13,13 +12,14 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+from glint import paths
 from glint.meter import Caps, Meter, guarded, litellm_callback, meta_cost
 from glint.ratelimit import RateLimiter
 
 MODEL = "openai/muse-spark-1.3-contributor"
-KEY = dotenv_values(r"<workspace>\.env")["MODEL_API_KEY"]
+KEY = dotenv_values(str(paths.ENV_FILE))["MODEL_API_KEY"]
 LLM_ARGS = {"api_base": "https://api.meta.ai/v1", "api_key": KEY, "temperature": 1.0}
-PARTITION = json.loads(Path(r"<workspace>\research\5-measurements\split-partition.json").read_text())
+PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
 TASKS = PARTITION["retail"]["pilot"][:2]
 
 meter = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), phase="m0-dryrun")
@@ -51,7 +51,7 @@ summary = {
     "agent_cost_reported_by_tau2": [s.agent_cost for s in results.simulations],
     "user_cost_reported_by_tau2": [s.user_cost for s in results.simulations],
 }
-out = Path(r"<workspace>\research\5-measurements\M0-dryrun.json")
+out = paths.RESULTS / "M0-dryrun.json"
 out.write_text(json.dumps(summary, indent=1))
 print(json.dumps(summary, indent=1))
 sys.exit(0 if abs(meter.meta_usd - hand) < 1e-9 else 1)

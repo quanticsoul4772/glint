@@ -1,13 +1,13 @@
 """The decision tools on the real τ² databases, including the cases where Glimmer decided wrong in recorded runs."""
-from pathlib import Path
 
 import pytest
 from tau2.domains.airline.data_model import FlightDB
 from tau2.domains.retail.data_model import RetailDB
 
+from glint import paths
 from glint.assist import airline, retail
 
-DOMAINS = Path(__file__).resolve().parents[2] / "vendor" / "tau2-bench" / "data" / "tau2" / "domains"
+DOMAINS = paths.tau2_data() / "tau2" / "domains"
 
 
 @pytest.fixture(scope="module")

@@ -8,13 +8,13 @@ import hashlib
 import json
 import sys
 from collections import Counter
-from pathlib import Path
 
 from m2_pilot import GLIMMER, META, SPARK, glimmer_args, install
 from tau2.data_model.simulation import TextRunConfig
 from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
 
+from glint import paths
 from glint.meter import Caps, Meter
 from glint.twins import (
     ChoicePoint,
@@ -25,16 +25,16 @@ from glint.twins import (
     stated_phrases,
 )
 
-RETAIL = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains\retail")
-DATA = Path(r"<workspace>\measure\data\twins")
-OUT = Path(r"<workspace>\research\5-measurements\M2-twin-pilot.json")
+RETAIL = paths.tau2_data() / "tau2" / "domains" / "retail"
+DATA = paths.MEASURE / "twins"
+OUT = paths.RESULTS / "M2-twin-pilot.json"
 EARLY = " State this preference in your very first message, before anything else."
 
 
 def build():
     db = json.loads((RETAIL / "db.json").read_text(encoding="utf-8"))
     tasks = {str(t["id"]): t for t in json.loads((RETAIL / "tasks.json").read_text(encoding="utf-8"))}
-    part = json.loads(Path(r"<workspace>\research\5-measurements\split-partition.json").read_text())["retail"]
+    part = json.loads((paths.RESULTS / "split-partition.json").read_text())["retail"]
     order = sorted(part["pilot"] + part["fit"], key=lambda t: hashlib.sha256(f"twin-pilot:{t}".encode()).hexdigest())
     chosen, n_pay = [], 0
     for tid in order:

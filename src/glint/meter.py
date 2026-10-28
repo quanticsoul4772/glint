@@ -14,6 +14,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from glint import paths
+
 # $ per 1M tokens (research/2-platform/platform-pricing-limits.md, Meta pricing page 2026-10-26).
 META_PRICES = {
     "muse-spark-1.3": {"input": 1.25, "cached": 0.15, "output": 4.25},
@@ -30,7 +32,7 @@ META_PRICES = {
     "Muse-Glimmer-30B-modal": {"input": 0.0, "cached": 0.0, "output": 0.0},
 }
 
-DEFAULT_LEDGER = Path(r"<workspace>\measure\meter\ledger.jsonl")
+DEFAULT_LEDGER = paths.LEDGER
 
 
 def register_litellm_prices() -> None:

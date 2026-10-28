@@ -7,7 +7,6 @@ Usage: python -X utf8 cost_check.py [TASK_ID]
 import json
 import sys
 import time
-from pathlib import Path
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
@@ -18,6 +17,7 @@ from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
 from tau2.utils import llm_utils
 
+from glint import paths
 from glint.atem import reparsing
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
@@ -45,7 +45,7 @@ config = TextRunConfig(domain="banking_knowledge", agent="llm_agent", llm_agent=
                        save_to=f"glint-costcheck-{task_id}", auto_review=False, max_retries=0)
 results = run_tasks(config, [Task.model_validate(tasks[task_id])])
 sim = results.simulations[0]
-Path(r"<workspace>\measure\data").joinpath(f"costcheck-{task_id}-{stamp}.json").write_text(
+paths.MEASURE.joinpath(f"costcheck-{task_id}-{stamp}.json").write_text(
     results.model_dump_json(), encoding="utf-8")
 rows = [json.loads(line) for line in glim.ledger.read_text(encoding="utf-8").splitlines()]
 mine = [r for r in rows if r.get("phase") in (glim.phase, meta.phase)]
@@ -59,6 +59,6 @@ report = {
     "peak_prompt_tokens": max((r["prompt"] for r in mine if r["phase"] == glim.phase), default=0),
     "max_output_tokens": 8192,
 }
-out = Path(r"<workspace>\research\5-measurements") / f"costcheck-banking-{task_id}-{stamp}.json"
+out = paths.RESULTS / f"costcheck-banking-{task_id}-{stamp}.json"
 out.write_text(json.dumps(report, indent=1), encoding="utf-8")
 print(json.dumps(report, indent=1))

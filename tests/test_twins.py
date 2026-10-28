@@ -1,11 +1,11 @@
 import json
-from pathlib import Path
 
 import pytest
 
+from glint import paths
 from glint.twins import _covers, _price_difference, contradicts, find_choice_points, make_twins, said
 
-DATA = Path(__file__).resolve().parents[2] / "vendor" / "tau2-bench" / "data" / "tau2" / "domains" / "retail"
+DATA = paths.tau2_data() / "tau2" / "domains" / "retail"
 
 
 @pytest.fixture(scope="module")

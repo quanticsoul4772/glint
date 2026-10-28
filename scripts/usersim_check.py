@@ -4,7 +4,6 @@ M0-dryrun.json on reward, termination, turn counts and cost. Spend cap for this 
 """
 import json
 from collections import defaultdict
-from pathlib import Path
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
@@ -13,15 +12,16 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+from glint import paths
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
 
-ENV = dotenv_values(r"<workspace>\.env")
+ENV = dotenv_values(str(paths.ENV_FILE))
 AGENT = "openai/muse-spark-1.3-contributor"
 AGENT_ARGS = {"api_base": "https://api.meta.ai/v1", "api_key": ENV["MODEL_API_KEY"], "temperature": 1.0}
 USER = "openai/meta-models/muse-spark-open-1026"
 USER_ARGS = {"api_base": "https://inference.baseten.co/v1", "api_key": ENV["BASETEN_API_KEY"], "temperature": 1.0}
-PARTITION = json.loads(Path(r"<workspace>\research\5-measurements\split-partition.json").read_text())
+PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
 TASKS = PARTITION["retail"]["pilot"][:2]
 
 meter = Meter(Caps(meta_usd=2.0, gpu_usd=0.0), phase="pre-m2-usersim")
@@ -59,6 +59,6 @@ summary = {
     "by_model": {k: {**v, "usd": round(v["usd"], 6)} for k, v in by_model.items()},
     "total_usd": round(meter.meta_usd, 6),
 }
-out = Path(r"<workspace>\research\5-measurements\pre-M2-usersim-spark-open.json")
+out = paths.RESULTS / "pre-M2-usersim-spark-open.json"
 out.write_text(json.dumps(summary, indent=1))
 print(json.dumps(summary, indent=1))

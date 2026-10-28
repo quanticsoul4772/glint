@@ -11,16 +11,17 @@ Usage: python gate_prompts.py
 """
 import json
 from datetime import datetime
-from pathlib import Path
 
 from m1_prefix_check import AGENT_INSTRUCTION, SYSTEM_PROMPT, bos, ids, template, to_template_messages
 from tau2.data_model.simulation import Results
 from tau2.domains.banking_knowledge.environment import get_environment
 
-DATA = Path(r"<workspace>\measure\data")
-LABELS = Path(r"<workspace>\research\5-measurements\gate-labels.json")
-LEDGER = Path(r"<workspace>\measure\meter\ledger.jsonl")
-OUT = Path(r"<workspace>\research\5-measurements\gate-prompts.json")
+from glint import paths
+
+DATA = paths.MEASURE
+LABELS = paths.RESULTS / "gate-labels.json"
+LEDGER = paths.LEDGER
+OUT = paths.RESULTS / "gate-prompts.json"
 
 
 def banking_context():

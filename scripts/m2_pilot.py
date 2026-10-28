@@ -11,7 +11,6 @@ import statistics
 import sys
 import time
 from collections import Counter
-from pathlib import Path
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
@@ -20,16 +19,17 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+from glint import paths
 from glint.atem import generated_text, reparsing
 from glint.labeler import Labeler
 from glint.labels import FAB, VIOL, is_resid_positive, passes_r0
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
 
-ENV = dotenv_values(r"<workspace>\.env")
-DATA = Path(r"<workspace>\measure\data\m2")
-OUT = Path(r"<workspace>\research\5-measurements\M2-pilot.json")
-PARTITION = json.loads(Path(r"<workspace>\research\5-measurements\split-partition.json").read_text())
+ENV = dotenv_values(str(paths.ENV_FILE))
+DATA = paths.MEASURE / "m2"
+OUT = paths.RESULTS / "M2-pilot.json"
+PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
 RETAIL, AIRLINE = PARTITION["retail"]["pilot"], PARTITION["airline"]["pilot"]
 
 GLIMMER = "openai/meta-models/Muse-Glimmer-30B"
@@ -133,7 +133,7 @@ def analyze_run(name):
 
 def analyze():
     report = {name: analyze_run(name) for name in RUNS if (DATA / f"{name}.json").exists()}
-    ledger = [json.loads(line) for line in Path(r"<workspace>\measure\meter\ledger.jsonl").read_text().splitlines()]
+    ledger = [json.loads(line) for line in paths.LEDGER.read_text().splitlines()]
     m2 = [r for r in ledger if r.get("phase") == "m2-pilot"]
     report["spend_usd_by_model"] = {}
     for r in m2:

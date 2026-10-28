@@ -8,17 +8,17 @@ Usage: python gate_labels.py
 """
 import json
 from collections import Counter
-from pathlib import Path
 
 from tau2.data_model.tasks import Task
 from tau2.domains.banking_knowledge.environment import get_environment as banking_env
 from tau2.registry import registry
 
+from glint import paths
 from glint.decisions import label_run, to_rows
 
-DATA = Path(r"<workspace>\measure\data")
-DOMAINS = Path(r"<workspace>\vendor\tau2-bench\data\tau2\domains")
-OUT = Path(r"<workspace>\research\5-measurements\gate-labels.json")
+DATA = paths.MEASURE
+DOMAINS = paths.tau2_data() / "tau2" / "domains"
+OUT = paths.RESULTS / "gate-labels.json"
 SOURCES = {  # file -> domain; Glimmer only (no Wonder), no-tools only
     "m2/retail-medium.json": "retail", "m2/retail-low.json": "retail", "m2/retail-high.json": "retail",
     "m2/airline-medium.json": "airline", "headroom/airline-glimmer.json": "airline",

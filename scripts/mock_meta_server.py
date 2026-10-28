@@ -5,9 +5,10 @@ Run: python scripts/mock_meta_server.py 8765   (writes measure/data/m6a-requests
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 
-OUT = Path(r"<workspace>\measure\data\m6a-requests.jsonl")
+from glint import paths
+
+OUT = paths.MEASURE / "m6a-requests.jsonl"
 SECRET_HEADERS = {"authorization", "x-api-key", "cookie"}
 
 
