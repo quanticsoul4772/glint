@@ -259,8 +259,12 @@ def test_generate_refuses_a_rerun_with_nothing_to_rerun(run_set, monkeypatch, tm
     monkeypatch.setattr(tools_ab, "_commit", lambda: "abc1234")
     monkeypatch.setattr(tools_ab, "_save_dir", lambda c, arm, d, stamp: tmp_path / "none" / arm)
     monkeypatch.setattr("sys.argv", ["tools_ab.py", "x", "--rerun-infrastructure-errors"])
+    from tau2.runner import batch
+
+    monkeypatch.setattr(batch, "try_resume", batch.try_resume)  # restored after the test
     with pytest.raises(SystemExit, match="no infrastructure-error runs to rerun"):
         tools_ab.generate(cfg)
+    assert batch.try_resume.glint_keeps_failures  # every run resumes through the keeper
 
 
 def test_a_set_with_connections_gets_its_own_pool_and_others_keep_taus_client(stand_in, make_sim, monkeypatch,
@@ -291,3 +295,56 @@ def test_a_set_with_connections_gets_its_own_pool_and_others_keep_taus_client(st
 def test_no_existing_set_changes_its_pool():
     # existing sets keep τ²'s client so their runs stay comparable with the runs already made
     assert not [name for name, cfg in tools_ab.SETS.items() if "connections" in cfg]
+
+
+def test_resume_reruns_only_infrastructure_errors_and_keeps_failed_runs(tmp_path, monkeypatch, capsys):
+    # τ²'s own resume reruns every run whose termination reason is infrastructure_error, context overflows and Glint
+    # errors included; the keeper puts those failed runs back, on disk and in the runs to skip
+    from tau2.data_model.simulation import Results, TerminationReason
+    from tau2.runner import batch, checkpoint
+
+    shipped = Results.load(tools_ab.paths.tau2_data() / "tau2" / "results" / "final" /
+                           "gpt-4.1-2025-04-14_retail_default_gpt-4.1-2025-04-14_4trials.json")
+    tasks = shipped.tasks[:2]
+    sims = [s for s in shipped.simulations if s.task_id in {t.id for t in tasks}]
+    overflow, dropped = sims[0], sims[1]
+    for s, error in ((overflow, "litellm.ContextWindowExceededError: too long"), (dropped, "APIError: 303")):
+        s.termination_reason, s.reward_info = TerminationReason.INFRASTRUCTURE_ERROR, None
+        s.info = {"error": error}
+    save = tmp_path / "results.json"
+    save.write_text(Results(info=shipped.info, tasks=tasks, simulations=sims).model_dump_json(), encoding="utf-8")
+    fresh = Results(info=shipped.info, tasks=tasks, simulations=[])
+    key = lambda s: (s.trial, s.task_id, s.seed)
+
+    monkeypatch.setattr(batch, "try_resume", checkpoint.try_resume)
+    tools_ab.keep_failed_runs_on_resume()
+    tools_ab.keep_failed_runs_on_resume()  # installed once however often generate runs
+    results, done, _ = batch.try_resume(save, fresh, tasks, 4, auto_resume=True)
+    assert key(overflow) in done and key(dropped) not in done  # only the dropped run is rerun
+    assert overflow.id in {s.id for s in results.simulations} and dropped.id not in {s.id for s in results.simulations}
+    on_disk = {s.id for s in Results.load(save).simulations}
+    assert overflow.id in on_disk and dropped.id not in on_disk and len(on_disk) == len(sims) - 1
+    assert "KEPT 1 failed runs" in capsys.readouterr().out
+
+
+def test_without_the_keeper_taus_resume_drops_failed_runs(tmp_path):
+    # the cause, pinned: if τ² changes this, the keeper may no longer be needed
+    from tau2.data_model.simulation import Results, TerminationReason
+    from tau2.runner import checkpoint
+
+    shipped = Results.load(tools_ab.paths.tau2_data() / "tau2" / "results" / "final" /
+                           "gpt-4.1-2025-04-14_retail_default_gpt-4.1-2025-04-14_4trials.json")
+    tasks = shipped.tasks[:1]
+    sims = [s for s in shipped.simulations if s.task_id == tasks[0].id]
+    sims[0].termination_reason, sims[0].info = TerminationReason.INFRASTRUCTURE_ERROR, {"error": "ContextWindowExceededError"}
+    save = tmp_path / "results.json"
+    save.write_text(Results(info=shipped.info, tasks=tasks, simulations=sims).model_dump_json(), encoding="utf-8")
+    _, done, _ = checkpoint.try_resume(save, Results(info=shipped.info, tasks=tasks, simulations=[]), tasks, 4, True)
+    assert (sims[0].trial, sims[0].task_id, sims[0].seed) not in done
+
+
+def test_a_release_records_its_commit_next_to_the_run(dropped_set):
+    cfg, _ = dropped_set
+    tools_ab.release_infrastructure_errors(cfg, "s", "abc1234")
+    rec = json.loads((cfg["data"] / "reruns.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert rec["commit"] == "abc1234" and rec["arm"] == "base" and rec["runs"] == [["task_1", 1], ["task_2", 1]]

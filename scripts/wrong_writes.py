@@ -28,7 +28,7 @@ OUT = paths.RESULTS / "wrong-writes.json"
 ARMS = ("base", "tools")
 
 
-def count_set(data, domains) -> dict:
+def count_set(data, domains, trials: dict | None = None) -> dict:
     """{domain: {arm: {"runs", "writes", "overruled", "overruled_executed", "by_task", "dropped", "unjudged"}}}
     for the arm files in `data`; an arm whose file is missing is left out."""
     out = {}
@@ -40,6 +40,9 @@ def count_set(data, domains) -> dict:
                 continue
             c, by_task, dropped, unjudged = Counter(), defaultdict(Counter), Counter(), {}
             for s in json.loads(f.read_text(encoding="utf-8"))["simulations"]:
+                if trials and s["trial"] >= trials[domain]:  # a resumed checkpoint can hold trials beyond k,
+                    dropped["beyond k"] += 1                   # which tools_ab.analyze leaves out too
+                    continue
                 kind = outcome(s)
                 if kind in NOT_RESULTS:
                     dropped[kind] += 1
@@ -73,7 +76,7 @@ def main():
                 continue
             domains = json.loads((cfg["data"] / "tasks.json").read_text(encoding="utf-8"))
             key = f"{name}{' --modal' if modal else ''}"
-            counts = count_set(cfg["data"], domains)
+            counts = count_set(cfg["data"], domains, {d: tools_ab._trials(cfg, d) for d in domains})
             if not any(len(arms) == len(ARMS) for arms in counts.values()):
                 print(f"NOTE: {key}: no domain has both arm files; not counted", flush=True)
                 continue
