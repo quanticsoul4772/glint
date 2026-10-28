@@ -16,6 +16,11 @@ def test_page_and_scenario_list():
     assert {s["id"] for s in listing} >= {"task_054", "task_038"}
 
 
+def test_the_page_is_revalidated_so_a_deploy_reaches_returning_visitors():
+    # regression: the page went out with Last-Modified 1970 and no Cache-Control, so browsers kept the old page
+    assert client.get("/").headers["cache-control"] == "no-cache"
+
+
 def test_every_scenario_pairs_a_failed_alone_run_with_a_passed_tools_run():
     for s in client.get("/api/scenarios").json():
         full = client.get(f"/api/scenarios/{s['id']}").json()

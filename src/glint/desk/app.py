@@ -32,7 +32,8 @@ def scenarios() -> list[dict]:
 
 @app.get("/")
 def index():
-    return FileResponse(HERE / "static" / "index.html")
+    # the deployed file's mtime is 1970, so without this browsers keep an old page across deploys
+    return FileResponse(HERE / "static" / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/scenarios")
