@@ -1,6 +1,6 @@
 """glint-bank replays through the MCP tool-call path (design V1 and V2, research/3-project/glint-bank-design.md §8).
 
-- **gold** (V1, false refusals): for each of the 97 banking tasks, `load_scenario(task)` through an in-process MCP
+- **gold** (V1, false refusals): for each of the 77 banking TRAIN tasks (pilot + rest; the 20 test_untouched stay unread), `load_scenario(task)` through an in-process MCP
   client, then every gold action: the assistant's through `call_tool` (the server's handler, so the session's gates),
   the user's straight into the session environment as `requestor="user"` (the server never takes customer calls). An
   ungated twin environment takes the same calls in step. A deny of a gold write the twin's τ² tool runs is a false
@@ -9,7 +9,9 @@
 - **wrong** (V2): the recorded wrong writes of Glimmer's banking12 runs (research/5-measurements/
   failure-review-2026-10-28/recs.json): task_054's over-maximum increase submit, task_051's approve with no prior deny,
   task_040/041's dispute with wrong arguments. Each run's writes are sent in order through the server on a fresh
-  scenario until the first deny, which must carry the task's expected rule. The failure review judged writes against
+  scenario until the first deny, which must carry the task's expected rule, or a gates-phase-2 procedure rule
+  (verification, required lookups, transfer) on a step the run's full call list shows it skipped, or on a write the
+  review marked wrong or extra. The failure review judged writes against
   gold, and gold's provisional-credit flag depends on gold's filing order: a dispute a run filed in another order can
   be right on the live database (the gate allows it), and one whose flag matches gold can be wrong there (the gate
   denies it). task_051 runs that paid the card down before submitting get an approve verdict on the live database.
@@ -21,11 +23,13 @@ Deterministic; no model, no network. Usage: python scripts/bank_replay.py [--rec
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
 
 import anyio
+import gate_replay  # scripts/ is on the path when this runs as a script or under the tests
 from loguru import logger
 from mcp.client.client import Client
 from tau2.data_model.message import ToolCall
@@ -35,6 +39,13 @@ from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
 
 RECS = paths.RESULTS / "failure-review-2026-10-28" / "recs.json"
+DOMAIN = "banking_knowledge"
+
+
+def train_task_ids() -> list[str]:
+    """The 77 banking train tasks (pilot + rest), as gate_replay replays them: the 20 test_untouched tasks of
+    split-partition-banking.json stay unread (research/00-decisions.md, 2026-10-28)."""
+    return sorted(t.id for t in gate_replay.tasks_of(DOMAIN))
 WRAPPER, UNLOCK = "call_discoverable_agent_tool", "unlock_discoverable_agent_tool"
 VISIBLE = {"log_verification", "change_user_email", "transfer_to_human_agents"}  # agent writes called by name
 # the recorded wrong writes the design names, and the rule each must be denied by
@@ -58,9 +69,9 @@ def _denies(session, before: int) -> list[dict]:
 async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> dict:
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         bank = BankServer(home=home or Path(tmp), sid="gold-replay")
-        refusals, also_rejected, mismatches, errors = [], [], [], []
+        refusals, also_rejected, placeholder, placeholder_hashes, mismatches, errors = [], [], [], [], [], []
         writes = allowed = 0
-        ids = task_ids or sorted(tasks())
+        ids = task_ids or train_task_ids()
         async with Client(bank.mcp_server()) as client:
             for task_id in ids:
                 task = tasks()[task_id]
@@ -89,7 +100,12 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                     if denied:
                         row = {"task_id": task_id, "action": k, "tool": write[0], "rule_id": denied[0]["rule_id"],
                                "reason": denied[0]["reason"]}
-                        (also_rejected if ungated.error else refusals).append(row)
+                        if ungated.error:
+                            also_rejected.append(row)
+                        elif (DOMAIN, task_id) in gate_replay.PLACEHOLDER_GOLD:
+                            placeholder.append(row | {"why": gate_replay.PLACEHOLDER_GOLD[(DOMAIN, task_id)]})
+                        else:
+                            refusals.append(row)
                     else:
                         allowed += 1
                         if reply.is_error != bool(ungated.error):
@@ -98,14 +114,39 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                     got = (session.env.get_db_hash(), session.env.get_user_db_hash())
                 want = (twin.get_db_hash(), twin.get_user_db_hash())
                 if got != want:
-                    mismatches.append({"task_id": task_id, "server": got, "twin": want})
+                    row = {"task_id": task_id, "server": got, "twin": want}
+                    if any(p["task_id"] == task_id for p in placeholder):  # its gold writes were denied: expected
+                        placeholder_hashes.append(row)
+                    else:
+                        mismatches.append(row)
         session.events.verify()
         session.events.close()
     return {"tasks": len(ids), "gold_writes": writes, "allowed": allowed, "false_refusals": refusals,
-            "also_rejected": also_rejected, "hash_mismatches": mismatches, "result_mismatches": errors}
+            "also_rejected": also_rejected, "placeholder_gold": placeholder,
+            "placeholder_hash_differs": [r["task_id"] for r in placeholder_hashes], "hash_mismatches": mismatches,
+            "result_mismatches": errors}
 
 
 # ---- V2: recorded wrong writes ------------------------------------------------------------------------------------
+
+PROCEDURE_RULES = ("procedure.", "banking.verification")  # gates phase 2: the steps before a write, and its record
+LOOKUP = re.compile(r"get_[a-z_]+_\d{4}")
+
+
+def skipped_in_recording(rec: dict, i: int, rule_id: str, reason: str) -> bool | None:
+    """For a procedure deny of write i: whether the run's full call list confirms the step was skipped. The recorded
+    writes keep only the hidden reads gold names, so the replay's own lookup record can lack a read the run did make;
+    the call list (names, in order) does not. Judged on every call before the LAST call of that tool name, so a step
+    done anywhere before it counts as done. None for a rule that judges the write's own arguments."""
+    name = rec["writes"][i]["name"]
+    calls = rec.get("calls") or []
+    before = set(calls[:max((k for k, c in enumerate(calls) if c == name), default=len(calls))])
+    if rule_id == "procedure.lookups":
+        return not (set(LOOKUP.findall(reason.split(";")[0])) & before)
+    if rule_id == "procedure.verified":
+        return "log_verification" not in before
+    return None
+
 
 def recorded_wrong(rec: dict, i: int) -> bool:
     """Whether write i of a recorded run is wrong by the failure review's gold-based label: an increase submit or a
@@ -125,7 +166,8 @@ async def _send(client, name: str, args: dict):
 
 async def wrong(recs: list[dict], home: Path | None = None) -> dict:
     """Each recorded run of the EXPECTED tasks, its writes sent in order through the server on a fresh scenario until
-    the first deny. That deny must carry the task's expected rule, as an error result that leaves the database
+    the first deny. That deny must carry the task's expected rule, or a procedure rule the recording supports
+    (`skipped_in_recording`, or a write recorded as wrong or extra), as an error result that leaves the database
     unchanged; whether gold's label also calls the write wrong is reported. A run with no deny is listed with its
     gold-labeled wrong writes."""
     stopped, not_stopped = [], []
@@ -150,7 +192,11 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                                "rule_id": denied[0]["rule_id"], "expected_rule": expected,
                                "is_error": reply.is_error, "db_unchanged": session.env.get_db_hash() == db,
                                "reason": denied[0]["reason"], "message": _text(reply)}
-                        row["ok"] = row["rule_id"] == expected and row["is_error"] and row["db_unchanged"]
+                        row["skipped_in_recording"] = skipped_in_recording(rec, i, row["rule_id"], row["reason"])
+                        reason_ok = row["rule_id"] == expected or (
+                            row["rule_id"].startswith(PROCEDURE_RULES) and row["skipped_in_recording"] is not False
+                            and (row["recorded_wrong"] or row["skipped_in_recording"] or w["st"] != "ok"))
+                        row["ok"] = reason_ok and row["is_error"] and row["db_unchanged"]
                         break
                 if row is None:
                     not_stopped.append({"run": run, "recorded_wrong": [
@@ -167,8 +213,13 @@ def main(argv: list[str]) -> int:
     g = anyio.run(gold)
     print(f"gold: {g['tasks']} tasks, {g['gold_writes']} gold writes through MCP, {g['allowed']} allowed, "
           f"{len(g['false_refusals'])} false refusals, {len(g['also_rejected'])} denies τ²'s tool also rejects, "
+          f"{len(g['placeholder_gold'])} denies of placeholder gold, "
           f"{len(g['hash_mismatches'])} database hash mismatches with the ungated twin, "
           f"{len(g['result_mismatches'])} result mismatches")
+    for f in g["placeholder_gold"]:
+        print(f"  placeholder gold {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['why']}")
+    if g["placeholder_hash_differs"]:
+        print(f"  database differs from the twin only where placeholder gold was denied: {g['placeholder_hash_differs']}")
     for f in g["false_refusals"]:
         print(f"  FALSE REFUSAL {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['reason']}")
     for m in g["hash_mismatches"]:

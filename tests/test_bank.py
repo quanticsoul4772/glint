@@ -41,6 +41,17 @@ async def _with_client(srv, body):
         return await body(client)
 
 
+def _verification(task_id: str = "task_054") -> dict:
+    """The task's gold log_verification arguments: the customer verified today (gates phase 2, procedure.verified:
+    every banking write for a user needs that user's verification logged today)."""
+    return next(a.arguments for a in bank.tasks()[task_id].evaluation_criteria.actions if a.name == "log_verification")
+
+
+def _verify(server, sid=None):
+    reply = server.call(sid, "log_verification", _verification())
+    assert not reply.is_error, reply.content[0].text
+
+
 def _hidden_args(tool: str, **args) -> dict:
     return {"agent_tool_name": tool, "arguments": json.dumps(args)}
 
@@ -87,24 +98,32 @@ def test_a_denied_write_is_an_error_result_with_the_gate_text_and_leaves_the_dat
     async def body(client):
         await client.call_tool(bank.LOAD, {"task_id": "task_054"})
         await client.call_tool("unlock_discoverable_agent_tool", {"agent_tool_name": rules.SUBMIT})
+        unverified = await client.call_tool("call_discoverable_agent_tool", _hidden_args(
+            rules.SUBMIT, requested_increase_amount=2500, **SOFIA))
+        assert not (await client.call_tool("log_verification", _verification())).is_error
         before = server.session().env.get_db_hash()
         denied = await client.call_tool("call_discoverable_agent_tool", _hidden_args(
             rules.SUBMIT, requested_increase_amount=4000, **SOFIA), meta={"callId": "call-7"})
         after_deny = server.session().env.get_db_hash()
         allowed = await client.call_tool("call_discoverable_agent_tool", _hidden_args(
             rules.SUBMIT, requested_increase_amount=2500, **SOFIA))
-        return before, denied, after_deny, allowed
+        return unverified, before, denied, after_deny, allowed
 
-    before, denied, after_deny, allowed = _run(_with_client, server, body)
-    fired = [e["payload"] for e in server.session().events.events("gate.fired")]
+    unverified, before, denied, after_deny, allowed = _run(_with_client, server, body)
+    # the hidden tool was unwrapped and gated; only the submit gate's own events are looked at here
+    fired = [e["payload"] for e in server.session().events.events("gate.fired")
+             if e["payload"]["tool"] == rules.SUBMIT and e["payload"]["gate"] == "banking_cli_submit_gate"]
+    # before any verification even a submit within the maximum is blocked (gates phase 2: procedure.verified)
+    assert unverified.is_error and "rule procedure.verified" in unverified.content[0].text
     assert denied.is_error and after_deny == before
     text = denied.content[0].text
     assert text.startswith("Error: this write was blocked by a policy gate (rule banking.cli.submit.reduce_amount")
     for part in ("Reason: requested increase $4,000.00 exceeds", "Purpose: credit_card_account_logistics_005",
                  "Fix: Submit an increase no larger than max_increase", "Verdict: {"):
         assert part in text
-    # the hidden tool was unwrapped and gated; the log carries the session, the task and Muse's call id
-    assert fired[0]["tool"] == rules.SUBMIT and fired[0]["decision"] == "deny"
+    # the log carries the session, the task and Muse's call id
+    fired = fired[1:]  # the submit gate's allow of the unverified call, which procedure.verified then blocked
+    assert fired[0]["decision"] == "deny" and fired[0]["rule_id"] == "banking.cli.submit.reduce_amount"
     assert {k: fired[0][k] for k in ("session_id", "task_id", "call_id")} == {
         "session_id": "s1", "task_id": "task_054", "call_id": "call-7"}
     assert not allowed.is_error and server.session().env.get_db_hash() != before
@@ -132,7 +151,9 @@ def test_sessions_are_isolated(server):
     server.load_scenario("a", "task_054")
     server.load_scenario("b", "task_054")
     for sid in ("a", "b"):
+        _verify(server, sid)
         server.call(sid, "unlock_discoverable_agent_tool", {"agent_tool_name": rules.SUBMIT})
+    b_fired = len(server.session("b").events.events("gate.fired"))
     b_before = server.session("b").env.get_db_hash()
     reply = server.call("a", "call_discoverable_agent_tool", _hidden_args(rules.SUBMIT, requested_increase_amount=2500,
                                                                           **SOFIA))
@@ -141,16 +162,19 @@ def test_sessions_are_isolated(server):
     assert server.session("a").env is not server.session("b").env
     a_log = server.home / "sessions" / "a" / "gates.sqlite"
     assert a_log.exists() and (server.home / "sessions" / "b" / "gates.sqlite").exists()
-    assert len(server.session("a").events.events("gate.fired")) == 1
-    assert server.session("b").events.events("gate.fired") == []
+    a_submits = [e for e in server.session("a").events.events("gate.fired") if e["payload"]["tool"] == rules.SUBMIT]
+    assert a_submits and all(e["payload"]["decision"] == "allow" for e in a_submits)
+    assert len(server.session("b").events.events("gate.fired")) == b_fired  # a's submit left no event in b's log
 
 
 def test_load_scenario_resets_and_never_leaks_the_customer_instructions(server):
     server.load_scenario(None, "task_054")
     first = server.session().env
+    _verify(server)
     server.call(None, "unlock_discoverable_agent_tool", {"agent_tool_name": rules.SUBMIT})
-    server.call(None, "call_discoverable_agent_tool", _hidden_args(rules.SUBMIT, requested_increase_amount=2500,
-                                                                   **SOFIA))
+    submitted = server.call(None, "call_discoverable_agent_tool", _hidden_args(
+        rules.SUBMIT, requested_increase_amount=2500, **SOFIA))
+    assert not submitted.is_error, submitted.content[0].text
     changed = first.get_db_hash()
     reply = server.call(None, bank.LOAD, {"task_id": "task_054"})
     fresh = bank.build_environment(bank.tasks()["task_054"])
@@ -261,6 +285,7 @@ def test_brief_and_log_clis(server, capsys, monkeypatch):
     assert bank.main(["brief", "task_054"]) == 0
     assert "Sofia Papadopoulos" in capsys.readouterr().out
     server.load_scenario(None, "task_054")
+    _verify(server)
     server.call(None, "unlock_discoverable_agent_tool", {"agent_tool_name": rules.SUBMIT})
     server.call(None, "call_discoverable_agent_tool", _hidden_args(rules.SUBMIT, requested_increase_amount=4000,
                                                                    **SOFIA))
@@ -290,11 +315,20 @@ def test_main_serves_stdio(monkeypatch):
 # ---- replays (design V1, V2) --------------------------------------------------------------------------------------
 
 def test_gold_replay_through_mcp_has_no_false_refusal_and_matches_the_ungated_twin():
+    """The 77 banking TRAIN tasks (pilot + rest); the 20 test_untouched tasks stay unread (research/00-decisions.md)."""
     import bank_replay
+    import gate_replay
 
     report = _run(bank_replay.gold)
-    assert report["tasks"] == 97 and report["gold_writes"] == report["allowed"] > 300
+    untouched = set(json.loads(gate_replay.BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
+    assert report["tasks"] == 77 and len(untouched) == 20 and not untouched & set(bank_replay.train_task_ids())
     assert report["false_refusals"] == [] and report["also_rejected"] == []
+    # task_005's gold logs a placeholder verification and then changes an unverified user's email (gate_replay lists
+    # it apart): its two gold writes are denied, so only its database differs from the twin's
+    assert [(p["task_id"], p["rule_id"]) for p in report["placeholder_gold"]] == [
+        ("task_005", "banking.verification.user"), ("task_005", "procedure.verified")]
+    assert report["gold_writes"] == report["allowed"] + 2 > 250
+    assert report["placeholder_hash_differs"] == ["task_005"]
     assert report["hash_mismatches"] == [] and report["result_mismatches"] == []
 
 
@@ -303,17 +337,28 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
 
     report = _run(bank_replay.wrong, json.loads(RUNS.read_text(encoding="utf-8")))
     stopped = {r["run"]: r for r in report["stopped"]}
-    assert len(stopped) == report["denied_as_expected"] == 15
+    assert len(stopped) == report["denied_as_expected"] == 20
     assert all(r["ok"] and r["is_error"] and r["db_unchanged"] for r in stopped.values())
     over = stopped["banking12 base task_054 trial 0"]
     assert (over["write"], over["rule_id"], over["recorded_wrong"]) == (40, "banking.cli.submit.reduce_amount", True)
     assert stopped["banking12 tools task_051 trial 0"]["rule_id"] == "banking.cli.approve"
     assert "high_utilization" in stopped["banking12 tools task_051 trial 0"]["reason"]
-    assert sum(r["run"].split()[2] == "task_040" for r in stopped.values()) == 8  # every recorded task_040 run
-    assert sum(r["run"].split()[2] == "task_041" for r in stopped.values()) == 5
-    # paid down before submitting: the policy approves on the live database
-    assert {"banking12 base task_051 trial 0", "banking12 base task_051 trial 1"} <= {
-        r["run"] for r in report["not_stopped"]}
+    rules_by_task = {}
+    for r in stopped.values():
+        rules_by_task.setdefault(r["run"].split()[2], []).append(r["rule_id"])
+    assert rules_by_task["task_040"] == ["banking.dispute"] * 8  # every recorded task_040 run
+    # gates phase 2 stops runs earlier, on steps the recording shows were skipped: the approve of task_051 base
+    # trials 0 and 1 came with no dispute-history or pending-order lookup in the whole run (they were not denied by
+    # the approve rule: the customer paid down before submitting, so the policy approves on the live database)
+    for trial in (0, 1):
+        r = stopped[f"banking12 base task_051 trial {trial}"]
+        assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.lookups", True)
+    r = stopped["banking12 base task_041 trial 1"]  # no log_verification anywhere before its disputes
+    assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.verified", True)
+    assert stopped["banking12 tools task_041 trial 1"]["rule_id"] == "banking.verification"  # wrong time_verified
+    assert sorted(rules_by_task["task_041"]) == ["banking.dispute"] * 3 + ["banking.verification",
+                                                                             "procedure.verified"]
+    assert sum(r.startswith("procedure.transfer.") for r in rules_by_task["task_051"] + rules_by_task["task_054"]) == 3
 
 
 def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_path):
@@ -335,6 +380,8 @@ def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_pat
 
     async def refusing_gold():
         return {"tasks": 1, "gold_writes": 1, "allowed": 0, "also_rejected": [], "hash_mismatches": [{"task_id": "t"}],
+                "placeholder_gold": [{"task_id": "p", "tool": "y", "rule_id": "q", "why": "placeholder"}],
+                "placeholder_hash_differs": ["p"],
                 "result_mismatches": [{"task_id": "t", "tool": "x", "text": "boom"}],
                 "false_refusals": [{"task_id": "t", "tool": "x", "rule_id": "r", "reason": "why"}]}
 
