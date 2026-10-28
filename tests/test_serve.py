@@ -1,9 +1,11 @@
 """glint.glimmer_serve.wait_ready against a local stand-in for the Modal endpoint (no GPU, no network)."""
 import http.server
+import json
 import threading
 
 import pytest
 
+from glint import glimmer_serve
 from glint.glimmer_serve import wait_ready
 
 
@@ -384,3 +386,112 @@ def test_a_resumed_session_at_or_near_its_cap_is_refused_before_it_starts(monkey
           glimmer_serve.session(_resumed_meter(tmp_path / "b", 4.95, 5.0), "modal", {}, tag="t")):
         pytest.fail("the batch must not run")
     assert calls == []  # nothing was started or stopped
+
+
+@pytest.fixture
+def modal_mock():
+    """A stand-in for Modal's web endpoint: each hop answers 303 to a result URL (with or without Location) until the
+    call is `hops` deep, then the completion. Yields (base url, settings); restores litellm's client afterwards."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    import litellm
+
+    settings = {"hops": 2, "location": True, "seen": 0}
+    body = json.dumps({"id": "x", "object": "chat.completion", "created": 0, "model": "m", "choices": [
+        {"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "hi"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def hop(self):
+            settings["seen"] += 1
+            if settings["seen"] <= settings["hops"]:
+                self.send_response(303)
+                if settings["location"]:
+                    self.send_header("Location", "/v1/chat/completions?__modal_function_call_id=fc-1")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            self.hop()
+
+        do_GET = hop
+
+    import httpx
+    import tau2.utils.llm_utils  # noqa: F401  (a real run imports τ², which installs its own client)
+
+    # a fresh client set up as τ² sets its own (redirects not followed), so each test starts from a run's state
+    saved = litellm.client_session, litellm.aclient_session
+    litellm.client_session = httpx.Client(limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
+    litellm.aclient_session = httpx.AsyncClient(limits=httpx.Limits(max_keepalive_connections=5, max_connections=10))
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_port}", settings
+    finally:
+        srv.shutdown()
+        litellm.client_session.close()
+        litellm.client_session, litellm.aclient_session = saved
+
+
+def _complete(url):
+    import litellm
+
+    args = glimmer_serve.litellm_args(url, "key", "secret")
+    return litellm.completion(model=f"openai/{glimmer_serve.MODEL_NAME}", messages=[{"role": "user", "content": "x"}],
+                              api_base=args["api_base"], api_key=args["api_key"], extra_headers=args["extra_headers"],
+                              num_retries=0)
+
+
+def test_taus_client_does_not_follow_modal_redirects(modal_mock):
+    # the cause of the banking-test failures: without the fix a request Modal redirects fails with a bare 303
+    import litellm
+
+    url, _ = modal_mock
+    with pytest.raises(litellm.APIError, match="303"):
+        litellm.completion(model=f"openai/{glimmer_serve.MODEL_NAME}", messages=[{"role": "user", "content": "x"}],
+                           api_base=url + "/v1", api_key="unused", num_retries=0)
+
+
+def test_modal_redirects_are_followed_on_taus_client(modal_mock, capsys):
+    import litellm
+
+    url, settings = modal_mock
+    tau_client = litellm.client_session
+    settings["hops"] = 4  # a request Modal redirected four times (about 600 s on Modal)
+    assert _complete(url).choices[0].message.content == "hi"
+    assert litellm.client_session is tau_client and tau_client.follow_redirects  # τ²'s client and limits are kept
+    assert litellm.aclient_session.follow_redirects
+    assert "UNFOLLOWED REDIRECT" not in capsys.readouterr().err
+    _complete(url)  # a second caller adds no second report hook
+    assert tau_client.event_hooks["response"].count(glimmer_serve._report_unfollowed) == 1
+
+
+def test_a_redirect_that_cannot_be_followed_is_reported_and_still_fails(modal_mock, capsys):
+    import litellm
+
+    url, settings = modal_mock
+    settings["location"] = False
+    with pytest.raises(litellm.APIError, match="303"):
+        _complete(url)
+    err = capsys.readouterr().err
+    assert "UNFOLLOWED REDIRECT 303 on POST 127.0.0.1/v1/chat/completions" in err and "content-length" in err
+
+
+def test_a_missing_shared_client_fails_loudly(monkeypatch):
+    import litellm
+    import tau2.utils.llm_utils  # noqa: F401
+
+    monkeypatch.setattr(litellm, "client_session", None)
+    with pytest.raises(RuntimeError, match="no shared HTTP client"):
+        glimmer_serve.follow_modal_redirects()

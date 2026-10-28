@@ -56,9 +56,45 @@ def serve():  # pragma: no cover  (runs only inside the Modal GPU container)
     subprocess.Popen(cmd, env=os.environ | {"VLLM_CACHE_ROOT": "/root/.cache/vllm/v031"})
 
 
+def _stamp(request) -> None:
+    """httpx request hook: when this hop was sent (response.elapsed is unreadable before the body is read)."""
+    request.extensions["glint_sent"] = time.monotonic()
+
+
+def _report_unfollowed(response) -> None:
+    """httpx response hook: a redirect with no Location (one httpx cannot follow) is printed loudly before the call
+    fails."""
+    if 300 <= response.status_code < 400 and not response.has_redirect_location:
+        req = response.request
+        print(f"[serve {time.strftime('%H:%M:%S')}] UNFOLLOWED REDIRECT {response.status_code} on {req.method} "
+              f"{req.url.host}{req.url.path} after {time.monotonic() - req.extensions['glint_sent']:.0f} s this hop; "
+              f"headers: {sorted(response.headers.keys())}", file=sys.stderr, flush=True)
+
+
+def follow_modal_redirects() -> None:
+    """Make LiteLLM's HTTP client follow Modal's redirects. Modal answers any web request still running after 150 s
+    with a 303 to a result URL; τ² installs its own httpx client on import (tau2.utils.llm_utils, connection limits),
+    and httpx clients do not follow redirects by default. So every Glimmer request over 150 s failed with
+    "Error code: 303" (2026-10-28, banking-test: tasks 020, 022, 029). τ²'s client and its limits are kept; it now
+    follows redirects, and a redirect it still cannot follow is reported."""
+    import litellm
+    import tau2.utils.llm_utils  # noqa: F401  (installs τ²'s client first, so it is the one changed here)
+
+    for client in (litellm.client_session, litellm.aclient_session):
+        if client is None:
+            raise RuntimeError("LiteLLM has no shared HTTP client; τ² changed how it sets one up")
+        client.follow_redirects = True
+    hooks = litellm.client_session.event_hooks
+    if _report_unfollowed not in hooks["response"]:
+        litellm.client_session.event_hooks = {"request": [*hooks["request"], _stamp],
+                                              "response": [*hooks["response"], _report_unfollowed]}
+
+
 def litellm_args(url: str, token_id: str, token_secret: str, strength: str = "medium") -> dict:
     """LiteLLM arguments for the endpoint (model `openai/Muse-Glimmer-30B-modal`). Logprobs need `top_logprobs` set;
-    `return_token_ids` gives the exact ids, since per-token strings can split a UTF-8 character."""
+    `return_token_ids` gives the exact ids, since per-token strings can split a UTF-8 character. Every caller of the
+    endpoint gets Modal's redirects followed."""
+    follow_modal_redirects()
     return {"api_base": url.rstrip("/") + "/v1", "api_key": "unused",
             "extra_headers": {"Modal-Key": token_id, "Modal-Secret": token_secret},
             "temperature": 1.0, "top_p": 0.95, "logprobs": True, "top_logprobs": 1,
