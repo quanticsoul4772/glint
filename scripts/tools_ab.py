@@ -93,6 +93,11 @@ def heldout2_tasks(n: int = 10, seed: int = 2027) -> dict[str, list[str]]:
     return heldout_tasks(n, seed, {d: INVENTORY[d] | set(first[d]) for d in ("retail", "airline")})
 
 
+def banking_test_tasks() -> dict[str, list[str]]:
+    """τ²'s untouched banking test split (all 20 tasks): the final check, never used to change the tools."""
+    return {"banking_knowledge": sorted(json.loads(BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])}
+
+
 def banking_tasks() -> dict[str, list[str]]:
     untouched = set(json.loads(BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
     ids = [t["id"] for t in json.loads(BANKING_TASKS.read_text(encoding="utf-8"))
@@ -117,6 +122,10 @@ SETS = {
     "banking": {"tasks": banking_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.0, "meta_usd": 1.5,
                 "gpu_usd": 12.0, "data": MEASURE / "tools_ab_banking12", "out": RESULTS / "tools-ab-banking12.json",
                 "save": "tools-ab-banking12"},
+    # The final check on τ²'s untouched banking test split; the tools are frozen
+    "banking-test": {"tasks": banking_test_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.0, "meta_usd": 2.0,
+                     "gpu_usd": 20.0, "data": MEASURE / "tools_ab_banking_test",
+                     "out": RESULTS / "tools-ab-banking-test.json", "save": "tools-ab-banking-test"},
     # The 10 banking tasks not tuned on (the banking tools were changed after reading 038 and 054 runs only); k=2 to
     # keep Modal credit for activation capture
     "banking-other": {"tasks": lambda: {"banking_knowledge": [t for t in banking_tasks()["banking_knowledge"]
