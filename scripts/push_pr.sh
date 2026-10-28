@@ -9,14 +9,18 @@ if [ "$branch" = "main" ]; then
   exit 1
 fi
 # Only "no pull requests found" means no PR; any other gh failure (auth, network) refuses rather than skip the check
-if ! state=$(gh pr view "$branch" --json state -q .state 2>&1); then
-  if [[ "$state" == *"no pull requests found"* ]]; then
+# (stderr is kept apart, so a warning printed on success cannot corrupt the state)
+err=$(mktemp)
+if ! state=$(gh pr view "$branch" --json state -q .state 2>"$err"); then
+  if grep -q "no pull requests found" "$err"; then
     state="NONE"
   else
-    echo "REFUSED: could not check the PR for '$branch': $state" >&2
+    echo "REFUSED: could not check the PR for '$branch': $(cat "$err")" >&2
+    rm -f "$err"
     exit 1
   fi
 fi
+rm -f "$err"
 if [ "$state" = "MERGED" ] || [ "$state" = "CLOSED" ]; then
   echo "REFUSED: the PR for '$branch' is $state; a push here never reaches main." >&2
   echo "Move the new commits: git checkout -b NEW origin/main && git cherry-pick <commits>" >&2

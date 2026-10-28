@@ -47,16 +47,18 @@ def main():
                 continue
             b, t = arms["base"], arms["tools"]
             # no counted run in an arm, or every run overflowed the context: the task says nothing about the tools
-            if not b["runs"] or not t["runs"] or b.get("context_overflows", 0) + t.get("context_overflows", 0) == \
-                    b["runs"] + t["runs"]:
-                change = "no data"
+            reason = None
+            if not b["runs"] or not t["runs"]:
+                change, reason = "no data", "no counted runs in an arm (infrastructure errors)"
+            elif b.get("context_overflows", 0) + t.get("context_overflows", 0) == b["runs"] + t["runs"]:
+                change, reason = "no data", "every run overflowed the context"
             else:
                 rb, rt = b["passes"] / b["runs"], t["passes"] / t["runs"]
                 change = "improved" if rt > rb else ("worse" if rt < rb else "tied")
             tally[change] += 1
             rows.append({"task": key, "alone": f"{b['passes']}/{b['runs']}", "tools": f"{t['passes']}/{t['runs']}",
                          "change": change, "overflows": b.get("context_overflows", 0) + t.get("context_overflows", 0),
-                         "infra_errors": b["infra_errors"] + t["infra_errors"]})
+                         "infra_errors": b["infra_errors"] + t["infra_errors"], "no_data_reason": reason})
         runs = {arm: [sum(report[k][arm]["passes"] for k in report if arm in report[k]),
                       sum(report[k][arm]["runs"] for k in report if arm in report[k])] for arm in ("base", "tools")}
         out.append({"set": name, "title": title, "role": role, "note": note, "tasks": rows, "by_task": tally,
