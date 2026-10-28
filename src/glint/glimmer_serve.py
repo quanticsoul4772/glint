@@ -56,9 +56,51 @@ def serve():  # pragma: no cover  (runs only inside the Modal GPU container)
     subprocess.Popen(cmd, env=os.environ | {"VLLM_CACHE_ROOT": "/root/.cache/vllm/v031"})
 
 
+POOL_WAIT_WARN_S = 30.0  # a request that waited longer than this for a connection is reported
+# httpcore trace events that mean the hop has a connection: a new one starts connecting, or a kept-alive one starts
+# sending (whichever comes first)
+_ON_CONNECTION = ("connection.connect_tcp.started", "http11.send_request_headers.started",
+                  "http2.send_request_headers.started")
+_ON_RESPONSE = ("http11.receive_response_headers.complete", "http2.receive_response_headers.complete")
+
+
 def _stamp(request) -> None:
-    """httpx request hook: when this hop was sent (response.elapsed is unreadable before the body is read)."""
+    """httpx request hook: when this hop was issued (response.elapsed is unreadable before the body is read), and a
+    httpcore trace that records when the hop got a connection and when its response headers arrived. The trace only
+    reads the clock, so it cannot fail the call."""
+    marks: dict[str, float] = {}
+
+    def trace(event: str, info: dict) -> None:
+        if event in _ON_CONNECTION:
+            marks.setdefault("connected", time.monotonic())
+        elif event in _ON_RESPONSE:
+            marks["answered"] = time.monotonic()
+
     request.extensions["glint_sent"] = time.monotonic()
+    request.extensions["glint_marks"] = marks
+    request.extensions["trace"] = trace
+
+
+def _report_pool_wait(response) -> None:
+    """httpx response hook: a hop that waited over POOL_WAIT_WARN_S for a free connection in the shared pool is
+    printed loudly with its queue wait and its server time, so queueing is told apart from a slow server
+    (2026-10-28, banking-test: a call logged as 382 s was mostly queueing). It reads only what `_stamp` stored, and
+    a failure here is printed, never raised into the call (a hook reading `response.elapsed` once broke calls)."""
+    try:
+        req = response.request
+        sent, marks = req.extensions.get("glint_sent"), req.extensions.get("glint_marks") or {}
+        if sent is None or "connected" not in marks:
+            return
+        wait = marks["connected"] - sent
+        if wait <= POOL_WAIT_WARN_S:
+            return
+        server = marks.get("answered", time.monotonic()) - marks["connected"]
+        print(f"[serve {time.strftime('%H:%M:%S')}] POOL WAIT {wait:.1f} s on {req.method} {req.url.host}"
+              f"{req.url.path}: queued for a connection (pool full) before it was sent; server time {server:.1f} s",
+              file=sys.stderr, flush=True)
+    except Exception as e:  # noqa: BLE001  (a logging bug must not fail a model call; it is printed instead)
+        print(f"[serve {time.strftime('%H:%M:%S')}] WARNING: the pool-wait log failed: {type(e).__name__}: {e}",
+              file=sys.stderr, flush=True)
 
 
 def _report_unfollowed(response) -> None:
@@ -76,7 +118,8 @@ def follow_modal_redirects() -> None:
     with a 303 to a result URL; τ² installs its own httpx client on import (tau2.utils.llm_utils, connection limits),
     and httpx clients do not follow redirects by default. So every Glimmer request over 150 s failed with
     "Error code: 303" (2026-10-28, banking-test: tasks 020, 022, 029). τ²'s client and its limits are kept; it now
-    follows redirects, and a redirect it still cannot follow is reported."""
+    follows redirects, a redirect it still cannot follow is reported, and so is a long wait for a pooled connection
+    (`_report_pool_wait`)."""
     import litellm
     import tau2.utils.llm_utils  # noqa: F401  (installs τ²'s client first, so it is the one changed here)
 
@@ -87,7 +130,24 @@ def follow_modal_redirects() -> None:
     hooks = litellm.client_session.event_hooks
     if _report_unfollowed not in hooks["response"]:
         litellm.client_session.event_hooks = {"request": [*hooks["request"], _stamp],
-                                              "response": [*hooks["response"], _report_unfollowed]}
+                                              "response": [*hooks["response"], _report_unfollowed, _report_pool_wait]}
+
+
+def use_connections(connections: int) -> None:
+    """Replace τ²'s shared LiteLLM clients (sync and async; 10 connections, 5 kept alive) with ones of `connections`
+    connections, all kept alive, set up as `follow_modal_redirects` sets τ²'s. τ² runs up to `max_concurrency`
+    simulations, plus their user-simulator calls, on the one client, so a smaller pool queues requests silently.
+    Call before any model call. The event hooks are sync functions, so as before only the sync client (the one τ²'s
+    `completion` uses) carries them."""
+    import httpx
+    import litellm
+    import tau2.utils.llm_utils  # noqa: F401  (τ² installs its clients on import; replace them only after)
+
+    limits = httpx.Limits(max_keepalive_connections=connections, max_connections=connections)
+    litellm.client_session = httpx.Client(limits=limits)
+    litellm.aclient_session = httpx.AsyncClient(limits=limits)
+    follow_modal_redirects()
+    say(f"LiteLLM's shared HTTP clients replaced: {connections} connections (τ²'s own: 10)")
 
 
 def litellm_args(url: str, token_id: str, token_secret: str, strength: str = "medium") -> dict:
@@ -177,6 +237,9 @@ STAGE_MARKERS = ("version ", "Resolved architecture", "Loading model", "Loading 
                  "torch.compile", "Compiling", "compile range", "Capturing CUDA graph", "Graph capturing finished",
                  "KV cache", "Maximum concurrency", "init engine", "Starting vLLM", "Application startup complete",
                  "ERROR", "Error:", "Traceback", "Killed", "OutOfMemory", "out of memory")
+# vLLM's periodic stats line (every 10 s while it serves: "Engine 000: Avg prompt throughput: ... GPU KV cache usage"),
+# which "KV cache" above would echo: it is counted and kept in `lines`, not echoed, and summarized when the watch ends
+PERIODIC_MARKERS = ("Avg prompt throughput", "Avg generation throughput", "SpecDecoding metrics")
 
 
 class LogWatch:
@@ -195,6 +258,7 @@ class LogWatch:
         self.history: list[str] = []  # kept for callers; -f streams only new lines, nothing is replayed
         self.lines: list[str] = []
         self.restarts = 0
+        self.suppressed, self.last_periodic = 0, None  # periodic stats lines not echoed (see PERIODIC_MARKERS)
         self._seen: set[str] = set()
         self._buf = self.lines
         self._cmd = [modal_cli, "app", "logs", app_name, "-f", "--timestamps", "--show-container-id"]
@@ -237,8 +301,18 @@ class LogWatch:
             return
         self._seen.add(line)
         self._buf.append(line)
+        if self._periodic(line):
+            self.suppressed += 1
+            self.last_periodic = line.strip()
+            return
         if any(m in line for m in STAGE_MARKERS + FAILURE_MARKERS):
             say(f"[vllm] {line.strip()[:240]}")
+
+    @staticmethod
+    def _periodic(line: str) -> bool:
+        """vLLM's periodic stats line, unless it also carries a failure, an error or a warning (those are echoed)."""
+        return (any(m in line for m in PERIODIC_MARKERS)
+                and not any(m in line for m in FAILURE_MARKERS + ("ERROR", "WARNING", "Error:", "Traceback")))
 
     def failure(self) -> str | None:
         """The crash as its root cause: the last exception line before the first failure marker (for example
@@ -264,6 +338,7 @@ class LogWatch:
         return self
 
     def __exit__(self, *exc):
+        say(f"[vllm] {self.suppressed} periodic stats lines not echoed; last: {self.last_periodic or 'none'}")
         with self._lock:
             self._closed = True
             proc = self._proc

@@ -29,6 +29,13 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 - `banking-other`: the other 10 banking tasks of `banking` (not tuned on), k=2.
 - `gate-banking`: activation-gate training data, no-tools arm only: the 12 banking tasks x 25 trials, concurrency 12.
 
+Optional set key `connections`: the size of LiteLLM's shared HTTP connection pool. When present, `generate()`
+replaces τ²'s shared clients (sync and async; 10 connections) with ones of that size before any call, still following
+Modal's redirects and carrying the logging hooks (`glimmer_serve.use_connections`). τ² runs `concurrency` simulations,
+plus the user simulator's calls, on that one pool, so a smaller pool queues requests silently (a POOL WAIT line in the
+log reports it). Sets without the key keep τ²'s client unchanged, so their runs stay comparable; no existing set has
+it.
+
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
@@ -281,6 +288,8 @@ def generate(cfg: dict) -> None:
                if not (data / f"{arm}-{d}.json").exists()]
     if not pending:
         return
+    if cfg.get("connections"):  # before any call: the pool size every call of the run shares (see the docstring)
+        glimmer_serve.use_connections(cfg["connections"])
     glim = Meter(Caps(meta_usd=cfg["glimmer_usd"], gpu_usd=0.0), phase=f"{cfg['save']}-glimmer-{stamp}")
     meta = Meter(Caps(meta_usd=cfg["meta_usd"], gpu_usd=0.0), phase=f"{cfg['save']}-meta-{stamp}")
     gpu = Meter(Caps(meta_usd=0.0, gpu_usd=cfg["gpu_usd"]), phase=f"{cfg['save']}-gpu-{stamp}")

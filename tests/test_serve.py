@@ -391,13 +391,15 @@ def test_a_resumed_session_at_or_near_its_cap_is_refused_before_it_starts(monkey
 @pytest.fixture
 def modal_mock():
     """A stand-in for Modal's web endpoint: each hop answers 303 to a result URL (with or without Location) until the
-    call is `hops` deep, then the completion. Yields (base url, settings); restores litellm's client afterwards."""
+    call is `hops` deep, then the completion after `delay` s. Yields (base url, settings); restores litellm's client
+    afterwards."""
     import threading
+    import time
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     import litellm
 
-    settings = {"hops": 2, "location": True, "seen": 0}
+    settings = {"hops": 2, "location": True, "seen": 0, "delay": 0.0}
     body = json.dumps({"id": "x", "object": "chat.completion", "created": 0, "model": "m", "choices": [
         {"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "hi"}}],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
@@ -415,6 +417,7 @@ def modal_mock():
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
+            time.sleep(settings["delay"])  # the server's own time on the completion
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -495,3 +498,102 @@ def test_a_missing_shared_client_fails_loudly(monkeypatch):
     monkeypatch.setattr(litellm, "client_session", None)
     with pytest.raises(RuntimeError, match="no shared HTTP client"):
         glimmer_serve.follow_modal_redirects()
+
+
+def test_a_request_queued_for_a_connection_is_reported_with_its_wait_and_server_time(modal_mock, monkeypatch, capsys):
+    # 2026-10-28, banking-test: a call logged as 382 s was mostly waiting for one of τ²'s 10 pooled connections, and
+    # nothing told the wait from the server's time. A pool of 1 and two concurrent calls of 1 s each: the second waits
+    # about 1 s for the connection, then the server takes about 1 s
+    import re
+    import threading
+
+    import httpx
+    import litellm
+
+    url, settings = modal_mock
+    settings["hops"], settings["delay"] = 0, 1.0
+    litellm.client_session = httpx.Client(limits=httpx.Limits(max_keepalive_connections=1, max_connections=1))
+    monkeypatch.setattr(glimmer_serve, "POOL_WAIT_WARN_S", 0.5)
+    replies = []
+    calls = [threading.Thread(target=lambda: replies.append(_complete(url))) for _ in range(2)]
+    for t in calls:
+        t.start()
+    for t in calls:
+        t.join(30)
+    assert [r.choices[0].message.content for r in replies] == ["hi", "hi"]  # the logging never touched the calls
+    err = capsys.readouterr().err
+    waits = re.findall(r"POOL WAIT ([\d.]+) s on POST 127\.0\.0\.1/v1/chat/completions: queued for a connection "
+                       r"\(pool full\) before it was sent; server time ([\d.]+) s", err)
+    assert len(waits) == 1, err  # the first call got the connection at once and is not reported
+    wait, server = map(float, waits[0])
+    assert 0.6 < wait < 5 and 0.9 < server < 5, (wait, server)
+    assert "pool-wait log failed" not in err
+
+
+def test_the_pool_wait_log_never_raises_into_the_call(capsys):
+    # a response hook that raised (reading response.elapsed) once broke every call: this one prints instead
+    import types
+
+    import httpx
+
+    def answer(request):
+        return httpx.Response(200, json={})
+
+    # a request the trace hook never saw (no _stamp before it): nothing to report, nothing raised
+    with httpx.Client(transport=httpx.MockTransport(answer),
+                      event_hooks={"response": [glimmer_serve._report_pool_wait]}) as client:
+        assert client.get("http://x/v1").status_code == 200
+    assert capsys.readouterr().err == ""
+    # marks that are not numbers (any bug in the hook): printed as a warning, not raised
+    broken = types.SimpleNamespace(request=types.SimpleNamespace(
+        extensions={"glint_sent": 0.0, "glint_marks": {"connected": "late"}}))
+    glimmer_serve._report_pool_wait(broken)
+    assert "WARNING: the pool-wait log failed: TypeError" in capsys.readouterr().err
+
+
+def _watch():
+    import threading
+
+    from glint.glimmer_serve import LogWatch
+
+    watch = LogWatch.__new__(LogWatch)
+    watch.history, watch.lines, watch._seen, watch.restarts = [], [], set(), 0
+    watch._buf, watch._lock, watch._closed, watch._proc = watch.lines, threading.Lock(), False, None
+    watch.suppressed, watch.last_periodic = 0, None
+    return watch
+
+
+STATS = ("2026-10-28T14:02:{:02d} ta-01 (APIServer pid=1) INFO [loggers.py:123] Engine 000: Avg prompt throughput: "
+         "{}.0 tokens/s, Avg generation throughput: 210.3 tokens/s, Running: 9 reqs, Waiting: 0 reqs, GPU KV cache "
+         "usage: 12.3%, Prefix cache hit rate: 85.1%")
+
+
+def test_vllm_stats_lines_are_counted_not_echoed_and_other_lines_still_print(capsys):
+    watch = _watch()
+    error = "2026-10-28T14:02:05 ta-01 (APIServer pid=1) ERROR [serving.py:88] Error in chat completion: bad request"
+    kv = "2026-10-28T13:50:00 ta-01 (EngineCore pid=25) INFO GPU KV cache size: 950,814 tokens"
+    for line in (kv, STATS.format(0, 1000), error, STATS.format(10, 1200), STATS.format(20, 1300)):
+        watch._take(line)
+    err = capsys.readouterr().err
+    assert "throughput" not in err  # every stats line was held back
+    assert "Error in chat completion" in err and "GPU KV cache size" in err  # the rest still prints
+    assert watch.suppressed == 3 and watch.last_periodic == STATS.format(20, 1300)
+    assert len(watch.lines) == 5  # every line is kept for crash detection and dump()
+    # a stats line that also carries an error is echoed
+    watch._take(STATS.format(30, 9).replace("INFO", "ERROR"))
+    assert "ERROR [loggers.py:123]" in capsys.readouterr().err and watch.suppressed == 3
+    watch.__exit__(None, None, None)
+    assert f"3 periodic stats lines not echoed; last: {STATS.format(20, 1300)}" in capsys.readouterr().err
+
+
+def test_crash_detection_reads_through_the_held_back_stats_lines(capsys):
+    watch = _watch()
+    for i, line in enumerate(["INFO Loading weights", STATS.format(1, 1000),
+                              "(EngineCore pid=25) RuntimeError: CUDA error: an illegal memory access",
+                              STATS.format(2, 0),
+                              "RuntimeError: Engine core initialization failed. See root cause above."]):
+        watch._take(f"2026-10-28T14:03:{i:02d} ta-01 {line}")
+    assert watch.failure() == "RuntimeError: CUDA error: an illegal memory access"
+    assert len(watch.lines) == 5 and watch.suppressed == 2  # the held-back lines are still in the log
+    err = capsys.readouterr().err
+    assert "Engine core initialization failed" in err and "throughput" not in err
