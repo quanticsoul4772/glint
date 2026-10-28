@@ -23,3 +23,6 @@ meter/*.jsonl
 coverage.json
 .coverage
 !tests/data/
+
+# the glint-bank plugin bundles τ² banking data (MIT); it is source, not run output
+!plugins/glint-bank/data/
