@@ -74,6 +74,12 @@ def meta_cost(model: str, prompt_tokens: int, cached_tokens: int, completion_tok
     return (uncached * p["input"] + cached_tokens * p["cached"] + completion_tokens * p["output"]) / 1e6
 
 
+# One lock for every Meter's ledger appends. Each Meter locks only its own totals, and a run has several (Glimmer,
+# Meta, GPU) appending to the same ledger from many threads: on 2026-10-28 (banking-test) two appends interleaved and
+# left a half record on its own line, which then stops every later Meter from starting.
+_LEDGER_LOCK = threading.Lock()
+
+
 class Meter:
     """Thread-safe running totals backed by an append-only ledger. `check()` raises once a cap is hit."""
 
@@ -101,8 +107,9 @@ class Meter:
 
     def _append(self, rec: dict) -> None:
         rec |= {"ts": time.time(), "phase": self.phase}
-        with self.ledger.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec) + "\n")
+        line = json.dumps(rec) + "\n"
+        with _LEDGER_LOCK, self.ledger.open("a", encoding="utf-8") as fh:
+            fh.write(line)  # one write per record, under the lock every Meter shares
 
     def record_meta(self, model: str, prompt_tokens: int, cached_tokens: int, completion_tokens: int,
                     reasoning_tokens: int = 0, tag: str = "") -> float:
