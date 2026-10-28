@@ -1,8 +1,212 @@
 [
  {
-  "set": "heldout",
-  "title": "Retail and airline, held-out tasks",
+  "set": "heldout2",
+  "title": "Retail and airline, held-out tasks (current tools)",
   "role": "held-out",
+  "note": "A fresh random draw of 10 retail and 10 airline tasks, excluding the design tasks, the whole failure inventory and the first draw; no tool change came from these tasks. Run on the current tools. By task: 2 improved, 14 tied, 4 worse (sign test p = 0.69); on retail 0 improved and 3 worse. 2 of the 5 retail failures with the tools were caused by find_variants matching option names as exact strings. k=4. Glimmer on Modal.",
+  "tasks": [
+   {
+    "task": "airline-10",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-15",
+    "alone": "3/4",
+    "tools": "4/4",
+    "change": "improved",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-17",
+    "alone": "3/4",
+    "tools": "3/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-20",
+    "alone": "3/4",
+    "tools": "4/4",
+    "change": "improved",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-28",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-3",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-38",
+    "alone": "4/4",
+    "tools": "3/4",
+    "change": "worse",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-42",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-49",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "airline-9",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-0",
+    "alone": "4/4",
+    "tools": "2/4",
+    "change": "worse",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-14",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-31",
+    "alone": "4/4",
+    "tools": "3/4",
+    "change": "worse",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-43",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-50",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-6",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-7",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-83",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-84",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "retail-99",
+    "alone": "3/4",
+    "tools": "2/4",
+    "change": "worse",
+    "overflows": 0,
+    "infra_errors": 0,
+    "no_data_reason": null
+   }
+  ],
+  "by_task": {
+   "improved": 2,
+   "tied": 14,
+   "worse": 4,
+   "no data": 0
+  },
+  "runs": {
+   "alone": [
+    76,
+    80
+   ],
+   "tools": [
+    73,
+    80
+   ]
+  }
+ },
+ {
+  "set": "heldout",
+  "title": "Retail and airline, first held-out draw (now design data)",
+  "role": "design",
   "note": "Tasks drawn at random, excluding the tasks the tools were built from. The draw missed part of the failure inventory, so retail task 21 (already in it) is included. The two arms span four code commits (resumed runs). The retail and airline tools were changed afterwards from these tasks' failures (commits aa1dadc and ce7b242), so this draw is now design data and does not measure the shipped tools. Retail k=4, airline k=2. Glimmer on DeepInfra.",
   "tasks": [
    {

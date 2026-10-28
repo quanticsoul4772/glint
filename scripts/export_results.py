@@ -17,7 +17,13 @@ import tools_ab  # after the log setup above
 
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "results.json"
 SETS = [  # (set, Modal backend, title, role, note)
-    ("heldout", False, "Retail and airline, held-out tasks", "held-out",
+    ("heldout2", True, "Retail and airline, held-out tasks (current tools)", "held-out",
+     ("A fresh random draw of 10 retail and 10 airline tasks, excluding the design tasks, the whole failure "
+      "inventory and the first draw; no tool change came from these tasks. Run on the current tools. By task: 2 "
+      "improved, 14 tied, 4 worse (sign test p = 0.69); on retail 0 improved and 3 worse. 2 of the 5 retail "
+      "failures with the tools were caused by find_variants matching option names as exact strings. k=4. Glimmer "
+      "on Modal.")),
+    ("heldout", False, "Retail and airline, first held-out draw (now design data)", "design",
      ("Tasks drawn at random, excluding the tasks the tools were built from. The draw missed part of the failure "
       "inventory, so retail task 21 (already in it) is included. The two arms span four code commits (resumed runs). "
       "The retail and airline tools were changed afterwards from these tasks' failures (commits aa1dadc and "
