@@ -314,3 +314,29 @@ def test_a_response_with_missing_token_counts_records_zero_not_one(tmp_path):
     (rec,) = [json.loads(line) for line in (tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
     assert (rec["prompt"], rec["cached"], rec["completion"], rec["reasoning"]) == (1000, 0, 0, 0)
     assert rec["usd"] == pytest.approx(meta_cost("muse-spark-1.3", 1000, 0, 0))
+
+
+def test_concurrent_meters_never_interleave_ledger_records(tmp_path):
+    # 2026-10-28: three meters of one run appended to one ledger from many threads, and two records interleaved
+    import json
+    import threading
+
+    from glint.meter import Caps, Meter
+
+    ledger = tmp_path / "ledger.jsonl"
+    meters = [Meter(Caps(meta_usd=1e9, gpu_usd=1e9), ledger=ledger, phase=f"p{i}") for i in range(3)]
+    pad = "x" * 4000  # long records make a torn write likely without the shared lock
+
+    def hammer(m):
+        for _ in range(300):
+            m.record_meta("muse-spark-1.3-contributor", 10, 0, 10, tag=pad)
+
+    threads = [threading.Thread(target=hammer, args=(m,)) for m in meters for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 3 * 4 * 300
+    assert all(json.loads(line)["tag"] == pad for line in lines)  # every line is one whole record
+    Meter(Caps(meta_usd=1e9, gpu_usd=1e9), ledger=ledger, phase="p0")  # and a new meter reads it back
