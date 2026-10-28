@@ -117,6 +117,7 @@ def live_start(body: StartLive):
             raise HTTPException(429, f"live mode is paused: {e}. Replay mode still works.") from e
         session = _new_session(body.task_id).start()
         _sessions[session.id] = session
+        budget.started(session)
     return {"id": session.id}
 
 

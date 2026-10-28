@@ -25,9 +25,10 @@ SPARK = "openai/muse-spark-1.3-contributor"
 DOMAIN = "banking_knowledge"
 META_CAP_USD = 1.0  # per desk process; a live pair costs a few cents of Meta credit
 CHARGE_EVERY_S = 60.0  # a running pair's GPU time is written to the ledger this often, not only when it ends
-PAIR_MAX_S = 900.0  # a live pair is stopped after 15 minutes (τ²'s own timeout and the halt below)
-# Set to stop the running pair: its next Glimmer call raises. One pair runs at a time, so one flag serves it
-halt = threading.Event()
+PAIR_MAX_S = 900.0  # a live pair is stopped after 15 minutes (τ²'s own timeout and the session's halt)
+# The running pair (one at a time): `router` refuses Glimmer calls once its halt is set. Each pair has its own halt,
+# so a late tick of a finished pair cannot stop the next one
+_active: LiveSession | None = None
 
 
 @dataclass
@@ -57,8 +58,10 @@ class LiveSession:
         self.max_seconds = max_seconds
         self.charged_s = 0.0
         self.stop_reason: str | None = None
+        self.halt = threading.Event()
         self._ended = threading.Event()
         self._view_lock = threading.Lock()
+        self._charge_lock = threading.Lock()
         self.started = time.time()
         self.ended: float | None = None
         self.waking = wake is not None
@@ -71,22 +74,36 @@ class LiveSession:
             self._runners[name] = run
 
     def start(self) -> LiveSession:
-        halt.clear()
+        global _active
+        _active = self
         threading.Thread(target=self._control, daemon=True).start()
         threading.Thread(target=self._meter_loop, daemon=True).start()
         return self
 
     def _meter_loop(self) -> None:
         while not self._ended.wait(CHARGE_EVERY_S):
-            self.tick()
+            try:
+                self.tick()
+            # Metering must not die quietly: a pair that cannot be charged is stopped (fail closed)
+            except Exception as e:  # noqa: BLE001
+                traceback.print_exc()
+                self.stop(f"GPU metering failed ({type(e).__name__}: {e})")
+                return
+
+    def take_uncharged(self, until: float) -> float:
+        """The wall time from the last charge up to `until` (seconds since start), marked as charged. Locked, so a
+        tick and the final record never charge the same seconds twice."""
+        with self._charge_lock:
+            seconds = max(0.0, until - self.charged_s)
+            self.charged_s = max(self.charged_s, until)
+            return seconds
 
     def tick(self) -> None:
         """Charge the GPU time since the last tick; stop the pair at the daily cap or past max_seconds."""
         elapsed = time.time() - self.started
         if self._charge is not None:
-            seconds, self.charged_s = elapsed - self.charged_s, elapsed
             try:
-                self._charge(self, seconds)
+                self._charge(self, self.take_uncharged(elapsed))
             except BudgetExceeded as e:
                 self.stop(f"the daily GPU cap is reached ({e})")
         if elapsed > self.max_seconds:
@@ -96,7 +113,7 @@ class LiveSession:
         if self.stop_reason is None:
             self.stop_reason = reason
             print(f"desk: stopping live run {self.id}: {reason}", flush=True)
-        halt.set()
+        self.halt.set()
 
     def _control(self) -> None:
         try:
@@ -145,8 +162,14 @@ class LiveSession:
                 sim = pane.result.model_dump()
                 view, overrules = {"outcome": outcome(sim)}, {}
                 if name == "alone" and self.label is not None:
-                    overrules = self.label(sim)
-                    view["overruled_writes"] = len(overrules)
+                    # A labeling failure is shown in the pane (and logged in full), not turned into a 500 on every
+                    # poll: the run itself and its outcome are still valid
+                    try:
+                        overrules = self.label(sim)
+                        view["overruled_writes"] = len(overrules)
+                    except Exception as e:  # noqa: BLE001
+                        traceback.print_exc()
+                        view["label_error"] = f"the overrule marks could not be computed: {type(e).__name__}: {e}"
                 view["events"] = timeline(sim["messages"], overrules)
                 pane.view = view
             return pane.view
@@ -197,11 +220,25 @@ class DeskBudget:
                      phase=f"desk-gpu-{time.strftime('%Y%m%d')}")
 
     def pairs_today(self) -> int:
+        """Pairs started today: counted from their start rows, so a pair whose process dies before it ends counts."""
         if not self.log_path or not os.path.exists(self.log_path):
             return 0
         today = time.strftime("%Y-%m-%d")
         with open(self.log_path, encoding="utf-8") as fh:
-            return sum(1 for line in fh if f'"day": "{today}"' in line)
+            return sum(1 for line in fh if f'"day": "{today}"' in line and '"event": "start"' in line)
+
+    def _log(self, row: dict) -> None:
+        import json
+
+        Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(self.log_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+
+    def started(self, session: LiveSession) -> None:
+        """Log the pair's start (it counts against the daily pair limit from now on)."""
+        if self.log_path:
+            self._log({"event": "start", "day": time.strftime("%Y-%m-%d"), "ts": time.time(),
+                       "session": session.id, "task_id": session.task_id})
 
     def check(self) -> None:
         self._meter().check_gpu()
@@ -217,18 +254,15 @@ class DeskBudget:
         meter.check_gpu()
 
     def record(self, session: LiveSession) -> None:
-        import json
-
         from glint.glimmer_serve import GPU, GPU_USD_PER_HOUR
 
         wall = (session.ended or time.time()) - session.started
-        rest = wall - session.charged_s + SCALEDOWN_S
-        session.charged_s = wall
+        rest = session.take_uncharged(wall) + SCALEDOWN_S
         self._meter().record_gpu(rest, GPU_USD_PER_HOUR, GPU, tag=f"desk {session.id} {session.task_id}")
         if self.log_path:
             seconds = wall + SCALEDOWN_S
             outcomes = session.outcomes()
-            row = {"day": time.strftime("%Y-%m-%d"), "ts": time.time(), "session": session.id,
+            row = {"event": "end", "day": time.strftime("%Y-%m-%d"), "ts": time.time(), "session": session.id,
                    "task_id": session.task_id, "gpu_seconds": round(seconds),
                    "gpu_usd": round(seconds * GPU_USD_PER_HOUR / 3600, 4), "wake_error": session.wake_error,
                    "stopped": session.stop_reason,
@@ -236,9 +270,7 @@ class DeskBudget:
                    **{f"{n}_error": p.error for n, p in session.panes.items()},
                    **{f"{n}_seconds": round((p.finished or time.time()) - p.started)
                       for n, p in session.panes.items()}}
-            Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.log_path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row) + "\n")
+            self._log(row)
 
 
 def tau2_builder(task, glimmer_args: dict, glimmer_model: str, user_args: dict, seed: int):
@@ -287,11 +319,12 @@ def tau2_labeler(task):
 
 
 def router(base, glimmer):
-    """Send Glimmer calls to `glimmer` (refused once `halt` is set) and every other model to `base`."""
+    """Send Glimmer calls to `glimmer` (refused once the running pair's halt is set) and every other model to
+    `base`."""
     def route(*args, **kwargs):
         if "Muse-Glimmer" not in kwargs.get("model", ""):
             return base(*args, **kwargs)
-        if halt.is_set():
+        if _active is not None and _active.halt.is_set():
             raise BudgetExceeded("the live run was stopped (daily GPU cap or time limit)")
         return glimmer(*args, **kwargs)
 

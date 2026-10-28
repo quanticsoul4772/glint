@@ -11,7 +11,8 @@
     "tools": "1/2",
     "change": "worse",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-11",
@@ -19,7 +20,8 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-21",
@@ -27,7 +29,8 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-23",
@@ -35,7 +38,8 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-27",
@@ -43,7 +47,8 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-33",
@@ -51,7 +56,8 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-34",
@@ -59,7 +65,8 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-41",
@@ -67,7 +74,8 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-43",
@@ -75,7 +83,8 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "airline-46",
@@ -83,7 +92,8 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-110",
@@ -91,7 +101,8 @@
     "tools": "1/4",
     "change": "worse",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-16",
@@ -99,7 +110,8 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-19",
@@ -107,7 +119,8 @@
     "tools": "2/4",
     "change": "worse",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-21",
@@ -115,7 +128,8 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-57",
@@ -123,7 +137,8 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-63",
@@ -131,7 +146,8 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-66",
@@ -139,7 +155,8 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-67",
@@ -147,7 +164,8 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-92",
@@ -155,7 +173,8 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-95",
@@ -163,7 +182,8 @@
     "tools": "3/4",
     "change": "improved",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    }
   ],
   "by_task": {
@@ -195,7 +215,8 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_037",
@@ -203,7 +224,8 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_039",
@@ -211,7 +233,8 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_040",
@@ -219,7 +242,8 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_041",
@@ -227,7 +251,8 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_050",
@@ -235,7 +260,8 @@
     "tools": "2/2",
     "change": "improved",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_051",
@@ -243,7 +269,8 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_052",
@@ -251,7 +278,8 @@
     "tools": "1/2",
     "change": "improved",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_053",
@@ -259,7 +287,8 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_081",
@@ -267,7 +296,8 @@
     "tools": "0/2",
     "change": "no data",
     "overflows": 4,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": "every run overflowed the context"
    }
   ],
   "by_task": {
@@ -299,7 +329,8 @@
     "tools": "2/4",
     "change": "improved",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "banking_knowledge-task_054",
@@ -307,7 +338,8 @@
     "tools": "1/4",
     "change": "improved",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    }
   ],
   "by_task": {
@@ -339,7 +371,8 @@
     "tools": "1/8",
     "change": "worse",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-20",
@@ -347,7 +380,8 @@
     "tools": "8/8",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 1
+    "infra_errors": 1,
+    "no_data_reason": null
    },
    {
     "task": "retail-82",
@@ -355,7 +389,8 @@
     "tools": "8/8",
     "change": "improved",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    },
    {
     "task": "retail-93",
@@ -363,7 +398,8 @@
     "tools": "6/8",
     "change": "tied",
     "overflows": 0,
-    "infra_errors": 0
+    "infra_errors": 0,
+    "no_data_reason": null
    }
   ],
   "by_task": {

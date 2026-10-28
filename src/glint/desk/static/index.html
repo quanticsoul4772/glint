@@ -228,7 +228,7 @@ async function showResults() {
     for (const r of s.tasks) {
       const extra = r.overflows ? ` (${r.overflows} context overflow${r.overflows > 1 ? "s" : ""})` : "";
       html += `<tr><td>${esc(r.task)}${esc(extra)}</td><td>${esc(r.alone)}</td><td>${esc(r.tools)}</td>
-        <td class="${esc(r.change)}">${esc(r.change === "no data" ? "no data (every run overflowed)" : r.change)}</td></tr>`;
+        <td class="${esc(r.change)}">${esc(r.change === "no data" ? `no data (${r.no_data_reason})` : r.change)}</td></tr>`;
     }
     html += `</table></div>`;
   }
