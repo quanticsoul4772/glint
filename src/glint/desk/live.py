@@ -16,6 +16,7 @@ import time
 import traceback
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from glint.desk.events import outcome, timeline
 from glint.meter import BudgetExceeded
@@ -23,6 +24,10 @@ from glint.meter import BudgetExceeded
 SPARK = "openai/muse-spark-1.3-contributor"
 DOMAIN = "banking_knowledge"
 META_CAP_USD = 1.0  # per desk process; a live pair costs a few cents of Meta credit
+CHARGE_EVERY_S = 60.0  # a running pair's GPU time is written to the ledger this often, not only when it ends
+PAIR_MAX_S = 900.0  # a live pair is stopped after 15 minutes (τ²'s own timeout and the halt below)
+# Set to stop the running pair: its next Glimmer call raises. One pair runs at a time, so one flag serves it
+halt = threading.Event()
 
 
 @dataclass
@@ -34,17 +39,26 @@ class Pane:
     error: str | None = None
     started: float = field(default_factory=time.time)
     finished: float | None = None
+    view: dict | None = None  # outcome and overrule marks, computed once when the pane ends
 
 
 class LiveSession:
     """One live pair. `build(pane_name)` returns (orchestrator, run) where run(orchestrator) returns the finished
     τ² SimulationRun; `label(sim_dict)` returns {message_index: decision} for the overrule marks. `wake()` blocks
-    until the Glimmer endpoint is ready (raising if it cannot start); `on_done(session)` runs once both panes end."""
+    until the Glimmer endpoint is ready (raising if it cannot start); `on_done(session)` runs once both panes end.
+    `charge(session, seconds)` is called every CHARGE_EVERY_S with the GPU time since the last call, and raises
+    BudgetExceeded once the day's cap is reached; that, or running past `max_seconds`, stops the pair."""
 
-    def __init__(self, task_id: str, build, label=None, wake=None, on_done=None):
+    def __init__(self, task_id: str, build, label=None, wake=None, on_done=None, charge=None,
+                 max_seconds: float = PAIR_MAX_S):
         self.id = uuid.uuid4().hex[:12]
         self.task_id = task_id
-        self.label, self._wake, self._on_done = label, wake, on_done
+        self.label, self._wake, self._on_done, self._charge = label, wake, on_done, charge
+        self.max_seconds = max_seconds
+        self.charged_s = 0.0
+        self.stop_reason: str | None = None
+        self._ended = threading.Event()
+        self._view_lock = threading.Lock()
         self.started = time.time()
         self.ended: float | None = None
         self.waking = wake is not None
@@ -57,8 +71,32 @@ class LiveSession:
             self._runners[name] = run
 
     def start(self) -> LiveSession:
+        halt.clear()
         threading.Thread(target=self._control, daemon=True).start()
+        threading.Thread(target=self._meter_loop, daemon=True).start()
         return self
+
+    def _meter_loop(self) -> None:
+        while not self._ended.wait(CHARGE_EVERY_S):
+            self.tick()
+
+    def tick(self) -> None:
+        """Charge the GPU time since the last tick; stop the pair at the daily cap or past max_seconds."""
+        elapsed = time.time() - self.started
+        if self._charge is not None:
+            seconds, self.charged_s = elapsed - self.charged_s, elapsed
+            try:
+                self._charge(self, seconds)
+            except BudgetExceeded as e:
+                self.stop(f"the daily GPU cap is reached ({e})")
+        if elapsed > self.max_seconds:
+            self.stop(f"the live run passed its {self.max_seconds / 60:.0f}-minute limit")
+
+    def stop(self, reason: str) -> None:
+        if self.stop_reason is None:
+            self.stop_reason = reason
+            print(f"desk: stopping live run {self.id}: {reason}", flush=True)
+        halt.set()
 
     def _control(self) -> None:
         try:
@@ -81,6 +119,7 @@ class LiveSession:
                 pane.thread.join()
         finally:
             self.ended = time.time()
+            self._ended.set()
             if self._on_done is not None:
                 self._on_done(self)
 
@@ -99,22 +138,35 @@ class LiveSession:
     def done(self) -> bool:
         return self.ended is not None
 
-    def snapshot(self) -> dict:
-        out = {"id": self.id, "task_id": self.task_id, "done": self.done}
-        for name, pane in self.panes.items():
-            messages = [m.model_dump() for m in list(getattr(pane.orchestrator, "trajectory", []) or [])]
-            view = {"status": "error" if pane.error else ("done" if pane.finished else
-                                                           ("waking" if self.waking else "running")),
-                    "elapsed_s": round((pane.finished or time.time()) - pane.started), "error": pane.error}
-            overrules = {}
-            if pane.result is not None:
+    def _finished_view(self, name: str, pane: Pane) -> dict:
+        """The ended pane's outcome, overrule marks and events, computed once (labeling replays the run)."""
+        with self._view_lock:
+            if pane.view is None:
                 sim = pane.result.model_dump()
-                messages = sim["messages"]
-                view["outcome"] = outcome(sim)
+                view, overrules = {"outcome": outcome(sim)}, {}
                 if name == "alone" and self.label is not None:
                     overrules = self.label(sim)
                     view["overruled_writes"] = len(overrules)
-            view["events"] = timeline(messages, overrules)
+                view["events"] = timeline(sim["messages"], overrules)
+                pane.view = view
+            return pane.view
+
+    def outcomes(self) -> dict:
+        """Each pane's pass/fail (None if it has no result), without labeling: for the session log."""
+        return {name: outcome(p.result.model_dump())["passed"] if p.result is not None else None
+                for name, p in self.panes.items()}
+
+    def snapshot(self) -> dict:
+        out = {"id": self.id, "task_id": self.task_id, "done": self.done, "stopped": self.stop_reason}
+        for name, pane in self.panes.items():
+            view = {"status": "error" if pane.error else ("done" if pane.finished else
+                                                           ("waking" if self.waking else "running")),
+                    "elapsed_s": round((pane.finished or time.time()) - pane.started), "error": pane.error}
+            if pane.result is not None:
+                view |= self._finished_view(name, pane)
+            else:
+                messages = [m.model_dump() for m in list(getattr(pane.orchestrator, "trajectory", []) or [])]
+                view["events"] = timeline(messages, {})
             out[name] = view
         return out
 
@@ -125,9 +177,11 @@ SCALEDOWN_S = 120.0  # glimmer_serve's scaledown_window: the container stays up 
 class DeskBudget:
     """GPU and usage limits for live mode, persisted in the meter ledger so a restart cannot reset them.
 
-    A live pair keeps the Glimmer container up for its whole run plus the scale-down window, so each finished pair
-    records (wall time + SCALEDOWN_S) at the A100 rate: an upper bound, and double-counted if a batch session keeps
-    the container up at the same time. Starts are refused once the day's GPU cap or pair count is reached."""
+    A live pair keeps the Glimmer container up for its whole run plus the scale-down window, so a pair is charged
+    (wall time + SCALEDOWN_S) at the A100 rate: an upper bound, and double-counted if a batch session keeps the
+    container up at the same time. The wall time is charged as the pair runs (`charge`, every CHARGE_EVERY_S), so a
+    pair whose process dies is still mostly counted; `record` charges the rest and logs the pair. Starts are refused
+    once the day's GPU cap or pair count is reached, and a running pair is stopped at the cap."""
 
     def __init__(self, gpu_usd_per_day: float, pairs_per_day: int, ledger=None, log_path=None):
         from glint.meter import DEFAULT_LEDGER
@@ -154,21 +208,35 @@ class DeskBudget:
         if self.pairs_today() >= self.pairs_per_day:
             raise BudgetExceeded(f"the daily limit of {self.pairs_per_day} live runs is reached")
 
+    def charge(self, session: LiveSession, seconds: float) -> None:
+        """Write `seconds` of the pair's GPU time to the ledger; raise BudgetExceeded once the day's cap is reached."""
+        from glint.glimmer_serve import GPU, GPU_USD_PER_HOUR
+
+        meter = self._meter()
+        meter.record_gpu(seconds, GPU_USD_PER_HOUR, GPU, tag=f"desk {session.id} {session.task_id}")
+        meter.check_gpu()
+
     def record(self, session: LiveSession) -> None:
         import json
 
         from glint.glimmer_serve import GPU, GPU_USD_PER_HOUR
 
-        seconds = (session.ended or time.time()) - session.started + SCALEDOWN_S
-        usd = self._meter().record_gpu(seconds, GPU_USD_PER_HOUR, GPU, tag=f"desk {session.id} {session.task_id}")
+        wall = (session.ended or time.time()) - session.started
+        rest = wall - session.charged_s + SCALEDOWN_S
+        session.charged_s = wall
+        self._meter().record_gpu(rest, GPU_USD_PER_HOUR, GPU, tag=f"desk {session.id} {session.task_id}")
         if self.log_path:
-            snap = session.snapshot()
+            seconds = wall + SCALEDOWN_S
+            outcomes = session.outcomes()
             row = {"day": time.strftime("%Y-%m-%d"), "ts": time.time(), "session": session.id,
-                   "task_id": session.task_id, "gpu_seconds": round(seconds), "gpu_usd": round(usd, 4),
-                   "wake_error": session.wake_error,
-                   **{f"{n}_outcome": (snap[n].get("outcome") or {}).get("passed") for n in ("alone", "tools")},
-                   **{f"{n}_error": snap[n].get("error") for n in ("alone", "tools")},
-                   **{f"{n}_seconds": snap[n]["elapsed_s"] for n in ("alone", "tools")}}
+                   "task_id": session.task_id, "gpu_seconds": round(seconds),
+                   "gpu_usd": round(seconds * GPU_USD_PER_HOUR / 3600, 4), "wake_error": session.wake_error,
+                   "stopped": session.stop_reason,
+                   **{f"{n}_outcome": outcomes[n] for n in ("alone", "tools")},
+                   **{f"{n}_error": p.error for n, p in session.panes.items()},
+                   **{f"{n}_seconds": round((p.finished or time.time()) - p.started)
+                      for n, p in session.panes.items()}}
+            Path(self.log_path).parent.mkdir(parents=True, exist_ok=True)
             with open(self.log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row) + "\n")
 
@@ -199,7 +267,7 @@ def tau2_builder(task, glimmer_args: dict, glimmer_model: str, user_args: dict, 
                                     max_steps=config.effective_max_steps, max_errors=config.max_errors, seed=seed,
                                     solo_mode=False, simulation_id=str(uuid.uuid4()),
                                     validate_communication=config.enforce_communication_protocol,
-                                    timeout=config.timeout)
+                                    timeout=PAIR_MAX_S)
         return orchestrator, lambda o: run_simulation(o, env_kwargs=env_kwargs or None)
 
     return build
@@ -216,6 +284,18 @@ def tau2_labeler(task):
                 if d.label == "overruled" and d.executed}
 
     return label
+
+
+def router(base, glimmer):
+    """Send Glimmer calls to `glimmer` (refused once `halt` is set) and every other model to `base`."""
+    def route(*args, **kwargs):
+        if "Muse-Glimmer" not in kwargs.get("model", ""):
+            return base(*args, **kwargs)
+        if halt.is_set():
+            raise BudgetExceeded("the live run was stopped (daily GPU cap or time limit)")
+        return glimmer(*args, **kwargs)
+
+    return route
 
 
 _configured = {}
@@ -238,10 +318,7 @@ def configure() -> dict:
     litellm.callbacks = [litellm_callback((meta, ("muse-spark",)))]
     base, glimmer = llm_utils.completion, reparsing(llm_utils.completion)
 
-    def route(*args, **kwargs):
-        return (glimmer if "Muse-Glimmer" in kwargs.get("model", "") else base)(*args, **kwargs)
-
-    llm_utils.completion = guarded(route, meta, only=("muse-spark",))
+    llm_utils.completion = guarded(router(base, glimmer), meta, only=("muse-spark",))
     _configured.update(url=url, glimmer_model=f"openai/{glimmer_serve.MODEL_NAME}",
                        glimmer_args=glimmer_serve.litellm_args(url, key, secret, "medium"),
                        user_args={"api_base": "https://api.meta.ai/v1", "api_key": os.environ["MODEL_API_KEY"],
