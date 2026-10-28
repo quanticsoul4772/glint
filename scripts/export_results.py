@@ -20,13 +20,18 @@ SETS = [  # (set, Modal backend, title, role, note)
     ("heldout", False, "Retail and airline, held-out tasks", "held-out",
      ("Tasks drawn at random, excluding the tasks the tools were built from. The draw missed part of the failure "
       "inventory, so retail task 21 (already in it) is included. The two arms span four code commits (resumed runs). "
-      "Retail k=4, airline k=2. Glimmer on DeepInfra.")),
+      "The retail and airline tools were changed afterwards from these tasks' failures (commits aa1dadc and "
+      "ce7b242), so this draw is now design data and does not measure the shipped tools. Retail k=4, airline k=2. "
+      "Glimmer on DeepInfra.")),
     ("banking-other", True, "Banking, untuned tasks", "untuned",
      ("The banking tasks with a dispute or credit-limit step that no tool change came from. The tools' rules were "
-      "checked against these tasks' correct answers, so they are not fully held-out. k=2. Glimmer on Modal.")),
+      "checked against these tasks' correct answers, so they are not fully held-out. These runs predate the verdict "
+      "fixes of commit ce7b242 (2026-10-27 16:59). 2 improved vs 0 worse is a sign test of p = 0.5. k=2. Glimmer "
+      "on Modal.")),
     ("banking-failures", True, "Banking, tuned tasks", "tuned",
      ("Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their "
-      "runs. Do not read as general evidence. k=4. Glimmer on Modal.")),
+      "runs. Do not read as general evidence. These runs predate the verdict fixes of commit ce7b242. k=4. Glimmer "
+      "on Modal.")),
     ("design", False, "Retail and airline, design tasks", "design",
      "The tasks the tools were built from. k=8. Glimmer on DeepInfra."),
 ]
