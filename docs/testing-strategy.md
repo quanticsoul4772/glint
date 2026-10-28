@@ -6,7 +6,7 @@ Glint makes two kinds of claims a bug can break: what it **spends** (Modal GPU t
 ## Coverage goal
 1. **Spend and measurement code: 90% line coverage.**
    - Spend: `meter`, `glimmer_serve`, `desk/live`.
-   - Measurement: `runlog`, `calllog`, `tools_ab`, `export_results`, `export_scenarios`, `gate_labels`.
+   - Measurement: `runlog`, `calllog`, `tools_ab`, `export_results`, `export_scenarios`, `gate_labels`, `wrong_writes`.
 2. **Every other module: at least 70%.**
 3. **Total: at least 85%** across the library and the measurement pipeline. Two kinds of code are left out:
    - the finished one-off pilot and check scripts;
