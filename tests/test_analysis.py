@@ -189,3 +189,64 @@ def test_export_results_reports_tuned_and_untuned_tasks_apart(run_set, make_sim,
         if only:
             assert only[0]("task_038") == only[0]("task_054") == (role == "tuned")
             assert only[0]("task_001") == (role != "tuned")
+
+
+def test_export_results_rows_counts_filter_and_tie(run_set, make_sim, monkeypatch, tmp_path):
+    # Kills the mutants that survived the 2026-10-28 cosmic-ray run on main (79 of 212): the tie boundary, the rate
+    # arithmetic, the per-task overflow / infrastructure / Glint error counts the desk shows, the both-arms-overflowed
+    # rule with k > 1, the task filter (tuned vs untuned sets), and a one-arm task that must not stop the loop.
+    import export_results
+
+    s = make_sim
+    arms = {("base", "banking_knowledge"): [s("a", 0, "pass"), s("a", 1, "fail"), s("a2", 0, "pass"),
+                                            s("b", 0, "context_overflow"), s("b", 1, "context_overflow"),
+                                            s("c", 0, "context_overflow"), s("c", 1, "pass"),
+                                            s("d", 0, "infrastructure_error"), s("d", 1, "pass"),
+                                            s("e", 0, "infrastructure_error"), s("e", 1, "glint_error"),
+                                            s("x", 0, "fail"), s("x", 1, "fail")],
+            ("tools", "banking_knowledge"): [s("a", 0, "fail"), s("a", 1, "pass"),
+                                             s("b", 0, "context_overflow"), s("b", 1, "context_overflow"),
+                                             s("c", 0, "pass"), s("c", 1, "pass"),
+                                             s("d", 0, "glint_error"), s("d", 1, "pass"),
+                                             s("e", 0, "infrastructure_error"), s("e", 1, "glint_error"),
+                                             s("x", 0, "pass"), s("x", 1, "pass")],
+            ("base", "airline"): [s("z", 0, "pass")], ("tools", "airline"): [s("z", 0, "pass")]}
+    cfg = run_set(arms, k=2)
+    monkeypatch.setattr(tools_ab, "SETS", {"x": {}})
+    monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: cfg)
+    monkeypatch.setattr(export_results, "SETS", [("x", True, "X", "untuned", "note", lambda task: task != "x")])
+    monkeypatch.setattr(export_results, "OUT", tmp_path / "results.json")
+    export_results.main()
+    (out,) = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    rows = [(r["task"].split("-")[-1], r["alone"], r["tools"], r["change"], r["overflows"], r["infra_errors"],
+             r["glint_errors"]) for r in out["tasks"]]
+    assert rows == [("z", "1/1", "1/1", "tied", 0, 0, 0),           # rows ordered by domain (airline first), then task
+                    ("a", "1/2", "1/2", "tied", 0, 0, 0),           # equal nonzero rates: tied, not improved
+                    ("b", "0/2", "0/2", "no data", 4, 0, 0),        # every run of both arms overflowed
+                    ("c", "1/2", "2/2", "improved", 1, 0, 0),       # one overflow is a failed run, not "no data"
+                    ("d", "1/1", "1/2", "worse", 0, 1, 1),          # infra excluded; a Glint error counts against tools
+                    ("e", "0/1", "0/1", "tied", 0, 2, 2)]           # errors in both arms add up (not one arm's count)
+    assert out["by_task"] == {"improved": 1, "tied": 3, "worse": 1, "no data": 1}  # a2 (one arm) and x (filtered) out
+    assert out["runs"] == {"alone": [4, 9], "tools": [5, 10]}
+
+
+def test_export_results_skips_a_missing_set_and_exports_the_next(run_set, make_sim, monkeypatch, tmp_path):
+    import export_results
+
+    cfg = run_set({("base", "retail"): [make_sim("a", 0)], ("tools", "retail"): [make_sim("a", 0)]}, k=1)
+    monkeypatch.setattr(tools_ab, "SETS", {"gone": {}, "here": {}})
+    monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: {"data": tmp_path / "missing"} if c is GONE else cfg)
+    GONE = tools_ab.SETS["gone"]
+    monkeypatch.setattr(export_results, "SETS", [("gone", True, "G", "untuned", "n"), ("here", True, "H", "untuned", "n")])
+    monkeypatch.setattr(export_results, "OUT", tmp_path / "results.json")
+    export_results.main()
+    assert [x["set"] for x in json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))] == ["here"]
+
+
+def test_export_results_sets_say_the_backend_they_load():
+    # each set's Modal flag picks its data folder; its note tells the reader the backend. A flipped flag would publish
+    # one backend's numbers under the other's note.
+    import export_results
+
+    for name, modal, _title, _role, note, *_ in export_results.SETS:
+        assert ("Glimmer on Modal" in note) == modal and ("Glimmer on DeepInfra" in note) == (not modal), name
