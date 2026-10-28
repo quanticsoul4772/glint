@@ -18,7 +18,7 @@ Glint: MCP decision tools that take over analytical decisions for Meta's open-we
 - **One branch per change, from `origin/main`.** Push with `scripts/push_pr.sh`: it refuses a branch whose PR is merged or closed (two commits were lost that way).
 - **Before a PR:** `.venv/Scripts/python.exe -X utf8 -m pytest -q` and `.venv/Scripts/ruff.exe check src tests scripts --line-length 120`.
 - **No secrets in the repo.** Keys live in `<workspace>\.env`; never print them.
-- **Long jobs:** run them detached with a log under `measure/data/`, watch the log, and keep the machine awake (the driver runs locally).
+- **Long jobs:** start them only with `scripts/launch.sh LOG -- command ...`, which detaches just the job and checks it is alive. Run checks (git pull, greps) as separate commands first; never chain them into a background `&` list, which backgrounds the checks too and loses their output. Keep the machine awake (the driver runs locally).
 
 ## Writing
 - American spelling. No filler.
