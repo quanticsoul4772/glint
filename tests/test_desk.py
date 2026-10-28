@@ -180,4 +180,12 @@ def test_results_tab_reports_by_task_with_roles():
     assert {"held-out", "untuned", "tuned"} <= roles
     for s in sets:
         assert sum(s["by_task"].values()) == len(s["tasks"])
-        assert all(r["change"] in ("improved", "tied", "worse") for r in s["tasks"])
+        assert all(r["change"] in ("improved", "tied", "worse", "no data") for r in s["tasks"])
+    # task 081 overflowed the context in every run: it carries no information, so it is not counted as tied
+    untuned = next(s for s in sets if s["set"] == "banking-other")
+    assert next(r for r in untuned["tasks"] if r["task"].endswith("081"))["change"] == "no data"
+
+
+def test_replay_marks_the_tuned_tasks():
+    tuned = {s["id"]: s["tuned"] for s in client.get("/api/scenarios").json()}
+    assert tuned == {"task_054": True, "task_038": True, "task_050": False, "task_052": False}

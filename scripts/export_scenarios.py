@@ -17,13 +17,15 @@ from tau2.domains.banking_knowledge.environment import get_environment
 from glint import paths
 from glint.decisions import label_run
 from glint.desk.events import customer_summary, outcome, timeline
+from glint.runlog import outcome as run_outcome
 
 DATA = paths.MEASURE
 TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.json"
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "scenarios.json"
-# (task, folder) pairs whose base arm failed and tools arm passed at least once
-SOURCES = [("task_054", "tools_ab_banking_failures_modal"), ("task_038", "tools_ab_banking_failures_modal"),
-           ("task_050", "tools_ab_banking_other_modal"), ("task_052", "tools_ab_banking_other_modal")]
+# (task, folder, tuned) for tasks whose base arm failed and tools arm passed at least once; tuned = the tools were
+# refined after reading the task's runs
+SOURCES = [("task_054", "tools_ab_banking_failures_modal", True), ("task_038", "tools_ab_banking_failures_modal", True),
+           ("task_050", "tools_ab_banking_other_modal", False), ("task_052", "tools_ab_banking_other_modal", False)]
 TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increase",
           "task_038": "Three disputed charges on a card that is being reissued",
           "task_050": "Credit limit increase request",
@@ -33,13 +35,14 @@ TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increa
 def main():
     tasks = {t["id"]: t for t in json.loads(TASKS.read_text(encoding="utf-8"))}
     scenarios = []
-    for task_id, folder in SOURCES:
+    for task_id, folder, tuned in SOURCES:
         task = Task.model_validate(tasks[task_id])
         arms = {arm: [s for s in json.loads((DATA / folder / f"{arm}-banking_knowledge.json")
-                                            .read_text(encoding="utf-8"))["simulations"] if s["task_id"] == task_id]
+                                            .read_text(encoding="utf-8"))["simulations"]
+                      if s["task_id"] == task_id and s["messages"] and run_outcome(s) != "infrastructure_error"]
                 for arm in ("base", "tools")}
-        alone = next((s for s in arms["base"] if not outcome(s)["passed"] and s["messages"]), None)
-        helped = next((s for s in arms["tools"] if outcome(s)["passed"] and s["messages"]), None)
+        alone = next((s for s in arms["base"] if not outcome(s)["passed"]), None)
+        helped = next((s for s in arms["tools"] if outcome(s)["passed"]), None)
         if alone is None or helped is None:
             print(f"skip {task_id}: no failed-alone / passed-with-tools pair")
             continue
@@ -47,12 +50,13 @@ def main():
         overrules = {d.message_index: {"tool": d.tool, "reasons": d.reasons}
                      for d in decisions if d.label == "overruled" and d.executed}
         scenarios.append({
-            "id": task_id, "title": TITLES.get(task_id, task_id),
+            "id": task_id, "title": TITLES.get(task_id, task_id), "tuned": tuned,
             "customer": customer_summary(str(task.user_scenario.instructions)),
             "source": f"{folder} (Glimmer 30B bf16 on Modal; recorded 2026-10-27)",
-            # the pair is chosen (a failed run alone, a passed run with tools); these are all the recorded runs
-            "recorded": {arm: {"passed": sum(outcome(x)["passed"] for x in runs if x["messages"]),
-                               "runs": sum(1 for x in runs if x["messages"])} for arm, runs in arms.items()},
+            # the pair is chosen (a failed run alone, a passed run with tools); these are all the recorded runs,
+            # counted as the Results tab counts them (infrastructure errors excluded)
+            "recorded": {arm: {"passed": sum(outcome(x)["passed"] for x in runs), "runs": len(runs)}
+                         for arm, runs in arms.items()},
             "alone": {"trial": alone["trial"], "events": timeline(alone["messages"], overrules), "outcome": outcome(alone),
                       "overruled_writes": len(overrules)},
             "tools": {"trial": helped["trial"], "events": timeline(helped["messages"]), "outcome": outcome(helped)},

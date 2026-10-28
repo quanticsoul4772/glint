@@ -259,10 +259,14 @@ def generate(cfg: dict) -> None:
             with events:
                 results = _run(cfg, domain, ids, arm, stamp, endpoint)
             (data / f"{arm}-{domain}.json").write_text(results.model_dump_json(), encoding="utf-8")
-            errors = sum("infrastructure" in str(s.termination_reason).lower() for s in results.simulations)
-            if errors:
-                print(f"WARNING: {arm} {domain}: {errors} of {len(results.simulations)} runs ended in an infrastructure "
-                      "error; they are excluded from the analysis and are not retried", flush=True)
+            kinds = Counter(outcome(s.model_dump(mode="json")) for s in results.simulations)
+            if kinds["infrastructure_error"]:
+                print(f"WARNING: {arm} {domain}: {kinds['infrastructure_error']} of {len(results.simulations)} runs "
+                      "ended in an infrastructure error; they are excluded from the analysis and are not retried",
+                      flush=True)
+            if kinds["context_overflow"]:
+                print(f"WARNING: {arm} {domain}: {kinds['context_overflow']} of {len(results.simulations)} runs "
+                      "overflowed the context; they count as failed runs", flush=True)
             print(f"{arm} {domain}: {len(results.simulations)} sims; this arm Glimmer "
                   f"${glim.meta_usd - glim_before:.3f}, Meta ${meta.meta_usd - meta_before:.3f}; phase totals Glimmer "
                   f"${glim.meta_usd:.3f}, "

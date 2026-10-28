@@ -3,7 +3,7 @@
   "set": "heldout",
   "title": "Retail and airline, held-out tasks",
   "role": "held-out",
-  "note": "Tasks drawn at random, excluding the tasks the tools were built from. Retail k=4, airline k=2. Glimmer on DeepInfra.",
+  "note": "Tasks drawn at random, excluding the tasks the tools were built from. The draw missed part of the failure inventory, so retail task 21 (already in it) is included. The two arms span four code commits (resumed runs). Retail k=4, airline k=2. Glimmer on DeepInfra.",
   "tasks": [
    {
     "task": "airline-0",
@@ -169,7 +169,8 @@
   "by_task": {
    "improved": 1,
    "tied": 16,
-   "worse": 3
+   "worse": 3,
+   "no data": 0
   },
   "runs": {
    "alone": [
@@ -264,15 +265,16 @@
     "task": "banking_knowledge-task_081",
     "alone": "0/2",
     "tools": "0/2",
-    "change": "tied",
+    "change": "no data",
     "overflows": 4,
     "infra_errors": 0
    }
   ],
   "by_task": {
    "improved": 2,
-   "tied": 8,
-   "worse": 0
+   "tied": 7,
+   "worse": 0,
+   "no data": 1
   },
   "runs": {
    "alone": [
@@ -311,7 +313,8 @@
   "by_task": {
    "improved": 2,
    "tied": 0,
-   "worse": 0
+   "worse": 0,
+   "no data": 0
   },
   "runs": {
    "alone": [
@@ -366,7 +369,8 @@
   "by_task": {
    "improved": 1,
    "tied": 2,
-   "worse": 1
+   "worse": 1,
+   "no data": 0
   },
   "runs": {
    "alone": [
