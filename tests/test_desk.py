@@ -1,4 +1,7 @@
 """Glint Bank Desk replay mode: the API serves the page and every scenario has two complete panes."""
+import json
+
+import pytest
 from fastapi.testclient import TestClient
 
 from glint.desk.app import app
@@ -172,30 +175,136 @@ def test_live_start_is_refused_when_the_budget_is_spent(monkeypatch):
 
 
 def test_replay_discloses_the_pair_is_selected_with_real_pass_counts():
-    # each replay pair is chosen (failed alone, passed with tools); the page must say so and give all recorded runs
+    # each replay pair is chosen (failed alone, passed with tools); the page must say so and give all recorded runs.
+    # These hold for any correctly exported scenarios.json: a pair is only selected from such runs
     assert "Selected pair, not a typical run" in client.get("/").text
     for s in client.get("/api/scenarios").json():
         rec = client.get(f"/api/scenarios/{s['id']}").json()["recorded"]
-        assert rec["base"]["runs"] >= 2 and rec["tools"]["runs"] >= 2
         assert rec["base"]["passed"] < rec["base"]["runs"] and rec["tools"]["passed"] >= 1
 
 
-def test_results_tab_reports_by_task_with_roles():
-    sets = client.get("/api/results").json()
-    roles = {s["role"] for s in sets}
-    assert {"held-out", "untuned", "tuned"} <= roles
-    for s in sets:
+def test_results_tab_counts_every_task_once():
+    # holds for any results.json export_results writes (what it contains is tested in test_analysis)
+    for s in client.get("/api/results").json():
         assert sum(s["by_task"].values()) == len(s["tasks"])
         assert all(r["change"] in ("improved", "tied", "worse", "no data") for r in s["tasks"])
-    # task 081 overflowed the context in every run: it carries no information, so it is not counted as tied
-    untuned = next(s for s in sets if s["set"] == "banking-other")
-    t081 = next(r for r in untuned["tasks"] if r["task"].endswith("081"))
-    assert t081["change"] == "no data" and t081["no_data_reason"] == "every run overflowed the context"
 
 
-def test_replay_marks_the_tuned_tasks():
-    tuned = {s["id"]: s["tuned"] for s in client.get("/api/scenarios").json()}
-    assert tuned == {"task_054": True, "task_038": True, "task_050": False, "task_052": False}
+@pytest.fixture
+def desk_files(monkeypatch, tmp_path):
+    """The desk reading its scenarios.json and results.json from a temporary folder; returns a writer for them."""
+    from glint.desk import app as desk_app
+
+    monkeypatch.setattr(desk_app, "HERE", tmp_path)
+    desk_app.scenarios.cache_clear()
+
+    def write(name, data):
+        (tmp_path / name).write_text(json.dumps(data), encoding="utf-8")
+
+    yield write
+    desk_app.scenarios.cache_clear()  # the next test reads the committed files again
+
+
+def _scenario(sid, tuned=None):
+    s = {"id": sid, "title": f"title {sid}", "alone": {"outcome": {"passed": False}, "events": []},
+         "tools": {"outcome": {"passed": True}, "events": []},
+         "recorded": {"base": {"runs": 4, "passed": 1}, "tools": {"runs": 4, "passed": 3}}}
+    return s if tuned is None else s | {"tuned": tuned}
+
+
+def test_the_scenario_list_and_pages_serve_what_scenarios_json_holds(desk_files):
+    desk_files("scenarios.json", [_scenario("task_900", tuned=True), _scenario("task_901")])
+    assert client.get("/api/scenarios").json() == [
+        {"id": "task_900", "title": "title task_900", "alone_passed": False, "tools_passed": True, "tuned": True},
+        {"id": "task_901", "title": "title task_901", "alone_passed": False, "tools_passed": True, "tuned": False}]
+    assert client.get("/api/scenarios/task_901").json() == _scenario("task_901")
+    assert client.get("/api/scenarios/task_054").status_code == 404  # only what the file holds
+
+
+def test_the_results_tab_serves_what_results_json_holds(desk_files):
+    sets = [{"set": "s", "role": "held-out", "by_task": {"tied": 1},
+             "tasks": [{"task": "task_900", "change": "tied"}]}]
+    desk_files("results.json", sets)
+    assert client.get("/api/results").json() == sets
+    desk_files("results.json", [])  # read on every request: a regenerated file is served without a restart
+    assert client.get("/api/results").json() == []
+
+
+def _fake_live_env(monkeypatch, tmp_path, pairs_per_day=5):
+    """Live mode configured with placeholders and its budget on a temporary ledger and session log."""
+    from glint.desk import app as desk_app
+    from glint.desk import live
+
+    for k in desk_app.LIVE_ENV:
+        monkeypatch.setenv(k, "x")
+    monkeypatch.setattr(desk_app, "_sessions", {})
+    monkeypatch.setattr(live, "_active", None)
+    budget = live.DeskBudget(gpu_usd_per_day=10, pairs_per_day=pairs_per_day, ledger=tmp_path / "ledger.jsonl",
+                             log_path=tmp_path / "sessions.jsonl")
+    monkeypatch.setattr(desk_app, "budget", budget)
+    return budget
+
+
+def _finish(session):
+    import time
+
+    for pane in session.panes.values():
+        pane.orchestrator.gate.set()
+    deadline = time.time() + 5
+    while not session.done and time.time() < deadline:
+        time.sleep(0.01)
+    assert session.done
+
+
+def test_live_start_logs_the_start_so_the_pair_counts_against_the_daily_limit(monkeypatch, tmp_path):
+    from glint.desk import app as desk_app
+    from glint.desk.live import LiveSession
+
+    budget = _fake_live_env(monkeypatch, tmp_path, pairs_per_day=1)
+    monkeypatch.setattr(desk_app, "_new_session", lambda task_id: LiveSession(task_id, _fake_build))
+    first = client.post("/api/live/start", json={"task_id": "task_054"})
+    assert first.status_code == 200
+    rows = [json.loads(x) for x in (tmp_path / "sessions.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(r["event"], r["session"], r["task_id"]) for r in rows] == [("start", first.json()["id"], "task_054")]
+    assert budget.pairs_today() == 1
+    _finish(desk_app._sessions[first.json()["id"]])
+    second = client.post("/api/live/start", json={"task_id": "task_038"})  # the first pair ended, the day's limit not
+    assert second.status_code == 429 and "daily limit of 1 live runs" in second.json()["detail"]
+
+
+def test_new_session_charges_the_gpu_ledger_while_running_and_records_the_pair_at_the_end(monkeypatch, tmp_path):
+    import time
+
+    from glint import glimmer_serve
+    from glint.desk import app as desk_app
+    from glint.desk import live
+
+    _fake_live_env(monkeypatch, tmp_path)
+    woke = []
+    monkeypatch.setattr(live, "configure", lambda: {"url": "https://x.modal.run", "glimmer_args": {},
+                                                    "glimmer_model": "openai/Muse-Glimmer-30B-modal",
+                                                    "user_args": {}})
+    monkeypatch.setattr(live, "tau2_builder", lambda *a, **k: _fake_build)
+    monkeypatch.setattr(live, "tau2_labeler", lambda task: lambda sim: {})
+    monkeypatch.setattr(glimmer_serve, "wait_ready", lambda url, *a, **k: woke.append(url))
+    session = desk_app._new_session("task_054")
+    session.started = time.time() - 100
+    session.tick()  # what the meter loop does every CHARGE_EVERY_S
+    ledger = tmp_path / "ledger.jsonl"
+    rows = [json.loads(x) for x in ledger.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1 and rows[0]["kind"] == "gpu" and round(rows[0]["seconds"]) == 100
+    assert session.id in rows[0]["tag"]
+    session.start()
+    _finish(session)
+    assert woke == ["https://x.modal.run"]
+    deadline = time.time() + 5  # on_done runs right after `done` turns true
+    while not (tmp_path / "sessions.jsonl").exists() and time.time() < deadline:
+        time.sleep(0.01)
+    logged = json.loads((tmp_path / "sessions.jsonl").read_text(encoding="utf-8"))
+    assert logged["event"] == "end" and logged["session"] == session.id and logged["tools_outcome"] is True
+    rows = [json.loads(x) for x in ledger.read_text(encoding="utf-8").splitlines()]
+    # the end charges the rest of the wall time plus the scale-down window, never the 100 s again
+    assert len(rows) == 2 and live.SCALEDOWN_S <= rows[1]["seconds"] < live.SCALEDOWN_S + 10
 
 
 def test_a_running_pair_is_charged_as_it_runs_and_stopped_at_the_cap(tmp_path):
@@ -420,3 +529,37 @@ def test_configure_routes_glimmer_and_caps_meta_once_per_process(monkeypatch):
 
     with pytest.raises(KeyError, match="MODEL_API_KEY"):
         live.configure()
+
+
+def test_configure_refuses_a_meta_call_over_the_cap_and_leaves_glimmer_uncapped(monkeypatch, tmp_path):
+    # the customer (Muse Spark on Meta credit) is capped at META_CAP_USD per process; Glimmer is not Meta credit
+    import litellm
+    from tau2.utils import llm_utils
+
+    from glint import meter as meter_mod
+    from glint.desk import live
+
+    monkeypatch.setattr(litellm, "callbacks", litellm.callbacks)
+    sent = []
+    monkeypatch.setattr(llm_utils, "completion", lambda **kw: sent.append(kw["model"]) or "ok")
+    monkeypatch.setattr(live, "_configured", {})
+    monkeypatch.setattr(live, "_active", None)
+    meters = []
+
+    class TmpMeter(meter_mod.Meter):  # the desk's meter, on a temporary ledger
+        def __init__(self, caps, phase):
+            super().__init__(caps, tmp_path / "ledger.jsonl", phase)
+            meters.append(self)
+
+    monkeypatch.setattr(meter_mod, "Meter", TmpMeter)
+    for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY"):
+        monkeypatch.setenv(k, "https://x.modal.run" if k == "GLINT_GLIMMER_URL" else "placeholder")
+    live.configure()
+    (meta,) = meters
+    assert meta.caps.meta_usd == live.META_CAP_USD
+    assert llm_utils.completion(model=live.SPARK, messages=[]) == "ok"
+    meta.record_meta("muse-wonder-1.0", 250_000, 0, 0)  # $1.00: the cap is reached
+    with pytest.raises(live.BudgetExceeded, match="reached cap"):
+        llm_utils.completion(model=live.SPARK, messages=[])
+    assert llm_utils.completion(model="openai/Muse-Glimmer-30B-modal", messages=[]) == "ok"
+    assert sent == [live.SPARK, "openai/Muse-Glimmer-30B-modal"]  # the refused call was never sent

@@ -121,6 +121,46 @@ def test_the_agent_uses_the_endpoint_and_caps_banking_output(monkeypatch):
     assert "max_tokens" not in args and "Muse-Glimmer" in model
 
 
+GLIMMER_MODEL, SPARK_MODEL = "openai/meta-models/Muse-Glimmer-30B", "openai/muse-spark-1.3-contributor"
+
+
+@pytest.mark.parametrize("spent_pool, refused, allowed", [("glimmer", GLIMMER_MODEL, SPARK_MODEL),
+                                                          ("meta", SPARK_MODEL, GLIMMER_MODEL)])
+def test_a_pool_past_its_cap_refuses_its_calls_and_only_its_calls(stand_in, make_sim, monkeypatch, tmp_path,
+                                                                   spent_pool, refused, allowed):
+    # generate installs two stacked guards on τ²'s completion, one per credit pool (Glimmer, Meta); a resumed run whose
+    # ledger already holds a pool's cap must refuse that pool's next call before it is sent, and only that pool's
+    from glint.meter import Meter
+
+    cfg, outcomes = stand_in
+    cfg["arms"] = ("base",)
+    cfg["data"].mkdir(parents=True)
+    (cfg["data"] / "stamp.txt").write_text("20261028-000000", encoding="utf-8")
+    (cfg["data"] / "commit.txt").write_text("abc123", encoding="utf-8")
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text(json.dumps({"kind": "meta", "usd": 1.0, "phase": f"gen-test-{spent_pool}-20261028-000000"})
+                      + "\n", encoding="utf-8")
+    monkeypatch.setattr(tools_ab, "Meter", lambda caps, phase: Meter(caps, ledger, phase))
+    sent = []
+    monkeypatch.setattr(llm_utils, "completion", lambda **kw: sent.append(kw["model"]) or {"choices": [{}]})
+    outcomes["base"] = [make_sim("1", 0), make_sim("1", 1)]
+    seen = {}
+
+    def run(cfg_, domain, ids, arm, stamp, endpoint):  # the calls τ²'s batch would make, through the installed wrapper
+        for model in (refused, allowed):
+            try:
+                llm_utils.completion(model=model, messages=[{"role": "user", "content": "hi"}])
+                seen[model] = "sent"
+            except BudgetExceeded as e:
+                seen[model] = str(e)
+        return _Results(outcomes[arm])
+
+    monkeypatch.setattr(tools_ab, "_run", run)
+    tools_ab.generate(cfg)
+    assert seen[refused].startswith("BudgetExceeded: Meta API spend $1.0000 reached cap $1.0")
+    assert seen[allowed] == "sent" and sent == [allowed]  # the refused call never reached the endpoint
+
+
 def test_the_modal_path_deploys_waits_and_routes_glimmer_through_the_session(stand_in, make_sim, monkeypatch):
     import contextlib
     import threading

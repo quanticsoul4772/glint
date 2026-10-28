@@ -227,3 +227,47 @@ def test_a_broken_ledger_line_names_the_file_and_line(tmp_path):
     ledger.write_text('{"kind": "meta", "usd": 0.1, "phase": "p"}\n{"kind": "me', encoding="utf-8")
     with pytest.raises(RuntimeError, match="line 2 is not valid JSON"):
         Meter(Caps(meta_usd=1.0, gpu_usd=0.0), ledger=ledger, phase="p")
+
+
+def test_the_ledger_reload_counts_only_the_meters_own_phase(tmp_path):
+    # one ledger holds every phase; a resumed run must see its own earlier spend and nothing of another run's
+    ledger = tmp_path / "ledger.jsonl"
+    rows = [{"kind": "meta", "usd": 0.25, "phase": "a"}, {"kind": "gpu", "usd": 1.5, "phase": "a"},
+            {"kind": "meta", "usd": 4.0, "phase": "b"}, {"kind": "gpu", "usd": 9.0, "phase": "b"}]
+    ledger.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    a = Meter(Caps(meta_usd=1.0, gpu_usd=2.0), ledger, phase="a")
+    assert a.meta_usd == pytest.approx(0.25) and a.gpu_usd == pytest.approx(1.5)
+    a.check()  # phase b's spend is past both caps; it must not stop phase a
+    b = Meter(Caps(meta_usd=1.0, gpu_usd=2.0), ledger, phase="b")
+    assert b.meta_usd == pytest.approx(4.0) and b.gpu_usd == pytest.approx(9.0)
+    with pytest.raises(BudgetExceeded):
+        b.check()
+
+
+def test_guarded_takes_a_rate_limiter_slot_only_for_its_own_pool_and_only_under_the_cap(tmp_path):
+    class Limiter:
+        taken = 0
+
+        def acquire(self):
+            self.taken += 1
+
+    m = Meter(Caps(meta_usd=0.05, gpu_usd=0.0), tmp_path / "ledger.jsonl")
+    limiter = Limiter()
+    fn = guarded(lambda **kw: "ok", m, limiter, only=("muse-spark",))
+    assert fn(model="openai/muse-spark-1.3-contributor") == "ok"
+    assert limiter.taken == 1
+    assert fn(model="openai/Muse-Glimmer-30B") == "ok"  # another pool's model is neither capped nor paced here
+    assert limiter.taken == 1
+    m.record_meta("muse-wonder-1.0", 10_000, 0, 2_000)  # $0.08, over the cap
+    with pytest.raises(BudgetExceeded):
+        fn(model="openai/muse-spark-1.3-contributor")
+    assert limiter.taken == 1  # a refused call does not wait for a slot
+
+
+def test_guarded_paces_calls_through_a_real_rate_limiter(tmp_path):
+    m = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), tmp_path / "ledger.jsonl")
+    fn = guarded(lambda **kw: "ok", m, RateLimiter(per_minute=600, burst=1))  # 10/s
+    t0 = time.monotonic()
+    for _ in range(6):
+        fn(model="muse-spark-1.3-contributor")
+    assert time.monotonic() - t0 >= 0.45
