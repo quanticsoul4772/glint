@@ -21,6 +21,11 @@ def test_the_page_is_revalidated_so_a_deploy_reaches_returning_visitors():
     assert client.get("/").headers["cache-control"] == "no-cache"
 
 
+def test_hidden_elements_stay_hidden_over_class_display_rules():
+    # regression 2026-10-28: .btn sets display, which overrode [hidden], so "Run live" showed with live mode off
+    assert "[hidden] { display: none !important; }" in client.get("/").text
+
+
 def test_every_scenario_pairs_a_failed_alone_run_with_a_passed_tools_run():
     for s in client.get("/api/scenarios").json():
         full = client.get(f"/api/scenarios/{s['id']}").json()
