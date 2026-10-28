@@ -18,9 +18,16 @@ git push -u origin "$branch"
 # The PR can be merged while this push is in flight: confirm the head commit is in the PR
 if [ "$state" = "OPEN" ]; then
   head=$(git rev-parse HEAD)
-  pr_head=$(gh pr view "$branch" --json headRefOid -q .headRefOid)
+  # GitHub's API can lag the push by a few seconds: retry before calling it a mismatch
+  for _ in 1 2 3 4 5; do
+    pr_head=$(gh pr view "$branch" --json headRefOid -q .headRefOid)
+    [ "$head" = "$pr_head" ] && break
+    sleep 2
+  done
   if [ "$head" != "$pr_head" ]; then
-    echo "WARNING: PR head $pr_head != pushed $head; check whether the PR merged during the push" >&2
+    state_now=$(gh pr view "$branch" --json state -q .state)
+    echo "WARNING: PR is $state_now and its head $pr_head != pushed $head; if it merged during the push, the" \
+         "commit is not on main" >&2
     exit 1
   fi
 fi
