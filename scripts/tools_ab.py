@@ -24,10 +24,13 @@ Sets:
 Runs go domain by domain (base then tools), so a domain that finishes has both arms.
 
 - `banking-failures`: 038 and 054 only, run first; shares `banking`'s stamp and checkpoint.
+- `heldout2`: a fresh draw of 10 retail + 10 airline train tasks (seed 2027) excluding the design tasks, the whole
+  failure inventory (twin-B 21, 44, 78 included) and every task of the first held-out draw; k=4.
 - `banking-other`: the other 10 banking tasks of `banking` (not tuned on), k=2.
 - `gate-banking`: activation-gate training data, no-tools arm only: the 12 banking tasks x 25 trials, concurrency 12.
 
-Usage: python tools_ab.py [design|heldout|banking|banking-failures|banking-other|gate-banking] [--modal] [--analyze]
+Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking]
+       [--modal] [--analyze] [--allow-mixed-code]
 """
 import json
 import os
@@ -65,13 +68,26 @@ BANKING_WRITES = ("file_credit_card_transaction_dispute_4829", "submit_credit_li
 MODAL_CLI = str(Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "modal.exe")
 
 
-def heldout_tasks(n: int = 10, seed: int = 2026) -> dict[str, list[str]]:
+def heldout_tasks(n: int = 10, seed: int = 2026, exclude: dict[str, set[str]] | None = None) -> dict[str, list[str]]:
+    """The first held-out draw used DESIGN_TASKS only, which misses the twin-B tasks of the failure inventory (21, 44,
+    78); task 21 was drawn. Kept as it was so the recorded draw reproduces."""
     rng = random.Random(seed)
     out = {}
     for domain in ("retail", "airline"):
-        ids = [t.id for t in registry.get_tasks_loader(domain)("train") if t.id not in DESIGN_TASKS[domain]]
+        skip = DESIGN_TASKS[domain] | (exclude or {}).get(domain, set())
+        ids = [t.id for t in registry.get_tasks_loader(domain)("train") if t.id not in skip]
         out[domain] = sorted(rng.sample(ids, n), key=int)
     return out
+
+
+# Tasks the tools or their fixes have been tuned on, or that are in the failure inventory: the design tasks, the twin-B
+# tasks, and the first held-out draw (its failures produced the airline-hint and return/exchange fixes)
+INVENTORY = {"retail": {"21", "44", "78"}, "airline": set()}
+
+
+def heldout2_tasks(n: int = 10, seed: int = 2027) -> dict[str, list[str]]:
+    first = heldout_tasks()
+    return heldout_tasks(n, seed, {d: INVENTORY[d] | set(first[d]) for d in ("retail", "airline")})
 
 
 def banking_tasks() -> dict[str, list[str]]:
@@ -90,6 +106,9 @@ SETS = {
     "heldout": {"tasks": heldout_tasks, "trials": 4, "airline_trials": 2, "glimmer_usd": 3.5, "meta_usd": 0.5,
                 "gpu_usd": 6.0, "data": MEASURE / "tools_ab_heldout", "out": RESULTS / "tools-ab-heldout.json",
                 "save": "tools-ab-heldout"},
+    "heldout2": {"tasks": heldout2_tasks, "trials": 4, "glimmer_usd": 3.5, "meta_usd": 1.0, "gpu_usd": 15.0,
+                 "data": MEASURE / "tools_ab_heldout2", "out": RESULTS / "tools-ab-heldout2.json",
+                 "save": "tools-ab-heldout2"},
     "banking": {"tasks": banking_tasks, "trials": 4, "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 6.0,
                 "data": MEASURE / "tools_ab_banking", "out": RESULTS / "tools-ab-banking.json",
                 "save": "tools-ab-banking"},
@@ -152,6 +171,16 @@ def _run(cfg: dict, domain: str, ids: list[str], arm: str, stamp: str, endpoint:
     return run_domain(TextRunConfig(**common, task_split_name="train", task_ids=ids))
 
 
+def _commit() -> str:
+    import subprocess
+
+    out = subprocess.run(["git", "-C", str(Path(__file__).resolve().parents[1]), "rev-parse", "--short", "HEAD"],
+                         capture_output=True, text=True, check=False)
+    dirty = subprocess.run(["git", "-C", str(Path(__file__).resolve().parents[1]), "status", "--porcelain", "src"],
+                           capture_output=True, text=True, check=False).stdout.strip()
+    return out.stdout.strip() + ("-dirty" if dirty else "")
+
+
 def generate(cfg: dict) -> None:
     # One stamp per comparison: a resumed run keeps the same meter phases (so the caps count earlier spend) and the
     # same τ² save_to (so finished simulations are resumed, not paid for again)
@@ -160,9 +189,18 @@ def generate(cfg: dict) -> None:
     stamp_dir = cfg.get("stamp_dir", data)
     stamp_dir.mkdir(parents=True, exist_ok=True)
     stamp_file = stamp_dir / "stamp.txt"
+    commit_file = stamp_dir / "commit.txt"
+    commit = _commit()
     if not stamp_file.exists():
         stamp_file.write_text(time.strftime("%Y%m%d-%H%M%S"), encoding="utf-8")
+        commit_file.write_text(commit, encoding="utf-8")
     stamp = stamp_file.read_text(encoding="utf-8").strip()
+    # A resume on different code would merge runs of two code versions into one comparison (the first held-out
+    # arms span four commits)
+    started = commit_file.read_text(encoding="utf-8").strip() if commit_file.exists() else None
+    if started and started != commit and "--allow-mixed-code" not in sys.argv:
+        raise SystemExit(f"this comparison started on commit {started}, the code is now {commit}; resuming would mix "
+                         "versions. Start a fresh stamp, or pass --allow-mixed-code.")
     tasks = cfg["tasks"]()
     (data / "tasks.json").write_text(json.dumps(tasks), encoding="utf-8")
     pending = [(d, ids, arm) for d, ids in tasks.items() for arm in cfg.get("arms", ("base", "tools"))
@@ -194,9 +232,16 @@ def generate(cfg: dict) -> None:
         for domain, ids, arm in pending:
             if arm == "tools":
                 install(domain)
+            glim_before, meta_before = glim.meta_usd, meta.meta_usd
             results = _run(cfg, domain, ids, arm, stamp, endpoint)
             (data / f"{arm}-{domain}.json").write_text(results.model_dump_json(), encoding="utf-8")
-            print(f"{arm} {domain}: {len(results.simulations)} sims; Glimmer ${glim.meta_usd:.3f}, "
+            errors = sum("infrastructure" in str(s.termination_reason) for s in results.simulations)
+            if errors:
+                print(f"WARNING: {arm} {domain}: {errors} of {len(results.simulations)} runs ended in an infrastructure "
+                      "error; they are excluded from the analysis and are not retried", flush=True)
+            print(f"{arm} {domain}: {len(results.simulations)} sims; this arm Glimmer "
+                  f"${glim.meta_usd - glim_before:.3f}, Meta ${meta.meta_usd - meta_before:.3f}; phase totals Glimmer "
+                  f"${glim.meta_usd:.3f}, "
                   f"Meta ${meta.meta_usd:.3f}", flush=True)
 
 
@@ -232,6 +277,12 @@ def analyze(cfg: dict) -> None:
             row["pass_rate"] = round(row["passes"] / row["runs"], 3) if row["runs"] else None
     cfg["out"].write_text(json.dumps(report, indent=1), encoding="utf-8")
     print(json.dumps(report, indent=1))
+    # Loud summary: infrastructure errors are excluded, so arms can end up with different run counts
+    for key, arms in sorted(report.items()):
+        runs = {arm: row["runs"] for arm, row in arms.items()}
+        errors = {arm: row["infra_errors"] for arm, row in arms.items() if row["infra_errors"]}
+        if errors or len(set(runs.values())) > 1:
+            print(f"WARNING: {key}: runs per arm {runs}, infrastructure errors {errors or 'none'}", flush=True)
 
 
 if __name__ == "__main__":
