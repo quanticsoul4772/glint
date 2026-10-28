@@ -42,19 +42,24 @@ def main():
     for name, modal, title, role, note in SETS:
         cfg = tools_ab.for_backend(tools_ab.SETS[name], modal)
         if not cfg["data"].exists():
+            print(f"WARNING: {name}: no data folder ({cfg['data']}); the set is left off the Results tab", flush=True)
             continue
         tools_ab.analyze(cfg)
         report = json.loads(cfg["out"].read_text(encoding="utf-8"))
         rows, tally = [], {"improved": 0, "tied": 0, "worse": 0, "no data": 0}
+        compared = []  # the tasks with both arms: the tally and the run totals both come from these
         for key in sorted(report, key=lambda k: (k.split("-")[0], k)):
             arms = report[key]
             if "base" not in arms or "tools" not in arms:
+                print(f"WARNING: {name}: {key} has only the {', '.join(arms)} arm; left off the Results tab",
+                      flush=True)
                 continue
+            compared.append(key)
             b, t = arms["base"], arms["tools"]
             # no counted run in an arm, or every run overflowed the context: the task says nothing about the tools
             reason = None
             if not b["runs"] or not t["runs"]:
-                change, reason = "no data", "no counted runs in an arm (infrastructure errors)"
+                change, reason = "no data", "no counted runs in an arm (infrastructure, evaluation or cap stops)"
             elif b.get("context_overflows", 0) + t.get("context_overflows", 0) == b["runs"] + t["runs"]:
                 change, reason = "no data", "every run overflowed the context"
             else:
@@ -63,9 +68,11 @@ def main():
             tally[change] += 1
             rows.append({"task": key, "alone": f"{b['passes']}/{b['runs']}", "tools": f"{t['passes']}/{t['runs']}",
                          "change": change, "overflows": b.get("context_overflows", 0) + t.get("context_overflows", 0),
-                         "infra_errors": b["infra_errors"] + t["infra_errors"], "no_data_reason": reason})
-        runs = {arm: [sum(report[k][arm]["passes"] for k in report if arm in report[k]),
-                      sum(report[k][arm]["runs"] for k in report if arm in report[k])] for arm in ("base", "tools")}
+                         "infra_errors": b["infra_errors"] + t["infra_errors"],
+                         "glint_errors": b.get("glint_errors", 0) + t.get("glint_errors", 0),
+                         "no_data_reason": reason})
+        runs = {arm: [sum(report[k][arm]["passes"] for k in compared), sum(report[k][arm]["runs"] for k in compared)]
+                for arm in ("base", "tools")}
         out.append({"set": name, "title": title, "role": role, "note": note, "tasks": rows, "by_task": tally,
                     "runs": {"alone": runs["base"], "tools": runs["tools"]}})
         print(f"{name}: {tally}, runs alone {runs['base']}, with tools {runs['tools']}")

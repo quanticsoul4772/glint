@@ -39,3 +39,19 @@ def test_recorded_call_matches_its_turn_in_the_saved_run(tmp_path):
     row = rows[key_for_turn(saved.messages)]
     assert unpack(row["prompt_ids"]) == [1, 2, 3] and unpack(row["completion_ids"]) == [5, 6]
     assert row["logprob_tokens"] == ["o", "k"]
+
+
+def test_a_vllm_response_without_token_ids_is_a_named_glint_error(tmp_path):
+    import pytest
+
+    from glint.calllog import CallLogError, recording
+
+    def completion(**kwargs):
+        return {"choices": [{"message": {"content": "hi"}}]}  # no prompt_token_ids, no token_ids
+
+    wrapped = recording(completion, tmp_path / "calls.jsonl", require_ids=True)
+    with pytest.raises(CallLogError, match="no token ids"):
+        wrapped(model="openai/Muse-Glimmer-30B-modal", messages=[{"role": "user", "content": "x"}])
+    # a hosted API returns no ids: without require_ids the call is recorded as before
+    recording(completion, tmp_path / "calls.jsonl")(model="openai/Muse-Glimmer-30B", messages=[])
+    assert (tmp_path / "calls.jsonl").read_text(encoding="utf-8").count("\n") == 1

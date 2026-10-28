@@ -30,6 +30,7 @@ CLI_STEPS = ("submit_credit_limit_increase_request_7392", "approve_credit_limit_
 # glint's own READ tools, absent from the plain toolkit the replay uses
 GLINT_TOOLS = {"check_order_action", "find_user_items", "find_variants", "check_reservation_action",
                "get_upcoming_trips_cost", "check_credit_limit_increase", "check_card_dispute"}
+WRITES = {"retail": set(RETAIL_WRITES), "airline": set(AIRLINE_WRITES), "banking_knowledge": set(BANKING_WRITES)}
 
 
 @dataclass
@@ -191,8 +192,10 @@ def _banking(db, name: str, a: dict, later: list[tuple[str, dict]]) -> tuple[str
     return None
 
 
-def label_run(sim: dict, task, env) -> list[Decision]:
-    """Label every write of one recorded run. `env` is a fresh environment of the run's domain; `task` its Task."""
+def label_run(sim: dict, task, env, unjudged: dict | None = None) -> list[Decision]:
+    """Label every write of one recorded run. `env` is a fresh environment of the run's domain; `task` its Task.
+    A write that cannot be judged (malformed arguments, or no rule covers it) gets no Decision; pass a dict as
+    `unjudged` to have each one counted by tool name, so they never vanish from the totals unseen."""
     init = task.initial_state
     env.set_state(init.initialization_data if init else None, init.initialization_actions if init else None, [])
     calls = [(i, *_unwrap(n, a), n, a) for i, n, a in _calls(sim) if n not in GLINT_TOOLS]
@@ -215,6 +218,8 @@ def label_run(sim: dict, task, env) -> list[Decision]:
         if verdict is not None:
             executed = not (reply.error or str(reply.content).startswith("Error"))
             out.append(Decision(sim["task_id"], sim["trial"], i, name, args, *verdict, executed=executed))
+        elif unjudged is not None and name in WRITES[domain]:
+            unjudged[name] = unjudged.get(name, 0) + 1
     return out
 
 

@@ -30,7 +30,10 @@ _NON_TOOL = ("self", "user", "commentary", "developer")
 
 
 class AtemParseError(ValueError):
-    pass
+    # the class name goes first in the message: τ² keeps only str(exception), and runlog.outcome must charge a failed
+    # re-parse to Glint instead of filing it as an infrastructure error
+    def __str__(self) -> str:
+        return f"AtemParseError: {super().__str__()}"
 
 
 @dataclass
