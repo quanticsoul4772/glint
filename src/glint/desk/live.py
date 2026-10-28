@@ -369,7 +369,7 @@ def router(base, glimmer):
 
 def cannot_serve(error: Exception) -> str | None:
     """Why Meta's API cannot serve the customer (the reason to switch to Spark Open), or None for any other error,
-    which must fail as before. Our own cap stop (BudgetExceeded) is never a reason to switch."""
+    which must fail as before. Glint's own cap stop (BudgetExceeded) is never a reason to switch."""
     if isinstance(error, BudgetExceeded):
         return None
     status = getattr(error, "status_code", None)
