@@ -514,6 +514,7 @@ def test_a_request_queued_for_a_connection_is_reported_with_its_wait_and_server_
     settings["hops"], settings["delay"] = 0, 1.0
     litellm.client_session = httpx.Client(limits=httpx.Limits(max_keepalive_connections=1, max_connections=1))
     monkeypatch.setattr(glimmer_serve, "POOL_WAIT_WARN_S", 0.5)
+    glimmer_serve.reset_pool_stats()
     replies = []
     calls = [threading.Thread(target=lambda: replies.append(_complete(url))) for _ in range(2)]
     for t in calls:
@@ -528,6 +529,11 @@ def test_a_request_queued_for_a_connection_is_reported_with_its_wait_and_server_
     wait, server = map(float, waits[0])
     assert 0.6 < wait < 5 and 0.9 < server < 5, (wait, server)
     assert "pool-wait log failed" not in err
+    # the arm-end summary counts every hop, not only the reported one, so silence is told apart from a dead hook
+    stats = glimmer_serve.pool_stats()
+    assert stats["requests"] == 2 and stats["waited"] == 1 and stats["longest_s"] == pytest.approx(wait, abs=0.1)
+    glimmer_serve.reset_pool_stats()
+    assert glimmer_serve.pool_stats() == {"requests": 0, "waited": 0, "longest_s": 0.0}
 
 
 def test_the_pool_wait_log_never_raises_into_the_call(capsys):

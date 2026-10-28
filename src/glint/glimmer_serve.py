@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -81,17 +82,38 @@ def _stamp(request) -> None:
     request.extensions["trace"] = trace
 
 
+# What `_report_pool_wait` has seen since the last `reset_pool_stats()`: every response hop, the hops that waited over
+# POOL_WAIT_WARN_S, and the longest wait. With no POOL WAIT line, these tell "no long waits" apart from a hook that
+# never ran (0 requests).
+_pool = {"requests": 0, "waited": 0, "longest_s": 0.0}
+_pool_lock = threading.Lock()
+
+
+def pool_stats() -> dict:
+    with _pool_lock:
+        return dict(_pool)
+
+
+def reset_pool_stats() -> None:
+    with _pool_lock:
+        _pool.update(requests=0, waited=0, longest_s=0.0)
+
+
 def _report_pool_wait(response) -> None:
     """httpx response hook: a hop that waited over POOL_WAIT_WARN_S for a free connection in the shared pool is
     printed loudly with its queue wait and its server time, so queueing is told apart from a slow server
-    (2026-10-28, banking-test: a call logged as 382 s was mostly queueing). It reads only what `_stamp` stored, and
-    a failure here is printed, never raised into the call (a hook reading `response.elapsed` once broke calls)."""
+    (2026-10-28, banking-test: a call logged as 382 s was mostly queueing). Every hop is counted in `pool_stats()`.
+    It reads only what `_stamp` stored, and a failure here is printed, never raised into the call (a hook reading
+    `response.elapsed` once broke calls)."""
     try:
         req = response.request
         sent, marks = req.extensions.get("glint_sent"), req.extensions.get("glint_marks") or {}
-        if sent is None or "connected" not in marks:
-            return
-        wait = marks["connected"] - sent
+        measured = sent is not None and "connected" in marks
+        wait = marks["connected"] - sent if measured else 0.0
+        with _pool_lock:
+            _pool["requests"] += 1
+            _pool["waited"] += wait > POOL_WAIT_WARN_S
+            _pool["longest_s"] = max(_pool["longest_s"], wait)
         if wait <= POOL_WAIT_WARN_S:
             return
         server = marks.get("answered", time.monotonic()) - marks["connected"]

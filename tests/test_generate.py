@@ -23,14 +23,24 @@ class _Results:
         return json.dumps({"simulations": self._sims})
 
 
+def _response(finish_reason: str):
+    import litellm
+
+    return litellm.ModelResponse(choices=[{"message": {"role": "assistant", "content": "x"},
+                                           "finish_reason": finish_reason}])
+
+
 @pytest.fixture
 def stand_in(monkeypatch, tmp_path):
     """A set of 1 retail task at k=2 whose runs are `outcomes[arm]`; restores everything generate patches."""
     import litellm
     import tau2.evaluator.evaluator_nl_assertions as nl
+    from tau2.runner import batch
+    from tau2.utils.display import ConsoleDisplay
 
     for obj, attr in ((llm_utils, "completion"), (litellm, "callbacks"), (nl, "DEFAULT_LLM_NL_ASSERTIONS"),
-                      (nl, "DEFAULT_LLM_NL_ASSERTIONS_ARGS")):
+                      (nl, "DEFAULT_LLM_NL_ASSERTIONS_ARGS"), (litellm, "suppress_debug_info"),
+                      (ConsoleDisplay, "console"), (batch, "logger"), (batch, "run_with_retry")):
         monkeypatch.setattr(obj, attr, getattr(obj, attr))
     monkeypatch.setattr(tools_ab, "install", lambda domain: None)
     monkeypatch.setattr(tools_ab, "_commit", lambda: "abc123")
@@ -146,7 +156,7 @@ def test_a_pool_past_its_cap_refuses_its_calls_and_only_its_calls(stand_in, make
                       + "\n", encoding="utf-8")
     monkeypatch.setattr(tools_ab, "Meter", lambda caps, phase: Meter(caps, ledger, phase))
     sent = []
-    monkeypatch.setattr(llm_utils, "completion", lambda **kw: sent.append(kw["model"]) or {"choices": [{}]})
+    monkeypatch.setattr(llm_utils, "completion", lambda **kw: sent.append(kw["model"]) or _response("stop"))
     outcomes["base"] = [make_sim("1", 0), make_sim("1", 1)]
     seen = {}
 
@@ -321,10 +331,13 @@ def test_resume_reruns_only_infrastructure_errors_and_keeps_failed_runs(tmp_path
     tools_ab.keep_failed_runs_on_resume()  # installed once however often generate runs
     results, done, _ = batch.try_resume(save, fresh, tasks, 4, auto_resume=True)
     assert key(overflow) in done and key(dropped) not in done  # only the dropped run is rerun
+    # τ² says "Resuming run from 7 runs. 2 runs remaining."; the line below counts the kept overflow back in
+    resume_line = f"RESUME: {2 * 4 - 1} runs kept, rerunning 1: [({dropped.task_id!r}, {dropped.trial})]"
     assert overflow.id in {s.id for s in results.simulations} and dropped.id not in {s.id for s in results.simulations}
     on_disk = {s.id for s in Results.load(save).simulations}
     assert overflow.id in on_disk and dropped.id not in on_disk and len(on_disk) == len(sims) - 1
-    assert "KEPT 1 failed runs" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "KEPT 1 failed runs" in out and resume_line in out
 
 
 def test_without_the_keeper_taus_resume_drops_failed_runs(tmp_path):
@@ -387,3 +400,158 @@ def test_generate_installs_the_save_retry(run_set, monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         tools_ab.generate(cfg)
     assert batch.create_checkpoint_fns.glint_retries_saves
+
+
+def test_a_truncated_glimmer_response_is_named_by_task_and_trial_and_counted_per_arm(stand_in, make_sim, monkeypatch,
+                                                                                      capsys):
+    # τ²'s "Output might be incomplete due to token limit!" names no task; Glint's line does
+    from tau2.runner import batch
+
+    cfg, outcomes = stand_in
+    outcomes["base"] = outcomes["tools"] = [make_sim("1", 0), make_sim("1", 1)]
+    replies = []
+    monkeypatch.setattr(llm_utils, "completion", lambda **kw: _response(replies.pop(0)))
+
+    def call():
+        return llm_utils.completion(model="openai/Muse-Glimmer-30B-modal", messages=[], max_tokens=8192)
+
+    def run(cfg_, domain, ids, arm, stamp, endpoint):
+        if arm == "base":  # two simulations through τ²'s own run_with_retry, as the batch runner calls it
+            for trial, reasons in ((1, ["length", "stop"]), (3, ["length"])):
+                replies.extend(reasons)
+                n = len(reasons)
+                batch.run_with_retry(lambda n=n: [call() for _ in range(n)] and types.SimpleNamespace(),
+                                     task=types.SimpleNamespace(id="task_022"), trial=trial, seed=1, max_retries=0,
+                                     retry_delay=0.0, console_display=True)
+            # outside a run, the task comes from τ²'s llm_log_dir, and what cannot be found is "unknown"
+            token = llm_utils.llm_log_dir.set(tools_ab.Path("sims/artifacts/task_task_077/sim_ab/llm_debug"))
+            replies.append("length")
+            call()
+            llm_utils.llm_log_dir.reset(token)
+            replies.append("length")
+            call()
+        return _Results(outcomes[arm])
+
+    monkeypatch.setattr(tools_ab, "_run", run)
+    tools_ab.generate(cfg)
+    out = capsys.readouterr().out
+    assert [line for line in out.splitlines() if line.startswith("TRUNCATED")] == [
+        "TRUNCATED: task_022 trial 1 (max_tokens 8192)", "TRUNCATED: task_022 trial 3 (max_tokens 8192)",
+        "TRUNCATED: task_077 trial unknown (max_tokens 8192)", "TRUNCATED: unknown trial unknown (max_tokens 8192)"]
+    assert "TRUNCATIONS: base retail: 4 Glimmer responses stopped at max_tokens" in out
+    assert "TRUNCATIONS: tools retail: 0 Glimmer responses stopped at max_tokens" in out  # counted per arm
+
+
+def test_each_arm_ends_with_its_own_pool_summary_even_with_no_requests(stand_in, make_sim, monkeypatch, capsys):
+    # a missing POOL WAIT line cannot tell "no long wait" from "the hook never ran"; the summary can
+    from glint import glimmer_serve
+
+    cfg, outcomes = stand_in
+    outcomes["base"] = outcomes["tools"] = [make_sim("1", 0), make_sim("1", 1)]
+
+    def hop(sent, connected):
+        return types.SimpleNamespace(request=types.SimpleNamespace(
+            method="POST", url=types.SimpleNamespace(host="x", path="/v1"),
+            extensions={"glint_sent": sent, "glint_marks": {"connected": connected, "answered": connected + 1}}))
+
+    def run(cfg_, domain, ids, arm, stamp, endpoint):
+        if arm == "base":
+            for sent, connected in ((0.0, 0.2), (0.0, 45.0), (10.0, 12.5)):
+                glimmer_serve._report_pool_wait(hop(sent, connected))
+        return _Results(outcomes[arm])
+
+    monkeypatch.setattr(tools_ab, "_run", run)
+    tools_ab.generate(cfg)
+    pools = [line for line in capsys.readouterr().out.splitlines() if line.startswith("POOL:")]
+    assert pools == ["POOL: 3 requests, 1 waited over 30 s, longest 45.0 s",
+                     "POOL: 0 requests, 0 waited over 30 s, longest 0.0 s"]
+
+
+def test_a_knowing_resume_on_new_code_explains_taus_config_warning(stand_in, make_sim, monkeypatch, capsys):
+    cfg, outcomes = stand_in
+    outcomes["base"] = outcomes["tools"] = [make_sim("1", 0), make_sim("1", 1)]
+    cfg["data"].mkdir(parents=True)
+    (cfg["data"] / "stamp.txt").write_text("20261027-000000", encoding="utf-8")
+    (cfg["data"] / "commit.txt").write_text("a2e9da7", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["tools_ab.py", "x", "--allow-mixed-code"])
+    tools_ab.generate(cfg)
+    assert ("MIXED CODE: this comparison started on a2e9da7, the code is now abc123; τ²'s \"Run config has changed\" "
+            "warning below is expected") in capsys.readouterr().out
+
+
+@pytest.fixture
+def quiet(monkeypatch):
+    """For quiet_run_log(): τ²'s console, batch logger and run_with_retry, and the loguru handlers, restored after."""
+    import litellm
+    from tau2.runner import batch
+    from tau2.utils.display import ConsoleDisplay
+
+    for obj, attr in ((litellm, "suppress_debug_info"), (ConsoleDisplay, "console"), (batch, "logger"),
+                      (batch, "run_with_retry")):
+        monkeypatch.setattr(obj, attr, getattr(obj, attr))
+    yield
+    logger.remove()
+
+
+def test_the_run_log_leaves_out_taus_resume_skips_and_repeated_errors_but_keeps_status(quiet, monkeypatch, capsys):
+    import litellm
+    from rich.text import Text
+    from tau2.runner import batch
+    from tau2.utils.display import ConsoleDisplay
+
+    seen = []
+    monkeypatch.setattr(batch, "run_with_retry", lambda run_fn, **kw: seen.append(kw) or run_fn())
+    tools_ab.quiet_run_log()
+    tools_ab.quiet_run_log()  # installed once
+    assert litellm.suppress_debug_info is True  # LiteLLM's "Provider List" / "Give Feedback" boilerplate
+    console = ConsoleDisplay.console
+    console.print(Text("Skipping task task_004, trial 1 because it has already been run.", style="bold yellow"))
+    console.print(Text("  Task task_022 failed permanently after 1 attempts: litellm.ContextWindowExceededError:\n"
+                       "more of the same error", style="bold red"))
+    console.print(Text("Status: 73/80 complete. Avg reward: 0.16 (N=64). 7 running: task_022.1(1068s)", style="cyan"))
+    console.print(Text("  Retry 1/2 for task task_022: boom", style="yellow"))
+    out = capsys.readouterr().out
+    assert "Skipping" not in out and "failed permanently" not in out
+    assert "Status: 73/80 complete" in out and "Retry 1/2 for task task_022" in out
+    # the evaluation table after each simulation is not printed; the run itself is untouched
+    task = types.SimpleNamespace(id="t1")
+    assert batch.run_with_retry(lambda: "sim", task=task, trial=2, console_display=True) == "sim"
+    assert seen == [{"task": task, "trial": 2, "console_display": False}]
+
+
+def test_only_taus_two_failed_run_errors_leave_the_run_log_and_the_simulation_log_keeps_them(quiet, monkeypatch,
+                                                                                               capsys, tmp_path):
+    # the records come from τ²'s real generate and run_with_retry; the handlers are added as run_tasks and
+    # _TaskLogContext add theirs
+    from tau2.runner import batch
+
+    tools_ab.quiet_run_log()
+    batch.logger.remove()
+    batch.logger.add(lambda msg: print(msg), level="WARNING")  # run_tasks: the run log
+    sim_log = tmp_path / "task.log"
+    sim_handler = batch.logger.add(sim_log, level="DEBUG", filter=lambda record: True)  # one simulation's own log
+
+    def overflow(**kw):
+        raise RuntimeError("ContextWindowExceededError: too long")
+
+    monkeypatch.setattr(llm_utils, "completion", overflow)
+
+    def run_fn():
+        return llm_utils.generate(model="openai/Muse-Glimmer-30B-modal", messages=[])
+
+    failed = batch.run_with_retry(run_fn, task=types.SimpleNamespace(id="task_022"), trial=0, seed=1, max_retries=0,
+                                  retry_delay=0.0)
+    assert "ContextWindowExceededError" in failed.info["error"]  # the cause the [runs] line prints
+    logger.error("an unrelated error")
+    try:
+        raise ValueError("ours")
+    except ValueError:
+        logger.exception("a Glint traceback")
+    batch.logger.remove(sim_handler)
+    out = capsys.readouterr().out
+    assert "tau2.utils.llm_utils:generate" not in out and "tau2.runner.progress:run_with_retry" not in out
+    assert "an unrelated error" in out and "a Glint traceback" in out and "ValueError: ours" in out
+    kept = sim_log.read_text(encoding="utf-8")
+    # a file handler gets both records: the filter is on the run log only. In a real run the simulation's task.log
+    # keeps generate:417; run_with_retry logs after τ² removes that handler, and its cause is in info.error
+    assert "generate:417" in kept and "run_with_retry:101" in kept

@@ -47,11 +47,13 @@ infrastructure error are taken out of τ²'s checkpoint, the arm file and events
 import json
 import os
 import random
+import re
 import sys
 import threading
 import time
 from collections import Counter
 from contextlib import ExitStack
+from contextvars import ContextVar
 from pathlib import Path
 
 import litellm
@@ -243,6 +245,7 @@ def keep_failed_runs_on_resume() -> None:
 
     def wrapped(save_path, simulation_results, tasks, num_trials, auto_resume=False, results_format="json"):
         save_path = Path(save_path)
+        given = tasks
         before = Results.load(save_path).simulations if save_path.exists() else []
         if save_path.exists() and Results._detect_format(save_path) != "json":
             raise RuntimeError(f"{save_path}: τ²'s dir checkpoint format; the failed-run keeper handles json only")
@@ -256,10 +259,109 @@ def keep_failed_runs_on_resume() -> None:
             save_path.write_text(results.model_dump_json(indent=2), encoding="utf-8")
             print(f"KEPT {len(back)} failed runs (context overflow or Glint error) as recorded; τ²'s resume would "
                   f"have rerun them: {sorted((s.task_id, s.trial) for s in back)}", flush=True)
+        if before:  # τ²'s own "Resuming run from N runs. M runs remaining." does not count the runs kept above
+            have = {(task_id, trial) for trial, task_id, _ in done}
+            pairs = [(t.id, trial) for t in given for trial in range(num_trials)]
+            rerun = sorted(p for p in pairs if p not in have)
+            print(f"RESUME: {len(pairs) - len(rerun)} runs kept, rerunning {len(rerun)}: {rerun}", flush=True)
         return results, done, tasks
 
     wrapped.glint_keeps_failures = True
     batch.try_resume = wrapped
+
+
+# τ²'s two ERROR records for a failed simulation, (logger name, function, line): the failed model call and the failed
+# run. The `[runs]` line (glint.runlog.RunEvents) carries the same outcome and cause once. A record from any other place
+# still prints; if τ² moves these lines, they print again rather than anything else being dropped.
+RUN_LOG_DROPPED = {("tau2.utils.llm_utils", "generate", 417), ("tau2.runner.progress", "run_with_retry", 101)}
+# τ² console lines left out of the run log: a resume prints one per finished run (the RESUME line lists what reruns),
+# and a failed run's error is printed again, wrapped, after its two ERROR records
+QUIET_LINES = (re.compile(r"Skipping task \S+, trial \d+ because it has already been run\."),
+               re.compile(r"  Task \S+ failed permanently after \d+ attempts: .*", re.DOTALL))
+# The (task id, trial) of the simulation the current thread runs, set around τ²'s run_with_retry
+CURRENT_RUN: ContextVar[tuple[str, int] | None] = ContextVar("glint_current_run", default=None)
+
+
+def run_log_filter(record) -> bool:
+    """loguru filter for the run log: False for the two known duplicate ERROR records only."""
+    return not (record["level"].name == "ERROR"
+                and (record["name"], record["function"], record["line"]) in RUN_LOG_DROPPED)
+
+
+class _RunLogLogger:
+    """τ²'s batch module logger with `run_log_filter` on the console handler run_tasks adds (it removes every handler
+    first, so a filter added before it would be lost). The per-simulation task.log handler, a file with its own
+    filter, is added unchanged, so each simulation's own log keeps every record."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def add(self, sink, **kwargs):
+        if callable(sink) and kwargs.get("filter") is None:
+            kwargs["filter"] = run_log_filter
+        return self._real.add(sink, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+class _QuietConsole:
+    """τ²'s shared rich console without QUIET_LINES; everything else (the Status lines) prints as before."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def print(self, *objects, **kwargs):
+        from rich.text import Text
+
+        if len(objects) == 1 and isinstance(objects[0], Text) and any(p.fullmatch(objects[0].plain)
+                                                                      for p in QUIET_LINES):
+            return None
+        return self._real.print(*objects, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+def quiet_run_log() -> None:
+    """Keep τ²'s per-run noise out of the run log; each simulation's own artifacts keep it (results.json holds the
+    run the evaluation table summarized; artifacts/task_<id>/sim_<id>/task.log holds every log record).
+    - the evaluation table after each simulation: run_with_retry is called with console_display=False;
+    - the "Skipping task ..." lines of a resume and the wrapped repeat of a failed run's error (QUIET_LINES);
+    - τ²'s two ERROR records for a failed simulation (RUN_LOG_DROPPED);
+    - LiteLLM's "Provider List" / "Give Feedback / Get Help" boilerplate printed after every error."""
+    from tau2.runner import batch
+    from tau2.utils.display import ConsoleDisplay
+
+    litellm.suppress_debug_info = True
+    if not isinstance(ConsoleDisplay.console, _QuietConsole):
+        ConsoleDisplay.console = _QuietConsole(ConsoleDisplay.console)
+    if not isinstance(batch.logger, _RunLogLogger):
+        batch.logger = _RunLogLogger(batch.logger)
+    if getattr(batch.run_with_retry, "glint_quiet", False):
+        return
+    run_with_retry = batch.run_with_retry
+
+    def quiet(run_fn, *, task, trial, **kwargs):
+        token = CURRENT_RUN.set((task.id, trial))
+        try:
+            return run_with_retry(run_fn, task=task, trial=trial, **(kwargs | {"console_display": False}))
+        finally:
+            CURRENT_RUN.reset(token)
+
+    quiet.glint_quiet = True
+    batch.run_with_retry = quiet
+
+
+def current_run() -> tuple[str, str]:
+    """(task id, trial) of the simulation this thread runs, from the run_with_retry wrapper, else the task from τ²'s
+    llm_log_dir (artifacts/task_<id>/sim_<id>/llm_debug); "unknown" for what cannot be found."""
+    run = CURRENT_RUN.get()
+    if run is not None:
+        return run[0], str(run[1])
+    log_dir = llm_utils.llm_log_dir.get()
+    task_dir = Path(log_dir).parent.parent.name if log_dir is not None else ""
+    return (task_dir[len("task_"):] if task_dir.startswith("task_") else "unknown"), "unknown"
 
 
 SAVE_TRIES, SAVE_WAIT_S = 6, 0.5
@@ -356,6 +458,9 @@ def generate(cfg: dict) -> None:
     if started and started != commit and "--allow-mixed-code" not in sys.argv:
         raise SystemExit(f"this comparison started on commit {started}, the code is now {commit}; resuming would mix "
                          "versions. Start a fresh stamp, or pass --allow-mixed-code.")
+    if started and started != commit:
+        print(f"MIXED CODE: this comparison started on {started}, the code is now {commit}; τ²'s \"Run config has "
+              "changed\" warning below is expected", flush=True)
     keep_failed_runs_on_resume()
     retry_locked_checkpoint_saves()
     if "--rerun-infrastructure-errors" in sys.argv and not release_infrastructure_errors(cfg, stamp, commit):
@@ -372,17 +477,25 @@ def generate(cfg: dict) -> None:
     meta = Meter(Caps(meta_usd=cfg["meta_usd"], gpu_usd=0.0), phase=f"{cfg['save']}-meta-{stamp}")
     gpu = Meter(Caps(meta_usd=0.0, gpu_usd=cfg["gpu_usd"]), phase=f"{cfg['save']}-gpu-{stamp}")
     register_litellm_prices()
+    quiet_run_log()
     litellm.callbacks = [litellm_callback((glim, ("Muse-Glimmer",)), (meta, ("muse-spark", "muse-wonder")))]
     base, glimmer = llm_utils.completion, reparsing(llm_utils.completion)
 
     halt = threading.Event()  # set by glimmer_serve.session() when the GPU cap trips or its watcher fails
+    truncated, truncated_lock = [0], threading.Lock()  # Glimmer responses cut at max_tokens in the current arm
 
     def route(*args, **kwargs):
         if "Muse-Glimmer" not in kwargs.get("model", ""):
             return base(*args, **kwargs)
         if halt.is_set():
             raise BudgetExceeded("the Modal session was halted (GPU cap reached or the GPU watcher failed)")
-        return glimmer(*args, **kwargs)
+        response = glimmer(*args, **kwargs)
+        if response.choices[0].finish_reason == "length":  # τ²'s own warning names no task
+            task_id, trial = current_run()
+            with truncated_lock:
+                truncated[0] += 1
+            print(f"TRUNCATED: {task_id} trial {trial} (max_tokens {kwargs.get('max_tokens', 'unset')})", flush=True)
+        return response
 
     # every Glimmer call's exact prompt and completion token ids (τ²'s saved runs keep neither), for activation capture
     recorded = recording(route, data / "calls.jsonl", require_ids=bool(cfg.get("modal")))
@@ -405,8 +518,14 @@ def generate(cfg: dict) -> None:
             glim_before, meta_before = glim.meta_usd, meta.meta_usd
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
                                label=f"{arm} {domain}")
+            truncated[0] = 0
+            glimmer_serve.reset_pool_stats()
             with events:
                 results = _run(cfg, domain, ids, arm, stamp, endpoint)
+            pool = glimmer_serve.pool_stats()
+            print(f"TRUNCATIONS: {arm} {domain}: {truncated[0]} Glimmer responses stopped at max_tokens", flush=True)
+            print(f"POOL: {pool['requests']} requests, {pool['waited']} waited over "
+                  f"{glimmer_serve.POOL_WAIT_WARN_S:.0f} s, longest {pool['longest_s']:.1f} s", flush=True)
             if halt.is_set():  # the drained runs are not results: no arm file, so a resume reruns this arm
                 raise BudgetExceeded(f"{arm} {domain}: the Modal session was halted mid-arm; the arm file is not "
                                      "written and a resumed run starts this arm again")
