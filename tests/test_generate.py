@@ -42,7 +42,7 @@ def stand_in(monkeypatch, tmp_path):
                       (nl, "DEFAULT_LLM_NL_ASSERTIONS_ARGS"), (litellm, "suppress_debug_info"),
                       (ConsoleDisplay, "console"), (batch, "logger"), (batch, "run_with_retry")):
         monkeypatch.setattr(obj, attr, getattr(obj, attr))
-    monkeypatch.setattr(tools_ab, "install", lambda domain: None)
+    monkeypatch.setattr(tools_ab, "install", lambda domain, enforcer=None: None)
     monkeypatch.setattr(tools_ab, "_commit", lambda: "abc123")
     outcomes = {}
 

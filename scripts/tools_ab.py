@@ -28,6 +28,13 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   failure inventory (twin-B 21, 44, 78 included) and every task of the first held-out draw; k=4.
 - `banking-other`: the other 10 banking tasks of `banking` (not tuned on), k=2.
 - `gate-banking`: activation-gate training data, no-tools arm only: the 12 banking tasks x 25 trials, concurrency 12.
+- `banking-gated`, `heldout2-gated`, `banking-test-gated`: the same tasks, k and caps as `banking`, `heldout2` and
+  `banking-test`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
+  write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
+  domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
+
+Set key `gates` (default true): the tools arm enforces the write gates. The sets recorded before the gates existed set
+it to false, so a resume of one of them stays comparable with its recorded runs.
 
 Optional set key `connections`: the size of LiteLLM's shared HTTP connection pool. When present, `generate()`
 replaces τ²'s shared clients (sync and async; 10 connections) with ones of that size before any call, still following
@@ -36,7 +43,8 @@ plus the user simulator's calls, on that one pool, so a smaller pool queues requ
 log reports it). Sets without the key keep τ²'s client unchanged, so their runs stay comparable; no existing set has
 it.
 
-Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking]
+Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
+                           heldout2-gated|banking-test-gated]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
 `--rerun-infrastructure-errors` (needs `--allow-mixed-code` when the code changed): the runs that ended in an
@@ -69,6 +77,7 @@ from glint import glimmer_serve, paths
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import recording
+from glint.gates import Enforcer, EventLog
 from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
 from glint.runlog import RunEvents, outcome
@@ -158,10 +167,29 @@ SETS = {
                          "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 6.0,
                          "data": MEASURE / "tools_ab_banking_failures", "stamp_dir": MEASURE / "tools_ab_banking",
                          "out": RESULTS / "tools-ab-banking-failures.json", "save": "tools-ab-banking"},
+    # Enforced write gates (decision 2026-10-28): the measurement run is banking-gated (the banking12 tasks, k=4)
+    "banking-gated": {"tasks": banking_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.0, "meta_usd": 1.5,
+                      "gpu_usd": 12.0, "gates": True, "requires_modal": True,
+                      "data": MEASURE / "tools_ab_banking12_gated", "out": RESULTS / "tools-ab-banking12-gated.json",
+                      "save": "tools-ab-banking12-gated"},
+    "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
+                       "gpu_usd": 8.0, "gates": True, "requires_modal": True,
+                       "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
+                       "save": "tools-ab-heldout2-gated"},
+    "banking-test-gated": {"tasks": banking_test_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.0,
+                           "meta_usd": 2.0, "gpu_usd": 20.0, "gates": True, "requires_modal": True,
+                           "data": MEASURE / "tools_ab_banking_test_gated",
+                           "out": RESULTS / "tools-ab-banking-test-gated.json", "save": "tools-ab-banking-test-gated"},
 }
+# Recorded before the gates existed: their tools arm stays ungated so a resume matches the recorded runs
+for _name in ("design", "heldout", "heldout2", "banking", "banking-test", "banking-other", "gate-banking",
+              "banking-failures"):
+    SETS[_name]["gates"] = False
 
 
 def for_backend(cfg: dict, modal: bool) -> dict:
+    if cfg.get("requires_modal") and not modal:
+        raise SystemExit("this set runs on Modal only: pass --modal")
     if not modal:
         return cfg
     stamp_dir = cfg.get("stamp_dir", cfg["data"])
@@ -435,6 +463,14 @@ def release_infrastructure_errors(cfg: dict, stamp: str, commit: str) -> int:
     return released
 
 
+def _enforcer(cfg: dict, domain: str, data: Path) -> Enforcer | None:
+    """The write gates for the tools arm (None when the set has `gates` false); decisions go to one log per run."""
+    if not cfg.get("gates", True):
+        return None
+    return Enforcer(domain, EventLog(data / f"gates-{domain}.sqlite"),
+                    context=lambda: dict(zip(("task_id", "trial"), current_run())))
+
+
 def generate(cfg: dict) -> None:
     # One stamp per comparison: a resumed run keeps the same meter phases (so the caps count earlier spend) and the
     # same τ² save_to (so finished simulations are resumed, not paid for again)
@@ -514,7 +550,7 @@ def generate(cfg: dict) -> None:
                                      failed=log.failure, log_lines=lambda: len(log.lines))
         for domain, ids, arm in pending:
             if arm == "tools":
-                install(domain)
+                install(domain, enforcer=_enforcer(cfg, domain, data))
             glim_before, meta_before = glim.meta_usd, meta.meta_usd
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
                                label=f"{arm} {domain}")

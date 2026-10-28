@@ -175,34 +175,40 @@ _ASSISTED = {"retail": AssistedRetailTools, "airline": AssistedAirlineTools}
 _ASSISTED_BANKING: dict[type, type] = {}  # composed banking toolkit class -> its assisted subclass
 
 
-def assist_environment(env, domain: str):
+def assist_environment(env, domain: str, enforcer=None):
     """Give one environment the decision tools, on its own live database. Used by install() for every environment
-    of a domain, and by the Bank Desk for just the tools pane."""
+    of a domain, and by the Bank Desk for just the tools pane. With an `enforcer` (glint.gates.Enforcer), THAT
+    environment's assistant writes are also gated: each one is checked before it runs, and a denied write does not
+    run."""
     if domain == "banking_knowledge":
         # The banking toolkit class is composed per retrieval variant and holds per-episode state, so keep the
         # instance and put the decision tools ahead of its class in the MRO
         cls = type(env.tools)
-        if issubclass(cls, BankingDecisionTools):  # already assisted (an installed constructor built it): no-op
-            return env
-        if cls not in _ASSISTED_BANKING:
-            _ASSISTED_BANKING[cls] = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
-        env.tools.__class__ = _ASSISTED_BANKING[cls]
-    else:
+        if not issubclass(cls, BankingDecisionTools):  # else already assisted (an installed constructor built it)
+            if cls not in _ASSISTED_BANKING:
+                _ASSISTED_BANKING[cls] = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
+            env.tools.__class__ = _ASSISTED_BANKING[cls]
+    elif not isinstance(env.tools, _ASSISTED[domain]):
         env.tools = _ASSISTED[domain](env.tools.db)
+    if enforcer is not None:
+        enforcer.attach(env)
     return env
 
 
-def install(domain: str) -> None:
-    """Make every environment τ² builds for `domain` carry the decision tools. Call once, before the run starts."""
+def install(domain: str, enforcer=None) -> None:
+    """Make every environment τ² builds for `domain` carry the decision tools, and, with an `enforcer`, gate its
+    writes. Call once per domain, before the run starts; a later call replaces the earlier one's enforcer."""
     base = registry.get_env_constructor(domain)
     if getattr(base, "glint_assisted", False):
-        return
+        if base.glint_enforcer is enforcer:
+            return
+        base = base.glint_base
 
     def constructor(*args, **kwargs):
-        return assist_environment(base(*args, **kwargs), domain)
+        return assist_environment(base(*args, **kwargs), domain, enforcer)
 
-    constructor.glint_assisted = True
+    constructor.glint_assisted, constructor.glint_base, constructor.glint_enforcer = True, base, enforcer
     registry._domains[domain] = constructor  # τ²'s registry has no public setter: checked right below
-    if not getattr(registry.get_env_constructor(domain), "glint_assisted", False):
+    if getattr(registry.get_env_constructor(domain), "glint_enforcer", None) is not enforcer or             not getattr(registry.get_env_constructor(domain), "glint_assisted", False):
         raise RuntimeError(f"installing the Glint tools for {domain} did not take effect (τ²'s registry changed?); "
                            "the tools arm would run without its tools")
