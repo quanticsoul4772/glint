@@ -682,6 +682,20 @@ def test_the_terse_wording_keeps_the_decision_and_uses_the_layout_before_the_pla
     assert tools_ab._enforcer(plan, "retail", tmp_path / "plan").wording == "plain"
 
 
+@pytest.mark.parametrize("reason,expected", [
+    ("payment method credit_card_1 is not allowed", "RETAIL_ARGS_NO"),
+    ("item 123 is not in order #W1", "RETAIL_ARGS_NO"),
+    ("status is 'delivered', action requires 'pending'", "POLICY_NO"),
+    ("order #W1 does not exist", "POLICY_NO"),
+])
+def test_a_retail_deny_on_the_arguments_says_a_corrected_call_can_succeed(monkeypatch, reason, expected):
+    from glint.assist import retail as retail_checks
+
+    monkeypatch.setattr(retail_checks, "check_eligibility",
+                        lambda *a, **k: {"allowed": False, "reasons": [reason], "rules": []})
+    assert rules._retail_gate("modify_payment")(None, {"order_id": "#W1"}).consequence == getattr(rules, expected)
+
+
 def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_an_f_string():
     # "...{{a, " f"..." "b}} ..." : the f-string part unescapes {{ but a plain string joined to it keeps }} as typed,
     # and the agent read "contacted_merchant}}" in procedure.dispute_plan.none's fix (2026-10-29)

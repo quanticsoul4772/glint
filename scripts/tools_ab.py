@@ -539,6 +539,14 @@ def _enforcer(cfg: dict, domain: str, data: Path) -> Enforcer | None:
                     wording=cfg.get("deny_wording", "plain"))
 
 
+def rerun_command(argv: list[str] | None = None) -> str:
+    """The launch.sh command that reruns this set's infrastructure errors (the guard refuses a bare tools_ab.py)."""
+    args = [a for a in (sys.argv[1:] if argv is None else argv)
+            if a not in ("--rerun-infrastructure-errors", "--allow-mixed-code")]
+    return (f"bash scripts/launch.sh LOG -- python -X utf8 scripts/tools_ab.py {' '.join(args)} "
+            "--rerun-infrastructure-errors (add --allow-mixed-code if the code changed)")
+
+
 def generate(cfg: dict) -> None:
     # One stamp per comparison: a resumed run keeps the same meter phases (so the caps count earlier spend) and the
     # same τ² save_to (so finished simulations are resumed, not paid for again)
@@ -666,9 +674,7 @@ def generate(cfg: dict) -> None:
             if kinds["infrastructure_error"]:
                 print(f"WARNING: {arm} {domain}: {kinds['infrastructure_error']} of {len(results.simulations)} runs "
                       "ended in an infrastructure error; they are excluded from the analysis and are not retried. "
-                      "Rerun them with: python scripts/tools_ab.py "
-                      f"{' '.join(a for a in sys.argv[1:] if a != '--rerun-infrastructure-errors')} "
-                      "--rerun-infrastructure-errors (and --allow-mixed-code if the code changed)", flush=True)
+                      f"Rerun them with: {rerun_command()}", flush=True)
             if kinds["context_overflow"]:
                 print(f"WARNING: {arm} {domain}: {kinds['context_overflow']} of {len(results.simulations)} runs "
                       "overflowed the context; they count as failed runs", flush=True)

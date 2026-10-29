@@ -89,7 +89,8 @@ def _retail_gate(action: str):
         return deny(f"retail.{action}", source, f"the retail policy does not allow this {action.replace('_', ' ')}",
                     "Do not repeat this write. Tell the user what the policy does not allow and why (rules in the "
                     "verdict); use only the payment methods the verdict allows.", v,
-                    consequence=POLICY_NO, facts=v["reasons"])
+                    consequence=POLICY_NO if any(r.startswith(("status is", "order ")) for r in v["reasons"])
+                    else RETAIL_ARGS_NO, facts=v["reasons"])
     return gate
 
 
@@ -99,6 +100,11 @@ AIRLINE_SOURCE = "glint.assist.airline.check_eligibility"
 AIRLINE_FIX = "Do not repeat this write. Tell the user the policy does not allow it (rules in the verdict)."
 POLICY_NO = ("This write cannot succeed for this record however it is retried. Tell the customer why, then continue "
              "with any other part of their request.")
+# a retail deny on the call's own arguments (items, payment method) can succeed with corrected ones; only the order's
+# status (glint.assist.retail.check_eligibility: "status is ...") rules the record out
+RETAIL_ARGS_NO = ("Nothing changed. A call with corrected arguments (the items or payment method the policy allows) "
+                  "can succeed; tell the customer what must change, then continue with any other part of their "
+                  "request.")
 
 
 def _airline_deny(rule: str, v: dict) -> GateResult:
