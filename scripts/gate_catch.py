@@ -40,7 +40,7 @@ from glint.gates import Enforcer, EventLog
 CAUSES = {"a": "wrong policy value", "b": "procedure step skipped or out of order",
           "c": "extra write", "d": "did not use a needed tool or info", "e": "overflow or max steps",
           "f": "ended or transferred early", "g": "wrong entity", "i": "wrong date argument"}
-FAILED = ("fail", "context_overflow")
+FAILED = ("fail", "context_overflow", "empty_reply")  # glint.runlog.outcome kinds that are failed runs
 WRAPPER = "call_discoverable_agent_tool"
 
 

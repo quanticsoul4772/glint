@@ -23,6 +23,8 @@ Decision = Literal["allow", "deny"]
 # decision can differ from τ²'s replay (which waits without a clock, see run_gate), so it is logged as an ERROR.
 DEFAULT_TIMEOUT_S = 60.0
 NO_RULE = "no_rule_yet"  # rule_id of the allow-and-log gate on a write no rule covers yet
+# the start of every deny the agent sees (GateResult.message); glint.gates.summary counts denied writes by it
+DENY_PREFIX = "Error: this write was blocked by a policy gate"
 
 
 @dataclass(frozen=True)
@@ -43,8 +45,7 @@ class GateResult:
     def message(self) -> str:
         """The tool result the agent sees on a deny: deterministic, so τ²'s replay of the call matches it."""
         verdict = json.dumps(self.details, sort_keys=True, default=str)
-        return (f"Error: this write was blocked by a policy gate (rule {self.rule_id}, check {self.source}) and was NOT "
-                f"executed."
+        return (f"{DENY_PREFIX} (rule {self.rule_id}, check {self.source}) and was NOT executed."
                 f"\nReason: {self.reason}\nPurpose: {self.purpose}\nFix: {self.fix}\nVerdict: {verdict}")
 
 
