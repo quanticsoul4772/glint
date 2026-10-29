@@ -195,7 +195,11 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                 session, row = bank.session(), None
                 plans = plan_arguments([w["args"] for w in rec["writes"] if w["name"] == rules.DISPUTE])
                 for i, w in enumerate(rec["writes"]):
-                    if w["name"].startswith(("give:", "U:")):
+                    if w["name"].startswith("give:"):  # the run gave the customer a tool: the card-digits gate reads it
+                        await client.call_tool("give_discoverable_user_tool",
+                                               {"discoverable_tool_name": w["name"].split(":", 1)[1]})
+                        continue
+                    if w["name"].startswith("U:"):  # the customer's own call
                         continue
                     user = str(w["args"].get("user_id", ""))
                     if w["name"] == rules.DISPUTE and user in plans:

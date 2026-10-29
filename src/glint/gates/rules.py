@@ -367,6 +367,9 @@ def _register_banking(reg: GateRegistry) -> None:
                           "database before this write.", procedure.lookups(tool), toolkit=True))
     reg.register(Gate("procedure_increase_first_gate", (DISPUTE,), "credit_card_account_logistics_007: a submitted "
                       "credit limit increase is decided before a dispute.", procedure.increase_first))
+    reg.register(Gate("procedure_card_digits_gate", (DISPUTE,), "A dispute carries the card's last 4 digits as the "
+                      "customer's get_card_last_4_digits tool reports them, after the customer was given it.",
+                      procedure.card_digits))
     reg.register(Gate("procedure_dispute_plan_gate", (DISPUTE,), "credit_cards_(general)_015 criterion 4: the "
                       "disputes filed first take the provisional credit, so each filing follows the plan_disputes "
                       "plan (order from τ² train gold, tasks 037-041 and 081).", procedure.dispute_plan, toolkit=True))

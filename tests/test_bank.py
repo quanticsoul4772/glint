@@ -350,8 +350,9 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     rules_by_task = {}
     for r in stopped.values():
         rules_by_task.setdefault(r["run"].split()[2], []).append(r["rule_id"])
-    # every recorded task_040 run leaves the plan made from its own disputes (replayplan) before a wrong flag lands
-    assert rules_by_task["task_040"] == ["procedure.dispute_plan.order"] * 8
+    # every recorded task_040 run is stopped before a wrong flag lands: by the plan made from its own disputes
+    # (replayplan), and one earlier, at a filing with wrong card digits and no card-digits tool given
+    assert sorted(rules_by_task["task_040"]) == ["procedure.card_digits.give"] + ["procedure.dispute_plan.order"] * 7
     # gates phase 2 stops runs earlier, on steps the recording shows were skipped: the approve of task_051 base
     # trials 0 and 1 came with no dispute-history or pending-order lookup in the whole run (they were not denied by
     # the approve rule: the customer paid down before submitting, so the policy approves on the live database)
@@ -361,8 +362,9 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     r = stopped["banking12 base task_041 trial 1"]  # no log_verification anywhere before its disputes
     assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.verified", True)
     assert stopped["banking12 tools task_041 trial 1"]["rule_id"] == "banking.verification"  # wrong time_verified
-    assert sorted(rules_by_task["task_041"]) == ["banking.dispute", "banking.verification"] + [
-        "procedure.dispute_plan.order"] * 5 + ["procedure.verified"]
+    assert sorted(rules_by_task["task_041"]) == ["banking.dispute", "banking.verification",
+                                                 "procedure.card_digits.give"] + [
+        "procedure.dispute_plan.order"] * 4 + ["procedure.verified"]
     assert sum(r.startswith("procedure.transfer.") for r in rules_by_task["task_051"] + rules_by_task["task_054"]) == 3
 
 
