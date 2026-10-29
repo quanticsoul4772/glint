@@ -81,6 +81,7 @@ from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import recording
 from glint.gates import Enforcer, EventLog
+from glint.gates import summary as gate_summary
 from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
 from glint.runlog import RunEvents, outcome
@@ -261,13 +262,14 @@ def _commit() -> str:
     return out + ("-dirty" if dirty else "")
 
 
-KEPT_ON_RESUME = ("context_overflow", "glint_error")  # failed runs: results, never rerun
+KEPT_ON_RESUME = ("context_overflow", "empty_reply", "glint_error")  # failed runs: results, never rerun
 
 
 def keep_failed_runs_on_resume() -> None:
     """τ²'s resume (tau2.runner.checkpoint.try_resume) reruns every simulation whose termination reason is
     infrastructure_error, and rewrites the checkpoint without them. Glint splits that reason (glint.runlog.outcome):
-    a context overflow or a Glint error is a failed run, a result, and must not be rerun until it passes. This wraps
+    a context overflow, an empty reply or a Glint error is a failed run, a result, and must not be rerun until it
+    passes. This wraps
     the resume τ²'s batch runner calls so those runs stay as recorded, on disk and in the runs it skips; only
     Glint's infrastructure_error and budget_stop runs (not results) are rerun."""
     from tau2.data_model.simulation import Results
@@ -291,8 +293,8 @@ def keep_failed_runs_on_resume() -> None:
             results.simulations.extend(back)
             done |= {(s.trial, s.task_id, s.seed) for s in back}
             save_path.write_text(results.model_dump_json(indent=2), encoding="utf-8")
-            print(f"KEPT {len(back)} failed runs (context overflow or Glint error) as recorded; τ²'s resume would "
-                  f"have rerun them: {sorted((s.task_id, s.trial) for s in back)}", flush=True)
+            print(f"KEPT {len(back)} failed runs (context overflow, empty reply or Glint error) as recorded; τ²'s "
+                  f"resume would have rerun them: {sorted((s.task_id, s.trial) for s in back)}", flush=True)
         if before:  # τ²'s own "Resuming run from N runs. M runs remaining." does not count the runs kept above
             have = {(task_id, trial) for trial, task_id, _ in done}
             pairs = [(t.id, trial) for t in given for trial in range(num_trials)]
@@ -469,6 +471,22 @@ def release_infrastructure_errors(cfg: dict, stamp: str, commit: str) -> int:
     return released
 
 
+def empty_reply_line(response) -> str | None:
+    """An `EMPTY REPLY:` line for a Glimmer response with no text and no tool call (τ² then ends the run with "must have
+    either content or tool_calls", outcome empty_reply), with its finish reason and token counts; else None."""
+    choice = response.choices[0]
+    message = choice.message
+    if (message.content or "").strip() or message.tool_calls:
+        return None
+    task_id, trial = current_run()
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "completion_tokens_details", None)
+    reasoning = getattr(details, "reasoning_tokens", None)
+    tokens = (f"prompt {usage.prompt_tokens} tokens, completion {usage.completion_tokens}"
+              + (f" (reasoning {reasoning})" if reasoning is not None else "")) if usage else "no token counts"
+    return f"EMPTY REPLY: {task_id} trial {trial}: finish_reason {choice.finish_reason}, {tokens}"
+
+
 def _enforcer(cfg: dict, domain: str, data: Path) -> Enforcer | None:
     """The write gates for the tools arm (None when the set has `gates` false); decisions go to one log per run."""
     if not cfg.get("gates", True):
@@ -537,6 +555,9 @@ def generate(cfg: dict) -> None:
             with truncated_lock:
                 truncated[0] += 1
             print(f"TRUNCATED: {task_id} trial {trial} (max_tokens {kwargs.get('max_tokens', 'unset')})", flush=True)
+        empty = empty_reply_line(response)
+        if empty:
+            print(empty, flush=True)
         return response
 
     # every Glimmer call's exact prompt and completion token ids (τ²'s saved runs keep neither), for activation capture
@@ -555,11 +576,13 @@ def generate(cfg: dict) -> None:
             glimmer_serve.wait_ready(endpoint, os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"],
                                      failed=log.failure, log_lines=lambda: len(log.lines))
         for domain, ids, arm in pending:
+            enforcer = _enforcer(cfg, domain, data) if arm == "tools" else None
             if arm == "tools":
-                install(domain, enforcer=_enforcer(cfg, domain, data))
+                install(domain, enforcer=enforcer)
             glim_before, meta_before = glim.meta_usd, meta.meta_usd
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
-                               label=f"{arm} {domain}")
+                               label=f"{arm} {domain}",
+                               on_run=gate_summary.ErrorLimitAlerts() if enforcer is not None else None)
             truncated[0] = 0
             glimmer_serve.reset_pool_stats()
             with events:
@@ -568,6 +591,10 @@ def generate(cfg: dict) -> None:
             print(f"TRUNCATIONS: {arm} {domain}: {truncated[0]} Glimmer responses stopped at max_tokens", flush=True)
             print(f"POOL: {pool['requests']} requests, {pool['waited']} waited over "
                   f"{glimmer_serve.POOL_WAIT_WARN_S:.0f} s, longest {pool['longest_s']:.1f} s", flush=True)
+            if enforcer is not None:  # the gate decisions live only in the gate log; one line puts them in the run log
+                sims = [s.model_dump(mode="json") for s in results.simulations]
+                print(gate_summary.line(f"{arm} {domain}", gate_summary.summarize(enforcer.events.events(), sims)),
+                      flush=True)
             if halt.is_set():  # the drained runs are not results: no arm file, so a resume reruns this arm
                 raise BudgetExceeded(f"{arm} {domain}: the Modal session was halted mid-arm; the arm file is not "
                                      "written and a resumed run starts this arm again")
@@ -595,6 +622,9 @@ def generate(cfg: dict) -> None:
             if kinds["context_overflow"]:
                 print(f"WARNING: {arm} {domain}: {kinds['context_overflow']} of {len(results.simulations)} runs "
                       "overflowed the context; they count as failed runs", flush=True)
+            if kinds["empty_reply"]:
+                print(f"WARNING: {arm} {domain}: {kinds['empty_reply']} of {len(results.simulations)} runs ended on an "
+                      "empty Glimmer reply (no content, no tool call); they count as failed runs", flush=True)
             print(f"{arm} {domain}: {len(results.simulations)} sims; this arm Glimmer "
                   f"${glim.meta_usd - glim_before:.3f}, Meta ${meta.meta_usd - meta_before:.3f}; phase totals Glimmer "
                   f"${glim.meta_usd:.3f}, "
@@ -622,17 +652,18 @@ def analyze(cfg: dict) -> None:
                 key = f"{domain}-{s['task_id']}"
                 row = report.setdefault(key, {}).setdefault(arm, {"passes": 0, "runs": 0, "tool_calls": Counter(),
                                                                    "infra_errors": 0, "context_overflows": 0,
-                                                                   "glint_errors": 0, "eval_errors": 0,
+                                                                   "empty_replies": 0, "glint_errors": 0, "eval_errors": 0,
                                                                    "budget_stops": 0})
                 kind = outcome(s)
                 if kind in ("infrastructure_error", "eval_error", "budget_stop"):  # not results; counted below
                     row[{"infrastructure_error": "infra_errors", "eval_error": "eval_errors",
                          "budget_stop": "budget_stops"}[kind]] += 1
                     continue
-                # a context overflow is the model's own conversation outgrowing the context, and a Glint error is
-                # Glint's own failure: both are failed runs (τ² files them as infrastructure errors; the cause is in
-                # info.error)
+                # a context overflow is the model's own conversation outgrowing the context, an empty reply is the
+                # model returning nothing (decision 2026-10-28), and a Glint error is Glint's own failure: all are
+                # failed runs (τ² files them as infrastructure errors; the cause is in info.error)
                 row["context_overflows"] += kind == "context_overflow"
+                row["empty_replies"] += kind == "empty_reply"
                 row["glint_errors"] += kind == "glint_error"
                 row["runs"] += 1
                 row["passes"] += kind == "pass"

@@ -11,9 +11,13 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 CONTEXT_OVERFLOW = "ContextWindowExceeded"
+# τ²'s check on a reply with no text and no tool call (Message.validate); Glimmer returned an empty message twice in
+# banking-gated on 2026-10-28. A model failure like an overflow (decision 2026-10-28): a failed run, never excluded
+EMPTY_REPLY = "must have either content or tool_calls"
 # Glint's own exceptions put their class name first in the message (τ² keeps only str(exception) in info.error)
 BUDGET_STOP = "BudgetExceeded:"
 GLINT_ERRORS = ("AtemParseError:", "CallLogError:")
@@ -26,6 +30,8 @@ def outcome(sim: dict) -> str:
     - 'pass' / 'fail': the run finished and was evaluated (reward 1 or not);
     - 'context_overflow': the model's own conversation outgrew the context, a model failure that τ² records as an
       infrastructure error;
+    - 'empty_reply': the model returned a message with no content and no tool call, which τ² records as an
+      infrastructure error; a model failure and a failed run, like context_overflow;
     - 'glint_error': Glint's own code failed inside the run (atem re-parse, call recording): a failed run, charged
       to Glint, never hidden as infrastructure;
     - 'budget_stop': a spend cap stopped the run: not a result, and the arm must not be saved as finished;
@@ -35,6 +41,8 @@ def outcome(sim: dict) -> str:
         error = str((sim.get("info") or {}).get("error", ""))
         if CONTEXT_OVERFLOW in error:
             return "context_overflow"
+        if EMPTY_REPLY in error:
+            return "empty_reply"
         if BUDGET_STOP in error:
             return "budget_stop"
         if any(e in error for e in GLINT_ERRORS):
@@ -58,7 +66,7 @@ def event(sim: dict, label: str) -> dict:
 # overflows a share of the finished runs. 2026-10-28, banking-test: 10 runs were lost to one HTTP 303 bug and about
 # one run in six overflowed the context, and each showed only as its own line.
 ALERT_COUNTS = {"infrastructure_error": 3, "glint_error": 1, "budget_stop": 1, "eval_error": 3}
-ALERT_SHARES = {"context_overflow": (0.15, 10)}  # share of finished runs, after at least this many runs
+ALERT_SHARES = {"context_overflow": (0.15, 10), "empty_reply": (0.15, 10)}  # share of finished runs, after at least this many runs
 
 
 class RunEvents:
@@ -66,8 +74,9 @@ class RunEvents:
     to stderr and append one JSON record to `events_path`. Warns once per `stall_s` with no new simulation."""
 
     def __init__(self, results_path: Path, events_path: Path, label: str, poll_s: float = 30.0,
-                 stall_s: float = 1200.0):
+                 stall_s: float = 1200.0, on_run: Callable[[dict], str | None] | None = None):
         self.results_path, self.events_path, self.label = Path(results_path), Path(events_path), label
+        self.on_run = on_run  # called with each new simulation; a returned line is printed (glint.gates.summary)
         self.poll_s, self.stall_s = poll_s, stall_s
         self.seen: set[tuple] = set()
         self.counts: dict[str, int] = {}
@@ -154,6 +163,9 @@ class RunEvents:
                     loud = "  <-- " + e["error"][:160] if e["outcome"] not in ("pass", "fail") else ""
                     self._say(f"{e['task_id']} trial {e['trial']}: {e['outcome'].upper()} ({e['termination']}, "
                               f"{e['duration_s']:.0f} s, {e['messages']} msgs){loud}")
+                    note = self.on_run(s) if self.on_run is not None else None
+                    if note:
+                        self._say(note)
             self._say(f"totals {self.counts}")
             self._alert(new[-1] if new else None)
         elif time.time() - self._last_new > self.stall_s:

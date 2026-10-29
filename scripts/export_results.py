@@ -75,18 +75,22 @@ def main():
                 continue
             compared.append(key)
             b, t = arms["base"], arms["tools"]
-            # no counted run in an arm, or every run overflowed the context: the task says nothing about the tools
+            # no counted run in an arm, or every run overflowed the context or returned an empty reply: the task says
+            # nothing about the tools
             reason = None
+            overflows = b.get("context_overflows", 0) + t.get("context_overflows", 0)
+            empty = b.get("empty_replies", 0) + t.get("empty_replies", 0)
             if not b["runs"] or not t["runs"]:
                 change, reason = "no data", "no counted runs in an arm (infrastructure, evaluation or cap stops)"
-            elif b.get("context_overflows", 0) + t.get("context_overflows", 0) == b["runs"] + t["runs"]:
-                change, reason = "no data", "every run overflowed the context"
+            elif overflows + empty == b["runs"] + t["runs"]:
+                change, reason = "no data", ("every run overflowed the context" + (" or returned an empty reply"
+                                                                                    if empty else ""))
             else:
                 rb, rt = b["passes"] / b["runs"], t["passes"] / t["runs"]
                 change = "improved" if rt > rb else ("worse" if rt < rb else "tied")
             tally[change] += 1
             rows.append({"task": key, "alone": f"{b['passes']}/{b['runs']}", "tools": f"{t['passes']}/{t['runs']}",
-                         "change": change, "overflows": b.get("context_overflows", 0) + t.get("context_overflows", 0),
+                         "change": change, "overflows": overflows, "empty_replies": empty,
                          "infra_errors": b["infra_errors"] + t["infra_errors"],
                          "glint_errors": b.get("glint_errors", 0) + t.get("glint_errors", 0),
                          "no_data_reason": reason})

@@ -422,11 +422,9 @@ def test_manifest_names_files_that_exist_and_the_launcher_pins_its_dependencies(
     start = (PLUGIN / "commands" / "start.md").read_text(encoding="utf-8")
     assert "$ARGUMENTS" in start and bank.LOAD in start and bank.POLICY in start
     launcher = (PLUGIN / "mcp" / "glint_bank.py").read_text(encoding="utf-8")
-    assert 'requires-python = ">=3.12,<3.13"' in launcher  # τ² imports audioop, which Python 3.13 removed
-    assert "glint @ git+https://github.com/quanticsoul4772/glint@" in launcher
-    tau2 = "tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a316c3f83133267fbd6faaa770992"
-    # in the dependencies, and as the override of Glint's own tau2 source (a sibling path absent from Glint's git tree)
-    assert launcher.count(tau2) == 2 and "# [tool.uv]\n# override-dependencies = [\n" in launcher
+    # stage 1 needs no packages; the server stage's uv script pins them (tests/test_launcher.py checks its metadata)
+    assert '# requires-python = ">=3.12,<3.13"\n# dependencies = []\n' in launcher
+    assert 'GLINT_REQUIREMENT = "glint @ git+https://github.com/quanticsoul4772/glint@' in launcher
 
 
 def test_launcher_points_tau2_at_the_bundled_data_and_runs_utf8(tmp_path):
@@ -434,7 +432,8 @@ def test_launcher_points_tau2_at_the_bundled_data_and_runs_utf8(tmp_path):
     plugin's data folder (brief prints a task τ² loaded from there). Without UTF-8 mode τ² reads task_100 as cp1252
     on Windows."""
     env = {k: v for k, v in os.environ.items() if k not in ("TAU2_DATA_DIR", "PYTHONUTF8")}
-    env |= {"PYTHONPATH": str(ROOT / "src"), "GLINT_BANK_HOME": str(tmp_path)}
+    # the server stage, as uv runs it once the dependencies are installed (stage 1 is in tests/test_launcher.py)
+    env |= {"PYTHONPATH": str(ROOT / "src"), "GLINT_BANK_HOME": str(tmp_path), "GLINT_BANK_STAGE": "server"}
     # stdout in UTF-8, so text τ² misread as cp1252 shows as mojibake instead of round-tripping back to the same bytes
     probe = ("import runpy, sys; sys.stdout.reconfigure(encoding='utf-8'); "
              "sys.argv = [sys.argv[0], 'brief', 'task_100']; "
