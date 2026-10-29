@@ -594,3 +594,29 @@ def test_the_run_log_drops_taus_cause_free_simulation_loop_warning():
     record = {"name": "tau2.orchestrator.orchestrator", "function": "run", "line": 287}
     assert ("tau2.orchestrator.orchestrator", "run", 287) in tools_ab.RUN_LOG_DROPPED
     assert not tools_ab.run_log_filter(record | {"level": types.SimpleNamespace(name="WARNING")})
+
+
+def test_a_fail_fast_pattern_stops_the_arm_names_its_cause_and_refuses_later_glimmer_calls(stand_in, make_sim,
+                                                                                         monkeypatch, capsys):
+    cfg, outcomes = stand_in
+    outcomes["base"] = outcomes["tools"] = [make_sim("1", 0), make_sim("1", 1)]
+    watchers = []
+
+    class Watch(tools_ab.RunEvents):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            watchers.append(self)
+
+    def run(cfg_, domain, ids, arm, stamp, endpoint):
+        if arm == "tools":  # the run log sees a pattern mid-arm
+            watchers[-1]._halt("5 runs in a row ended infrastructure_error with the same cause: HTTP 303")
+        return _Results(outcomes[arm])
+
+    monkeypatch.setattr(tools_ab, "RunEvents", Watch)
+    monkeypatch.setattr(tools_ab, "_run", run)
+    with pytest.raises(BudgetExceeded, match=r"tools retail: stopped early \(fail fast\): 5 runs in a row"):
+        tools_ab.generate(cfg)
+    assert (cfg["data"] / "base-retail.json").exists() and not (cfg["data"] / "tools-retail.json").exists()
+    assert "FAIL FAST: 5 runs in a row" in capsys.readouterr().err
+    with pytest.raises(BudgetExceeded, match=r"stopped early \(fail fast\)"):
+        llm_utils.completion(model="openai/Muse-Glimmer-30B-modal", messages=[])

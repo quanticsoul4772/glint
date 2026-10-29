@@ -69,6 +69,13 @@ def event(sim: dict, label: str) -> dict:
 # one run in six overflowed the context, and each showed only as its own line.
 ALERT_COUNTS = {"infrastructure_error": 3, "glint_error": 1, "budget_stop": 1, "eval_error": 3}
 ALERT_SHARES = {"context_overflow": (0.15, 10), "empty_reply": (0.15, 10)}  # share of finished runs, after at least this many runs
+# Fail fast: patterns that cannot be noise stop the arm (RunEvents `on_halt`) instead of only alerting. Runs in a row
+# that end with the same outcome and the same cause (the first HALT_CAUSE_CHARS of info.error); context overflows and
+# empty replies are model results, not faults, and never stop a run. And HALT_STALLS stall windows in a row with no run
+# finished (two 20-minute windows across 12 concurrent runs mean nothing is being served).
+HALT_SAME_CAUSE = {"infrastructure_error": 5, "eval_error": 5, "glint_error": 3}
+HALT_CAUSE_CHARS = 80
+HALT_STALLS = 2
 
 
 class RunEvents:
@@ -77,8 +84,13 @@ class RunEvents:
 
     def __init__(self, results_path: Path, events_path: Path, label: str, poll_s: float = 30.0,
                  stall_s: float = 1200.0, on_run: Callable[[dict], str | None] | None = None,
-                 domain: str | None = None):
+                 domain: str | None = None, on_halt: Callable[[str], None] | None = None):
         self.results_path, self.events_path, self.label = Path(results_path), Path(events_path), label
+        # called once, with the reason, when a fail-fast pattern is seen (HALT_SAME_CAUSE, HALT_STALLS); the caller
+        # stops the arm. Without it the pattern is still printed as a FAIL FAST line.
+        self.on_halt, self.halted = on_halt, None
+        self._streak: tuple[tuple[str, str] | None, int] = (None, 0)  # (outcome, cause) of the latest runs, how many
+        self._stalls = 0
         self.on_run = on_run  # called with each new simulation; a returned line is printed (glint.gates.summary)
         # With the run's τ² domain, each failed run is diffed against τ²'s expected actions (glint.inspect): a compact
         # summary goes into its event record and its line, and the arm's end prints a DIFFS line. Imported here, not
@@ -120,6 +132,22 @@ class RunEvents:
             from glint import inspect
 
             self._say(inspect.diffs_line(list(self.diffs.values())))
+
+    def _track_streak(self, e: dict) -> None:
+        kind = e["outcome"]
+        key = (kind, str(e.get("error") or "")[:HALT_CAUSE_CHARS]) if kind in HALT_SAME_CAUSE else None
+        n = self._streak[1] + 1 if key is not None and key == self._streak[0] else (1 if key is not None else 0)
+        self._streak = (key, n)
+        if key is not None and n >= HALT_SAME_CAUSE[kind]:
+            self._halt(f"{n} runs in a row ended {kind} with the same cause: {key[1] or 'no error recorded'}")
+
+    def _halt(self, reason: str) -> None:
+        if self.halted is not None:
+            return
+        self.halted = reason
+        self._say(f"FAIL FAST: {reason}; stopping the arm")
+        if self.on_halt is not None:
+            self.on_halt(reason)
 
     def _alert(self, latest: dict | None) -> None:
         """One ALERT line when an outcome repeats past its threshold, again at each doubling, with its tasks and the
@@ -184,6 +212,7 @@ class RunEvents:
                             e["diff_error"] = f"{type(exc).__name__}: {exc}"[:300]
                             loud += f"  WARNING: no diff ({e['diff_error'][:160]})"
                     self.counts[e["outcome"]] = self.counts.get(e["outcome"], 0) + 1
+                    self._track_streak(e)
                     by_task = self.tasks_by_outcome.setdefault(e["outcome"], {})
                     by_task[str(e["task_id"])] = by_task.get(str(e["task_id"]), 0) + 1
                     fh.write(json.dumps(e, default=str) + "\n")
@@ -197,8 +226,14 @@ class RunEvents:
                         self._say(note)
             self._alert(new[-1] if new else None)
         elif time.time() - self._last_new > self.stall_s:
-            self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({len(self.seen)} so far)")
+            self._stalls += 1
+            self._say(f"WARNING: no run finished in {self._stalls * self.stall_s / 60:.0f} min ({len(self.seen)} so "
+                      "far)")
             self._last_new = time.time()
+            if self._stalls >= HALT_STALLS:
+                self._halt(f"no run finished in {self._stalls * self.stall_s / 60:.0f} min")
+        if new:
+            self._stalls = 0
         return new
 
     def _watch(self):
