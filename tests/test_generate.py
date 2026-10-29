@@ -65,7 +65,11 @@ def test_generate_writes_both_arms_and_warns_about_what_is_not_a_clean_result(st
     assert (cfg["data"] / "commit.txt").read_text(encoding="utf-8") == "abc123"
     out = capsys.readouterr().out
     assert "base retail: 1 of 2 runs ended in an infrastructure error" in out
-    assert "--rerun-infrastructure-errors (and --allow-mixed-code if the code changed)" in out
+    assert "Rerun them with: bash scripts/launch.sh LOG -- python -X utf8 scripts/tools_ab.py " in out
+    assert tools_ab.rerun_command(["banking-plan-gated", "--modal", "--allow-mixed-code",
+                                   "--rerun-infrastructure-errors"]) == (
+        "bash scripts/launch.sh LOG -- python -X utf8 scripts/tools_ab.py banking-plan-gated --modal "
+        "--rerun-infrastructure-errors (add --allow-mixed-code if the code changed)")
     assert "tools retail: 1 simulations, expected 2" in out
     assert "tools retail: 1 of 1 runs failed in Glint's own code" in out
 
