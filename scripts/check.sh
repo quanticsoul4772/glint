@@ -11,7 +11,9 @@ RUFF=${RUFF:-ruff}
 repo=$(git rev-parse --show-toplevel)
 status=0
 for ref in "$@"; do
-  wt=$(mktemp -d "${TMPDIR:-/tmp}/glint-check-XXXXXX")
+  # next to the repo, not in the system temp folder: tests find the vendored τ² checkout relative to the repo's
+  # parent (../vendor/tau2-bench), which a worktree in /tmp does not have (2026-10-29)
+  wt=$(mktemp -d "$(dirname "$repo")/glint-check-XXXXXX")
   if ! git -C "$repo" worktree add -q --detach "$wt" "$ref" 2>/dev/null; then
     echo "$ref: FAILED to check out"; status=1; rmdir "$wt" 2>/dev/null; continue
   fi

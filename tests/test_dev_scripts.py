@@ -57,3 +57,13 @@ def test_stop_run_fails_loud_when_containers_stay(tmp_path):
     modal = _stub(tmp_path / "modal", 'if [ "$1 $2" = "app list" ]; then echo "  ap-1  glint-se  stopping  1  x  y"; fi')
     r = _run("stop_run.sh", ["no-such-set-xyz"], {"MODAL": modal, "STOP_WAIT_S": "0"})
     assert r.returncode == 1 and "FAILED: glint-serve still has 1 container(s)" in r.stderr
+
+
+def test_check_puts_its_worktree_next_to_the_repo(tmp_path):
+    # tests find the vendored τ² checkout at ../vendor relative to the repo, so the throwaway worktree is a sibling
+    where = tmp_path / "where.txt"
+    py = _stub(tmp_path / "py", f'pwd >> "{where.as_posix()}"; echo "1 passed"; exit 0')
+    lint = _stub(tmp_path / "ruff", "exit 0")
+    assert _run("check.sh", ["HEAD"], {"PY": py, "RUFF": lint}).returncode == 0
+    parent = where.read_text(encoding="utf-8").splitlines()[0].rstrip("/").rsplit("/", 2)
+    assert parent[-1].startswith("glint-check-") and parent[-2] == ROOT.parent.name
