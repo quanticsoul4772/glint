@@ -91,8 +91,8 @@ def test_live_session_streams_then_reports_outcomes():
     assert snap["alone"]["events"] == [{"kind": "customer", "text": "hi"}]
     for pane in session.panes.values():
         pane.orchestrator.gate.set()
-    for pane in session.panes.values():
-        pane.thread.join(5)
+    # wait on the session's own end, not on the pane threads: the session starts them, and a join could reach a pane
+    # whose thread was not started yet ("cannot join thread before it is started", about 1 run in 6, 2026-10-29)
     while not session.done and time.time() < deadline + 5:  # done is set after the panes end, not with them
         time.sleep(0.01)
     snap = session.snapshot()
