@@ -77,6 +77,9 @@ from contextlib import ExitStack
 from contextvars import ContextVar
 from pathlib import Path
 
+import quiet_logs  # noqa: F401  (must stay the first import that can load loguru: τ²'s registry logs at import)
+
+# isort: split
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
 from m2_pilot import GLIMMER, META, SPARK, glimmer_args
@@ -396,6 +399,8 @@ class _QuietConsole:
                 if self._last_status is not None and now - self._last_status < STATUS_EVERY_S:
                     return None
                 self._last_status = now
+        # one log line per message: rich wraps at the console width (80 in a run log), so one Status line was 4
+        kwargs.setdefault("soft_wrap", True)
         return self._real.print(*objects, **kwargs)
 
     def __getattr__(self, name):
