@@ -19,8 +19,10 @@ agent says or seems to have done them.
 """
 from __future__ import annotations
 
+import hashlib
+
 from glint.assist import as_flag
-from glint.assist.banking import OVERCHARGE, PLAN_TOOL, TODAY
+from glint.assist.banking import CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, TODAY, card_of_transaction
 from glint.gates.bankdb import as_date, money, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 
@@ -39,7 +41,8 @@ BANK_CREDIT_LOOKUPS = ((ACCOUNTS, "bank_accounts_(general)_043/_044"),
                        (TRANSACTIONS, "bank_accounts_(general)_017/_043/_044"))
 # write -> the hidden lookups its procedure requires before it, each with its source document. Lookups the
 # knowledge base mentions without making them a precondition are not required (credit card disputes: the dispute
-# history feeds the provisional credit count, but τ²'s train gold files some disputes without that lookup).
+# history feeds the provisional credit count, which plan_disputes reads from the database; τ²'s train gold files some
+# disputes without that lookup, and τ² scores these tasks on the database, which a read cannot change).
 REQUIRED_LOOKUPS = {
     "approve_credit_limit_increase_5847": CLI_LOOKUPS,
     "deny_credit_limit_increase_5848": CLI_LOOKUPS,
@@ -107,6 +110,63 @@ def lookups(tool: str):
                                f"missing: {', '.join(missing)}"])
         return allow("procedure.lookups", source, details)
     return gate
+
+
+def card_last_4(credit_card_account_id: str) -> str:
+    """The digits τ²'s customer-side get_card_last_4_digits reports for a card (vendored tau2 banking_knowledge
+    tools.py): the first 4 decimal digits of sha256('card_last4:' + account id), padded with '0'. The agent's database
+    has no such field."""
+    digest = hashlib.sha256(f"card_last4:{credit_card_account_id}".encode()).hexdigest()
+    return "".join(c for c in digest if c.isdigit())[:4].ljust(4, "0")
+
+
+CARD_SOURCE = "credit_cards_(general)_014 card_last_4_digits; τ²'s get_card_last_4_digits customer tool"
+
+
+def expected_card_digits(db, credit_card_account_id: str) -> tuple[str, bool]:
+    """(the card's last 4 digits, whether they are on the account). A task can put them on the account (task_054, 080,
+    081; the account lookups show them); otherwise only the customer's get_card_last_4_digits knows them."""
+    on_file = (db.credit_card_accounts.data.get(credit_card_account_id) or {}).get("card_last_4_digits")
+    return (str(on_file), True) if on_file else (card_last_4(credit_card_account_id), False)
+
+
+def card_digits(db, a: dict) -> GateResult:
+    """A credit card dispute carries the card's last 4 digits: the ones on the account when the task puts them there,
+    else the ones the customer's own get_card_last_4_digits reports, after the customer was given that tool. Glimmer
+    filed card names or '0000' when it never gave it (banking-plan-v2-gated, the only difference in 6 runs,
+    2026-10-29); τ²'s gold gives it wherever the account has no digits (031, 037-041, 053). The digits are stored in
+    the dispute record, which τ² scores."""
+    user, tid = str(a.get("user_id", "")), str(a.get("transaction_id", ""))
+    txn = db.credit_card_transaction_history.data.get(tid)
+    if txn is None or txn.get("user_id") != user:
+        return allow("procedure.card_digits.unknown_transaction", CARD_SOURCE,
+                     reason="no such transaction for this user: the dispute gate and τ²'s tool reject it")
+    card = card_of_transaction(db, user, txn)
+    wanted, on_file = expected_card_digits(db, card)
+    filed = str(a.get("card_last_4_digits") or "").strip()
+    if on_file:
+        details = {"credit_card_account_id": card, "on_file": wanted}
+        if filed != wanted:
+            return deny("procedure.card_digits.value", CARD_SOURCE, "the card digits are not the ones on the "
+                        "card's account", f"File with card_last_4_digits '{wanted}'.", details,
+                        consequence="A dispute filed with the wrong card digits is a dispute on the wrong card.",
+                        facts=[f"card_last_4_digits given: {filed!r}", f"{card} on file: {wanted}"])
+        return allow("procedure.card_digits", CARD_SOURCE, details)
+    given = any(r.get("tool_name") == CARD_DIGITS_TOOL for r in db.user_discoverable_tools.data.values())
+    details = {"credit_card_account_id": card, "given": given}
+    if not given:
+        return deny("procedure.card_digits.give", CARD_SOURCE, "the customer was not given the tool that reports the "
+                    "card's last 4 digits", f"Give the customer {CARD_DIGITS_TOOL} (give_discoverable_user_tool, "
+                    f"arguments {{\"credit_card_account_id\": \"{card}\"}}), then file with the digits it reports.",
+                    details, consequence="The digits are the customer's to look up; filing a guess files a dispute on "
+                    "the wrong card. One tool covers every dispute on this card.",
+                    facts=[f"{CARD_DIGITS_TOOL}: not given in this conversation", f"card: {card}"])
+    if filed != wanted:
+        return deny("procedure.card_digits.value", CARD_SOURCE, "the card digits are not the ones the customer's tool "
+                    "reports for this card", f"File with card_last_4_digits '{wanted}'.", details | {"wanted": wanted},
+                    consequence="A dispute filed with the wrong card digits is a dispute on the wrong card.",
+                    facts=[f"card_last_4_digits given: {filed!r}", f"{CARD_DIGITS_TOOL} for {card}: {wanted}"])
+    return allow("procedure.card_digits", CARD_SOURCE, details)
 
 
 def increase_first(db, a: dict) -> GateResult:

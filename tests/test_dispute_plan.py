@@ -14,7 +14,7 @@ from tau2.registry import registry
 from glint import paths
 from glint.assist import banking
 from glint.assist.tau2_tools import BankingDecisionTools, DisputePlanTools, add_plan_tool, install
-from glint.gates import Enforcer, EventLog, rules
+from glint.gates import Enforcer, EventLog, procedure, rules
 from glint.gates.core import run_gate
 from glint.gates.replayplan import filing, plan_arguments, with_plans
 
@@ -89,11 +89,19 @@ def _plan_gate(env, args: dict):
     return run_gate(gate, env.tools, args)[0]
 
 
-def _gated(task_id: str):
+def _give_card_digits(env) -> None:
+    """Give the customer the card-digits tool, as gold does where the card has no digits on file
+    (procedure.card_digits)."""
+    _call(env, "give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
+
+
+def _gated(task_id: str, digits: bool = True):
     task = _task(task_id)
     env = _env(task, Enforcer("banking_knowledge", EventLog(":memory:")))
     disputes = _gold_disputes(task)
     _verify(env, disputes[0]["user_id"])
+    if digits:
+        _give_card_digits(env)
     return env, task, disputes
 
 
@@ -270,6 +278,7 @@ def test_plan_gate_decisions_replay_unchanged_in_taus_strict_replay():
     u = env.tools.db.users.data[gold[0]["user_id"]]
     send("log_verification", time_verified="2025-11-14 03:40:00 EST",
          **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
+    send("give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
     send("unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
     assert _denied(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[0])),
                    "procedure.dispute_plan.none")
@@ -309,6 +318,8 @@ def test_glint_bank_always_publishes_plan_disputes_and_its_plan_gates_the_filing
             await client.call_tool("load_scenario", {"task_id": "task_037"})
             env = server.session().env
             _verify(env, gold[0]["user_id"])
+            await client.call_tool("give_discoverable_user_tool",
+                                   {"discoverable_tool_name": banking.CARD_DIGITS_TOOL})
             await client.call_tool("unlock_discoverable_agent_tool", {"agent_tool_name": rules.DISPUTE})
             unplanned = await client.call_tool(WRAPPER, {"agent_tool_name": rules.DISPUTE,
                                                          "arguments": json.dumps(gold[0])})
@@ -410,3 +421,35 @@ def test_every_overcharge_entry_tells_the_agent_not_to_suggest_a_full_refund():
         over["transaction_id"]]
     assert all(n is None for t, n in notes.items() if t != over["transaction_id"])
     assert "full refund" not in str(plan["ask_user"]).lower()  # the question for the customer stays neutral
+
+
+def test_a_dispute_needs_the_customer_given_the_digits_tool_and_its_digits():
+    # Glimmer filed 'Gold Rewards Card', 'bgold' or '0000' when it never gave the customer get_card_last_4_digits
+    # (banking-plan-v2-gated, 2026-10-29); gold gives it where the card has no digits on file
+    env, _, gold = _gated("task_039", digits=False)
+    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    first = env.tools.glint_plans[gold[0]["user_id"]]["order"][0]
+    assert banking.CARD_DIGITS_TOOL in first["card_last_4_digits_from"] and "card_last_4_digits" not in first
+    filing = next(d for d in gold if d["transaction_id"] == first["transaction_id"])
+    flag = {"eligible_for_provisional_credit": first["eligible_for_provisional_credit"] == "True"}
+    not_given = _file(env, filing | flag)
+    assert _denied(not_given, "procedure.card_digits.give") and banking.CARD_DIGITS_TOOL in not_given.content
+    _give_card_digits(env)
+    card = banking.card_of_transaction(env.tools.db, filing["user_id"],
+                                       env.tools.db.credit_card_transaction_history.data[filing["transaction_id"]])
+    assert procedure.card_last_4(card) == filing["card_last_4_digits"] == "1652"  # τ²'s tool's digits are gold's
+    guessed = _file(env, filing | flag | {"card_last_4_digits": "bgold"})
+    assert _denied(guessed, "procedure.card_digits.value") and "card_last_4_digits '1652'" in guessed.content
+    assert _ran(_file(env, filing | flag))
+
+
+def test_a_card_with_digits_on_file_needs_no_tool_and_its_digits_are_the_ones_on_file():
+    # task_054's card account carries card_last_4_digits 7823 (the account lookups show it); τ²'s tool would say 0791
+    env, _, gold = _gated("task_054", digits=False)
+    filing = gold[0]
+    _call(env, "plan_disputes", user_id=filing["user_id"], transactions=_items(gold))
+    flag = {"eligible_for_provisional_credit": env.tools.glint_plans[filing["user_id"]]["order"][0][
+        "eligible_for_provisional_credit"] == "True"}
+    wrong = _file(env, filing | flag | {"card_last_4_digits": "0791"})
+    assert _denied(wrong, "procedure.card_digits.value") and "card_last_4_digits '7823'" in wrong.content
+    assert _ran(_file(env, filing | flag))

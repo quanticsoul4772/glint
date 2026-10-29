@@ -225,7 +225,8 @@ def _banking(task_id: str):
     # phase 2 gates banking writes on the user's verification and on the lookups each procedure names: do them as
     # the gold conversation does (the hidden lookups are reads; they change nothing the phase-1 gates judge)
     for a in task.evaluation_criteria.actions:
-        if a.name == "log_verification":
+        # the verification, and the customer tools gold gives (the card-digits tool, procedure.card_digits)
+        if a.name in ("log_verification", "give_discoverable_user_tool"):
             env.get_response(ToolCall(id="v", name=a.name, arguments=a.arguments, requestor="assistant"))
     for tool, args in gold:
         if env.tools.tool_type(tool) == ToolType.READ:
