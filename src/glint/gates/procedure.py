@@ -15,7 +15,7 @@ agent says or seems to have done them.
   answer and provisional credit flag), on the enforcer's own record of the plans made in this conversation
   (`toolkit.glint_plans`, kept by glint.gates.enforce). Provisional credit needs at most 2 disputes in the past 12
   months (credit_cards_(general)_015 criterion 4), so the order decides which disputes get it; the order itself comes
-  from τ²'s train gold (tasks 039-041), not from the policy text.
+  from τ²'s train gold (tasks 037-041 and 081), not from the policy text.
 """
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ def transfer(db, a: dict) -> GateResult:
     return allow("procedure.transfer", source, {"reason": reason, "fraud": fraud})
 
 
-PLAN_SOURCE = "credit_cards_(general)_015 criterion 4; filing order from τ² train gold (tasks 039-041)"
+PLAN_SOURCE = "credit_cards_(general)_015 criterion 4; filing order from τ² train gold (037-041, 081)"
 REPLAN = (f"If the customer's list changed, call {PLAN_TOOL} again with every dispute not filed yet (it replaces the "
           "plan).")
 

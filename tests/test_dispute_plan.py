@@ -118,6 +118,24 @@ def test_plan_files_the_qualifying_disputes_first_with_golds_credit_flags(task_i
     assert counted == list(range(counted[0], counted[0] + len(gold)))
 
 
+@pytest.mark.parametrize("task_id", ["task_037", "task_038", "task_039", "task_040", "task_041", "task_081"])
+def test_plan_files_the_credit_group_largest_amount_first_as_gold_does(task_id):
+    """Whatever order the customer gives, the credit group comes out largest amount first, as τ²'s train gold files it
+    in these six tasks, so every transaction gets gold's flag (the given order alone does not: 0 of 12 recorded
+    039-041 runs, scripts/plan_sim.py)."""
+    task = _task(task_id)
+    db, gold = _env(task).tools.db, _gold_disputes(task)
+    want = {d["transaction_id"]: d["eligible_for_provisional_credit"] for d in gold}
+    for given in (_items(gold), list(reversed(_items(gold))), sorted(_items(gold), key=lambda i: i["transaction_id"])):
+        plan = banking.plan_disputes(db, gold[0]["user_id"], given)
+        credit = [e for e in plan["order"] if e["can_get_credit"]]
+        amounts = [banking._money(db.credit_card_transaction_history.data[e["transaction_id"]]["transaction_amount"])
+                   for e in credit]
+        assert amounts == sorted(amounts, reverse=True)
+        assert [e["transaction_id"] for e in credit] == [d["transaction_id"] for d in gold][:len(credit)]
+        assert {e["transaction_id"]: e["eligible_for_provisional_credit"] for e in plan["order"]} == want
+
+
 def test_plan_lists_rejected_and_already_filed_disputes_and_asks_the_merchant_question():
     env, _, gold = _gated("task_039")
     user = gold[0]["user_id"]

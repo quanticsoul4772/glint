@@ -212,7 +212,8 @@ DISPUTE_REASONS = ("unauthorized_fraudulent_charge", "duplicate_charge", "incorr
 COUNT_CRITERION = "at_most_2_disputes_past_12_months"
 PLAN_RULE = ("File the disputes in this order, each with its eligible_for_provisional_credit. Provisional credit "
              "needs at most 2 disputes filed in the past 12 months (credit_cards_(general)_015 criterion 4), so the "
-             "disputes filed first take the credit; the disputes that meet every other criterion are filed first.")
+             "disputes filed first take the credit; the disputes that meet every other criterion are filed first, "
+             "largest amount first.")
 
 
 def card_of_transaction(db, user_id: str, txn: dict) -> str:
@@ -233,8 +234,11 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     goods_services_not_received older than 30 days), then the rest, and credit goes to the first qualifying ones until
     criterion 4 stops it. The first group is the disputes that meet every criterion but 4 (in 039-041 these are
     exactly the qualifying reasons; task_038's gold files a duplicate_charge whose merchant was not contacted after a
-    non-qualifying reason, so a qualifying reason alone does not put a dispute first). Inside each group the given
-    order is kept.
+    non-qualifying reason, so a qualifying reason alone does not put a dispute first). Inside the first group the
+    largest amount is filed first: τ²'s train gold files those disputes from the largest to the smallest amount in
+    tasks 037, 038, 039, 040, 041 and 081. That is not in the policy text either, and those six tasks are tuned tasks
+    (research/00-decisions.md, 2026-10-28). The second group keeps the given order (no credit is at stake there); equal
+    amounts keep the given order too.
 
     `transactions`: the disputes the customer wants, each {transaction_id, dispute_reason, contacted_merchant} (the
     last None when not asked yet). Criterion 4 counts the disputes on record in the past 12 months plus the planned
@@ -266,7 +270,10 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     first = [check_dispute(db, user_id, card, tid, reason, contacted) for tid, reason, contacted, card in wanted]
     qualifies = [all(ok for name, ok in v.get("provisional_credit_criteria", {"none": False}).items()
                      if name != COUNT_CRITERION) for v in first]
-    ordered = [w for w, q in zip(wanted, qualifies) if q] + [w for w, q in zip(wanted, qualifies) if not q]
+    amount = {tid: _money(db.credit_card_transaction_history.data[tid].get("transaction_amount"))
+              for tid, *_ in wanted}
+    credit_group = sorted((w for w, q in zip(wanted, qualifies) if q), key=lambda w: -amount[w[0]])  # stable
+    ordered = credit_group + [w for w, q in zip(wanted, qualifies) if not q]
     order, ask = [], []
     for tid, reason, contacted, card in ordered:
         v = check_dispute(db, user_id, card, tid, reason, contacted, planned_before=len(order))
