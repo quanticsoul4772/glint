@@ -99,11 +99,13 @@ class RunEvents:
 
     def __init__(self, results_path: Path, events_path: Path, label: str, poll_s: float = 30.0,
                  stall_s: float = 1200.0, on_run: Callable[[dict], str | None] | None = None,
-                 domain: str | None = None, on_halt: Callable[[str], None] | None = None):
+                 domain: str | None = None, on_halt: Callable[[str], None] | None = None,
+                 activity: Callable[[], float] | None = None):
         self.results_path, self.events_path, self.label = Path(results_path), Path(events_path), label
         # called once, with the reason, when a fail-fast pattern is seen (HALT_SAME_CAUSE, HALT_STALLS); the caller
         # stops the arm. Without it the pattern is still printed as a FAIL FAST line.
         self.on_halt, self.halted = on_halt, None
+        self.activity = activity  # time.time() of the model's latest call; a stall with calls still made is not one
         self._streak: tuple[tuple[str, str] | None, int] = (None, 0)  # (outcome, cause) of the latest runs, how many
         self._stalls = 0
         self.on_run = on_run  # called with each new simulation; a returned line is printed (glint.gates.summary)
@@ -244,12 +246,21 @@ class RunEvents:
                         self._say(note)
             self._alert(new[-1] if new else None)
         elif time.time() - self._last_new > self.stall_s:
-            self._stalls += 1
-            self._say(f"WARNING: no run finished in {self._stalls * self.stall_s / 60:.0f} min ({len(self.seen)} so "
-                      "far)")
+            # a stall window counts toward a stop only when the model made no call in it either: one long run at an
+            # arm's tail can go 40 minutes without finishing while still working (task_053, 2026-10-29)
+            idle_s = time.time() - self.activity() if self.activity is not None else None
+            if idle_s is not None and idle_s < self.stall_s:
+                self._stalls = 0
+                self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({len(self.seen)} so far); model "
+                          f"calls are still being made (last {idle_s:.0f} s ago)")
+            else:
+                self._stalls += 1
+                self._say(f"WARNING: no run finished in {self._stalls * self.stall_s / 60:.0f} min ({len(self.seen)} "
+                          "so far)" + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))
+                if self._stalls >= HALT_STALLS:
+                    self._halt(f"no run finished in {self._stalls * self.stall_s / 60:.0f} min"
+                               + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))
             self._last_new = time.time()
-            if self._stalls >= HALT_STALLS:
-                self._halt(f"no run finished in {self._stalls * self.stall_s / 60:.0f} min")
         if new:
             self._stalls = 0
         return new

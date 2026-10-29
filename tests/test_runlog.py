@@ -336,3 +336,21 @@ def test_a_pattern_seen_only_after_the_arm_finished_warns_and_keeps_the_arm(tmp_
         _write(results, [_sim(f"p{i}", 0, 1.0) for i in range(20)] + tail)
     assert reasons == [] and watch.halted is None
     assert "fail-fast pattern at the arm's end" in capsys.readouterr().err
+
+
+def test_a_long_run_that_keeps_calling_the_model_is_not_a_stall(tmp_path, capsys):
+    # task_053 trial 3 ran 42+ minutes alone at an arm's tail, calling the model every few seconds (2026-10-29)
+    results, reasons, last = tmp_path / "results.json", [], [time.time()]
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x", stall_s=1200.0, on_halt=reasons.append,
+                      activity=lambda: last[0])
+    for _ in range(4):  # four stall windows with calls still being made
+        watch._last_new = time.time() - 1300
+        last[0] = time.time() - 5
+        watch.poll()
+    assert reasons == [] and watch._stalls == 0
+    assert "model calls are still being made (last 5 s ago)" in capsys.readouterr().err
+    for _ in range(2):  # then the calls stop too
+        watch._last_new = time.time() - 1300
+        last[0] = time.time() - 1500
+        watch.poll()
+    assert reasons == ["no run finished in 40 min and no model call in 25 min"]
