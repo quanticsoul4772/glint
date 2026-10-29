@@ -51,3 +51,17 @@ def test_the_script_prints_the_pattern(capsys):
 
     runpy.run_path(str(ROOT / "scripts" / "alert_patterns.py"), run_name="__main__")
     assert capsys.readouterr().out.rstrip("\r\n") == ap.MONITOR
+
+
+def test_the_pattern_has_no_escaped_spaces_and_grep_accepts_it():
+    import shutil
+    import subprocess
+
+    assert r"\ " not in ap.MONITOR and ap.ere_escape("a.b (c)") == r"a\.b \(c\)"
+    grep = shutil.which("grep")
+    if grep is None:
+        return
+    lines = "METER FAILED: x\nFAIL FAST: y\n[runs] task_1 trial 0: PASS (τ²: user_stop)\nexit 0\n"
+    r = subprocess.run([grep, "-E", ap.MONITOR], input=lines, capture_output=True, text=True, encoding="utf-8",
+                       check=False)
+    assert r.stdout.splitlines() == ["METER FAILED: x", "FAIL FAST: y", "exit 0"] and "warning" not in r.stderr

@@ -28,7 +28,13 @@ INFO = ("NOTE", "RESUME", "POOL", "TRUNCATIONS", "MIXED CODE", "GATES", "GATE OU
 # Labels inside transcripts (the desk, glint.inspect), not run-log lines
 TRANSCRIPT = ("USER", "AGENT", "TOOL RESULT", "UNKNOWN")
 
-MONITOR = "|".join([*(re.escape(a) for a in ALERTS), *OUTCOMES, *MARKERS])
+def ere_escape(text: str) -> str:
+    """Escape for grep -E: regex metacharacters only. re.escape also escapes spaces ("\\ "), which GNU grep 3.8 and
+    later warn about as a stray backslash."""
+    return re.sub(r"([.^$*+?(){}\[\]|\\])", r"\\\1", text)
+
+
+MONITOR = "|".join([*(ere_escape(a) for a in ALERTS), *OUTCOMES, *MARKERS])
 
 
 def covered(line: str) -> bool:
