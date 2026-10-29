@@ -695,7 +695,10 @@ def test_the_terse_wording_keeps_the_decision_and_uses_the_layout_before_the_pla
     ("payment method credit_card_1 is not allowed", "RETAIL_ARGS_NO"),
     ("item 123 is not in order #W1", "RETAIL_ARGS_NO"),
     ("status is 'delivered', action requires 'pending'", "POLICY_NO"),
-    ("order #W1 does not exist", "POLICY_NO"),
+    ("order #W1 does not exist", "RETAIL_ARGS_NO"),  # a mistyped order id: the right one can succeed
+    ("payment method gift_card_1 is not allowed here; allowed: ['credit_card_2']", "RETAIL_ARGS_NO"),
+    ("payment method gift_card_1 is not allowed here; allowed: none (no payment method covers it)", "POLICY_NO"),
+    ("items ['1', '2'] are not in order #W1", "RETAIL_ARGS_NO"),
 ])
 def test_a_retail_deny_on_the_arguments_says_a_corrected_call_can_succeed(monkeypatch, reason, expected):
     from glint.assist import retail as retail_checks
