@@ -1,6 +1,7 @@
 """tools_ab.generate with τ²'s batch replaced by a stand-in: arm files, warnings, the cap stop and the code guard.
 Nothing here calls a model or Modal."""
 import json
+import sys
 import types
 from pathlib import Path
 
@@ -676,3 +677,25 @@ def test_a_fail_fast_stop_on_modal_stops_the_app_at_once(stand_in, make_sim, mon
     with pytest.raises(BudgetExceeded, match=r"stopped early \(fail fast\): 2 stall windows"):
         tools_ab.generate(cfg)
     assert len(stops) == 1 and "FAIL FAST: stopping the Modal app now" in capsys.readouterr().out
+
+
+def test_the_quiet_console_prints_each_message_as_one_unwrapped_line():
+    from rich.text import Text
+
+    printed = []
+    real = types.SimpleNamespace(print=lambda *objects, **kwargs: printed.append(kwargs))
+    console = tools_ab._QuietConsole(real)
+    console.print(Text("Status: 4/48 complete. Avg reward: 0.25 (N=4). 12 running: " + "task_031.0(500s), " * 12))
+    console.print(Text("x"), soft_wrap=False)  # an explicit choice is kept
+    assert printed == [{"soft_wrap": True}, {"soft_wrap": False}]
+
+
+def test_importing_tools_ab_logs_no_tau2_registry_dump():
+    import subprocess
+
+    root = Path(tools_ab.__file__).resolve().parents[1]
+    env = {k: v for k, v in __import__("os").environ.items() if k != "LOGURU_LEVEL"}
+    env["PYTHONPATH"] = str(root / "src")
+    r = subprocess.run([sys.executable, "-X", "utf8", "-c", "import tools_ab"], cwd=root / "scripts", env=env,
+                       capture_output=True, text=True, timeout=120, check=True)
+    assert "Registering default components" not in r.stderr and "Registry info" not in r.stderr
