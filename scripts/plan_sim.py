@@ -38,6 +38,15 @@ def gold_flags(task) -> dict[str, bool]:
              if a.name == WRAPPER and a.arguments.get("agent_tool_name") == DISPUTE)}
 
 
+def gold_refunds(task) -> dict[str, float]:
+    """Gold's partial_refund_amount by transaction (incorrect_amount disputes): the overcharge the customer states.
+    The simulation measures the credit flags, so the plan gets the amount a customer gives when asked."""
+    return {d["transaction_id"]: d["partial_refund_amount"] for d in
+            (json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
+             if a.name == WRAPPER and a.arguments.get("agent_tool_name") == DISPUTE)
+            if d.get("partial_refund_amount") is not None}
+
+
 def run_filings(sim: dict) -> dict[str, dict]:
     """transaction id -> the run's last filing of it, in the order the run first filed each transaction."""
     filings: dict[str, dict] = {}
@@ -63,12 +72,16 @@ def simulate(task, filings: dict[str, dict]) -> dict:
     user_id = next(iter(filings.values()))["user_id"]
     user = env.tools.db.users.data[user_id]
     _call(env, "log_verification", time_verified=NOW, **{k: user[k] for k in VERIFY_FIELDS})
-    items = [{k: f[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")} for f in filings.values()]
+    refunds = gold_refunds(task)
+    items = [{k: f[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
+             | ({"partial_refund_amount": refunds[f["transaction_id"]]} if f["transaction_id"] in refunds else {})
+             for f in filings.values()]
     plan = json.loads(_call(env, PLAN_TOOL, user_id=user_id, transactions=items).content)
     denied = []
     for e in plan["order"]:
         flag = str(e["eligible_for_provisional_credit"]) == "True"  # τ² shows tool-result bools as strings
-        args = filings[e["transaction_id"]] | {"eligible_for_provisional_credit": flag}
+        args = (filings[e["transaction_id"]] | {"eligible_for_provisional_credit": flag}
+                | {k: e[k] for k in ("resolution_requested", "partial_refund_amount") if k in e})
         _call(env, "unlock_discoverable_agent_tool", agent_tool_name=DISPUTE)
         reply = _call(env, WRAPPER, agent_tool_name=DISPUTE, arguments=json.dumps(args))
         if "was NOT executed" in str(reply.content):

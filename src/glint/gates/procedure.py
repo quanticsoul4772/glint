@@ -225,8 +225,10 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     nxt = remaining[0] | {"eligible_for_provisional_credit": as_flag(remaining[0]["eligible_for_provisional_credit"])}
     if remaining[0]["contacted_merchant"] is not None:
         nxt["contacted_merchant"] = as_flag(remaining[0]["contacted_merchant"])
+    refund = (f", resolution_requested {nxt['resolution_requested']!r}, partial_refund_amount "
+              f"{nxt['partial_refund_amount']}" if nxt.get("resolution_requested") else "")
     fix_next = (f"File {nxt['transaction_id']} next (dispute_reason {nxt['dispute_reason']!r}, "
-                f"eligible_for_provisional_credit {nxt['eligible_for_provisional_credit']}). {REPLAN}")
+                f"eligible_for_provisional_credit {nxt['eligible_for_provisional_credit']}{refund}). {REPLAN}")
     if tid != nxt["transaction_id"]:
         return deny("procedure.dispute_plan.order", PLAN_SOURCE, f"the plan files {nxt['transaction_id']} before "
                     f"{tid}", fix_next, details | {"next": nxt}, consequence=CREDIT_ORDER,
@@ -247,7 +249,8 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
         if a.get("resolution_requested") != nxt["resolution_requested"]:
             reasons.append(f"resolution_requested {a.get('resolution_requested')!r} != the plan's "
                            f"{nxt['resolution_requested']!r}")
-        if money(a.get("partial_refund_amount")) != nxt["partial_refund_amount"]:
+        # the plan as the agent got it: τ² turns every value in a tool result into a string ("50.0")
+        if money(a.get("partial_refund_amount")) != money(nxt["partial_refund_amount"]):
             reasons.append(f"partial_refund_amount {a.get('partial_refund_amount')} != the plan's "
                            f"{nxt['partial_refund_amount']}")
     if nxt["contacted_merchant"] is None:
