@@ -207,19 +207,26 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
 
 PLAN_TOOL = "plan_disputes"
 OVERCHARGE = "incorrect_amount"
+OVERCHARGE_NOTE = ("Ask what the customer should have been charged, as written; do not offer or suggest a full refund. "
+                   "Plan resolution_requested 'full_refund' only when the customer asks for the whole charge back "
+                   "without being offered it.")
 
 
-def overcharge(charged: float, item: dict) -> tuple[float | None, str]:
-    """(partial_refund_amount, rejection) for an incorrect_amount item: from `partial_refund_amount` (the overcharge)
-    or `expected_amount` (what should have been charged); (None, "") when the customer has not been asked yet."""
+def overcharge(charged: float, item: dict) -> tuple[dict | None, str]:
+    """(the resolution to file, rejection) for an incorrect_amount item. The customer's explicit
+    `resolution_requested: 'full_refund'` wins: the policy says to ask the customer (credit_cards_(general)_014).
+    Otherwise a partial refund of the overcharge, from `partial_refund_amount` (the overcharge) or `expected_amount`
+    (what should have been charged); (None, "") when the customer has not been asked yet."""
+    if item.get("resolution_requested") == "full_refund":
+        return {"resolution_requested": "full_refund"}, ""
     given, expected = item.get("partial_refund_amount"), item.get("expected_amount")
     if given in (None, "") and expected in (None, ""):
         return None, ""
     refund = round(_money(given), 2) if given not in (None, "") else round(charged - _money(expected), 2)
     if not 0 < refund < charged:
         return None, (f"the overcharge must be more than $0 and less than the ${charged:,.2f} charged (got "
-                      f"${refund:,.2f}); for the whole amount, use another dispute reason")
-    return refund, ""
+                      f"${refund:,.2f}); for the whole amount, plan resolution_requested 'full_refund'")
+    return {"resolution_requested": "partial_refund", "partial_refund_amount": refund}, ""
 DISPUTE_REASONS = ("unauthorized_fraudulent_charge", "duplicate_charge", "incorrect_amount",
                    "goods_services_not_received", "goods_services_not_as_described",
                    "canceled_subscription_still_charging", "refund_never_processed")
@@ -260,7 +267,8 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     incorrect_amount dispute that way (tasks 039, 040, 041; tuned tasks), and Glimmer, asking "full refund for all?",
     filed full_refund with no amount in 10 of 12 gated runs of those tasks (2026-10-29). So the plan asks the customer
     the amount they should have been charged, for each such dispute, until the item carries `expected_amount` or the
-    overcharge itself as `partial_refund_amount`.
+    overcharge itself as `partial_refund_amount`. The customer's own choice wins: an item with resolution_requested
+    'full_refund' (the customer asked for the whole charge back) is planned as a full refund with no amount.
 
     `transactions`: the disputes the customer wants, each {transaction_id, dispute_reason, contacted_merchant} (the
     last None when not asked yet), and for incorrect_amount `expected_amount` or `partial_refund_amount`. Criterion 4
@@ -316,11 +324,14 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
         if contacted is None:
             questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")
         if reason == OVERCHARGE:
+            # for the agent, not the customer: Glimmer's "full refund for all?" was agreed to and filed as the
+            # customer's choice (039-041, 2026-10-29); a suggested full refund is not the customer asking for one
+            entry["note"] = OVERCHARGE_NOTE
             if refund is None:
                 questions.append(f"What amount should you have been charged for the {tid} charge "
                                  f"(${amount[tid]:,.2f})?")
             else:
-                entry |= {"resolution_requested": "partial_refund", "partial_refund_amount": refund}
+                entry |= refund
         if questions:
             entry["ask_user"] = " ".join(questions)
             ask.extend(questions)

@@ -146,9 +146,13 @@ class DisputePlanTools(ToolKitBase):
                 "contacted_merchant": the customer's answer to "did you try to resolve this with the merchant
                 first?" (true/false; leave it out if not asked yet), and for an 'incorrect_amount' dispute either
                 "expected_amount" (what the customer should have been charged) or "partial_refund_amount" (the
-                overcharge); leave both out until the customer has said, and the plan asks for it}.
+                overcharge); leave both out until the customer has said, and the plan asks for it. Ask what the
+                customer should have been charged without offering or suggesting a full refund; only if the customer
+                asks for the whole charge back without being offered it, give "resolution_requested": "full_refund"
+                instead}.
                 An incorrect_amount dispute is filed as resolution_requested 'partial_refund' with the plan's
-                partial_refund_amount (taken from τ²-bench train tasks 039-041; the policy says to ask the customer).
+                partial_refund_amount unless the customer asked for a full refund (the partial default is taken from
+                τ²-bench train tasks 039-041; the policy says to ask the customer).
 
         Returns:
             dict: order (position, transaction_id, dispute_reason, contacted_merchant,
