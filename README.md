@@ -1,37 +1,57 @@
 # Glint
 
-**Deterministic decision tools that take over the analytical decisions of Meta's open-weight Muse Glimmer 30B.**
+[![tests](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml/badge.svg)](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml)
 
-A 30B model can hold a customer conversation, but it often gets the decision wrong. Examples: whether a policy allows a cancellation, which variant matches what the customer described, whether a credit-limit increase must come before a dispute. Glint moves those decisions out of the model into small, deterministic tools (policy as code). The model calls a tool, gets an authoritative verdict with its reasons, and acts on it.
+**Deterministic policy gates for Meta's open-weight Muse Glimmer 30B: every write the agent makes is checked against the written policy before it runs.**
 
-**Try it:** [Glint Bank Desk](https://quanticsoul4772--glint-desk-web.us-east.modal.run): the same banking customer, handled by Glimmer alone and by Glimmer with the Glint tools, side by side (recorded runs; no sign-in).
+A 30B model can hold a customer conversation, but it often gets the decision wrong. Examples: whether a policy allows a cancellation, which variant matches what the customer described, whether a credit-limit increase must come before a dispute. Glint moves those decisions out of the model into code. Each write the agent attempts goes through a gate that applies the policy to the live account records. An allowed write runs. A denied write does not run, and the agent gets the reason, the facts the gate used and the next step. The agent cannot skip the check.
+
+**Try it:** [Glint Bank Desk](https://quanticsoul4772--glint-desk-web.us-east.modal.run): the same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side (recorded runs; no sign-in).
 
 ![Bank Desk: on the left, Glimmer alone files the dispute first, which a Glint check would overrule; on the right, the Glint verdict tells it to do the credit-limit increase first](docs/images/desk-verdict.png)
 
-Built for the Meta Global AI Developer Hackathon (Indie track, theme **Push the Frontier**: a new capability for an open-weight agent). All code in this repo was written during the event: the first commit is 2026-10-26 (`952dd30`), and the full history is public.
+Built for the Meta Global AI Developer Hackathon (Indie track, theme **Push the Frontier**: a new capability for an open-weight agent). See [Built during the event](#built-during-the-event).
 
 ## How it works
-1. A customer asks the agent (Glimmer 30B) for something policy-bound: dispute a charge, raise a credit limit, exchange an item.
-2. Before acting, Glimmer calls a Glint tool with the facts it has.
-3. The tool reads the account records and applies the written policy in code. No model inside.
-4. It returns a verdict: what is allowed, what to do, in what order, and why.
-5. Glimmer acts on the verdict and keeps the conversation.
 
-**Example** (recorded, τ²-bench banking task 054). Glimmer calls `check_card_dispute` for a fraudulent $487.50 charge, with a replacement card and a credit-limit increase also requested:
-
-```json
-{
-  "card_action": "cancel_and_reissue",
-  "eligible_for_provisional_credit": "True",
-  "provisional_credit_criteria": {"account_open_60_days": "True", "reason_qualifies": "True", "amount_in_range": "True",
-                                  "at_most_2_disputes_past_12_months": "True", "merchant_contacted_if_not_fraud": "True"},
-  "sequencing": "Do the credit limit increase first (submit, the required lookups, approve or deny) before filing any dispute or ordering a replacement card: a pending dispute or replacement makes the increase fail."
-}
+```mermaid
+flowchart LR
+    C["Customer<br/>(Muse Spark simulator, or a person)"] <--> A["Muse Glimmer 30B<br/>(agent)"]
+    A -- "tool call" --> E["τ²-bench environment<br/>(bank, retail, airline)"]
+    E -- "read" --> A
+    E -- "write" --> G{"Glint gate<br/>policy as code"}
+    G -- "allow" --> W["write runs"]
+    G -- "deny: reason, facts, fix" --> A
+    G -. "every decision" .-> L[("hash-chained<br/>gate log")]
+    A -. "optional" .-> T["Glint decision tools<br/>(MCP)"]
+    M["Muse Code<br/>+ glint-bank plugin"] -- "MCP" --> S["glint-bank server"] --> E
 ```
-In the recorded pair, Glimmer alone filed the dispute first (a write a Glint check would overrule) and failed the task; with the verdict it did the increase first and passed.
 
-## The tools
-Seven tools, served as an **MCP server** (`python -m glint.assist.server`, stdio) usable from any MCP client, and wired into τ²-bench toolkits for measurement (`glint.assist.tau2_tools`).
+1. A customer asks the agent (Glimmer 30B) for something policy-bound: dispute a charge, raise a credit limit, close a card, exchange an item.
+2. The agent calls the environment's tools. Reads run as usual.
+3. **Every write is intercepted** (`glint.gates.enforce`) and checked by the gates registered for that tool. A gate is a plain function of the live database and the write's arguments, so the same call against the same records always gets the same decision, including when τ²'s evaluator replays the run.
+4. A deny returns, as the tool result, the rule, what the check found, the facts it used, why it matters and the next step. Arguments are never rewritten. A gate that raises, times out or returns nothing usable denies (fail closed).
+5. Every decision is written to an append-only, hash-chained SQLite log (`glint.gates.eventlog`). At startup, every write tool in the toolkit must have a gate, or enforcement refuses to start.
+
+## The gates
+Rules are per write tool, never per task, and each cites the policy document it comes from (`glint.gates.rules`).
+
+| Domain | What is gated |
+|---|---|
+| Banking | Credit card disputes (card action, provisional-credit flag, and the order of the customer's disputes from `plan_disputes`), credit-limit increases (the tier maximum and the required checks), replacement cards, debit card freeze, close, order and activation, account credits, card closures and retention offers, transfers to a human (the reason code) |
+| Banking, procedure | The customer verified in this conversation; the lookups each procedure requires done before the write; a submitted credit-limit increase decided before a dispute or a transfer |
+| Retail | Cancel, modify, return and exchange (`check_order_action`); address changes |
+| Airline | Cancellation, flight, cabin, baggage and passenger changes; bookings; certificates |
+
+Writes no rule covers yet are allowed and logged as `no_rule_yet`, with the reason (`rules.NO_RULE_YET`).
+
+**Validation** (scripts in `scripts/`, each also a test):
+- `gate_replay.py`: τ²'s correct (gold) actions for every training task of the three domains go through the gates; a gold write that is denied is a false refusal.
+- `gate_catch.py`: recorded failed runs are replayed through the gates, to see whether the first wrong write would have been stopped.
+- Both are run on training tasks only; τ²'s banking test split is not used to change any rule.
+
+## Decision tools
+Before the gates, the same checks were offered as seven optional **MCP tools** the agent could call (`python -m glint.assist.server`, stdio). They are still served, and wired into τ²-bench toolkits (`glint.assist.tau2_tools`). Measured: Glimmer called them in only 2 of 80 runs on τ²'s banking test split, which is why the checks became enforced gates.
 
 | Tool | Domain | Decides |
 |---|---|---|
@@ -47,9 +67,10 @@ Seven tools, served as an **MCP server** (`python -m glint.assist.server`, stdio
 - **Muse Glimmer 30B** (open weights) is the agent, **self-hosted** on Modal with vLLM (bf16, A100-80GB, 131K context, scale to zero) by `glint.glimmer_serve`, which adds a health wait, fail-fast boot-log watching, a GPU cap enforced during the session and a retried stop.
 - **Muse Spark** (Meta Model API) plays the customer in τ²-bench and judges its natural-language checks.
 - **Spark Open** (open weights, on Baseten) takes over as the customer in the desk's live mode if Meta's API cannot serve it.
-- **Muse Code** loads Glint's MCP server as a client: in a check on 2026-10-28, Muse Code 1.4.14 loaded the 7 tools and Spark called `check_credit_limit_increase` end to end.
+- **Muse Code** loads the [glint-bank plugin](plugins/glint-bank/README.md): a live τ² bank served over MCP (`python -m glint.bank.server`), with every write gated; `/start <task_id>` loads a scenario. In the checks of 2026-10-28 the plugin's server reached `ready` in Muse Code. Muse Code 1.4.14 also loaded Glint's decision-tool MCP server (7 tools), and Spark called `check_credit_limit_increase` end to end.
 - `glint.atem` re-parses Glimmer's tool calls from its raw token stream: the hosted parser turned string arguments such as zip codes into numbers.
 
+<!-- results:start (replaced by the refresh-results step; edit the result notes, not this block) -->
 ## What was measured
 τ²-bench v1.0.1, Glimmer at medium reasoning, both arms with the same seeds on the same backend. Reported **by task** (runs of one task are not independent); tuned and untuned tasks apart. Full detail: [docs/results.md](docs/results.md).
 
@@ -63,29 +84,41 @@ Seven tools, served as an **MCP server** (`python -m glint.assist.server`, stdio
 
 ![Results tab: per set, tasks improved, tied and worse, runs passed with and without Glint, and pass dots per task](docs/images/desk-results.png)
 
+<!-- results:end -->
 ## Limitations
 - **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard.
 - **Small samples.** k=4 per task; no sign test is significant.
-- **Retail:** the tools cost runs. `find_variants` matches option names as exact strings (it called the user's "Google Home" unavailable when the catalog says "Google Assistant"); the tools are frozen, so the defect is reported, not fixed.
-- **Banking:** Glimmer still fails most tasks with the tools; task 081 overflows the context; wrong writes did not fall on untuned tasks.
-- **The desk's replay pairs are selected wins** (a failed run without the tools beside a passed run with them), from runs on earlier tool code; the page says so and shows each task's real pass counts. Live mode is off on the public desk because each pair runs a GPU.
+- **The gates' rules were written and checked on training tasks**, so gated results on those tasks are in-sample. A deny that lands on a run's first wrong write shows the gate caught that write, not that the run would then pass.
+- **Retail:** `find_variants` matches option names as exact strings (it called the user's "Google Home" unavailable when the catalog says "Google Assistant").
+- **Banking:** Glimmer still fails most tasks; task 081 overflows the context.
+- **The desk's replay pairs are selected wins** (a failed run without Glint beside a passed run with it), from runs on earlier tool code; the page says so and shows each task's real pass counts. Live mode is off on the public desk because each pair runs a GPU.
 
 ## Run it
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.12, [uv](https://docs.astral.sh/uv/) and git. τ²-bench is about 1.4 GB.
 
 ```bash
-git clone https://github.com/sierra-research/tau2-bench ../vendor/tau2-bench
-git -C ../vendor/tau2-bench checkout fc0055dc4e0a316c3f83133267fbd6faaa770992   # tau2-bench v1.0.1, pinned
+git clone -c core.longpaths=true https://github.com/quanticsoul4772/glint
+git clone -c core.longpaths=true -c core.autocrlf=false https://github.com/sierra-research/tau2-bench vendor/tau2-bench
+git -C vendor/tau2-bench checkout fc0055dc4e0a316c3f83133267fbd6faaa770992   # τ²-bench v1.0.1, pinned; stop if this fails
+cd glint
 uv sync --extra dev
 uv run pytest -q
 ```
 
+τ²-bench goes next to the repo (`../vendor/tau2-bench`, as `pyproject.toml` expects). On Windows, the `core.longpaths` and `core.autocrlf` settings are required: without them some τ² data files fail to check out, the pin fails, and `uv sync` installs a different τ² version; and the bundled bank data no longer matches τ²'s byte for byte.
+
 - **Bank Desk, replay mode** (no GPU, no keys): `uv run python -m glint.desk.app`, then open http://127.0.0.1:8765.
-- **Bank Desk, live mode:** needs a deployed Glimmer endpoint (`modal deploy src/glint/glimmer_serve.py`) and `GLINT_GLIMMER_URL`, `MODAL_PROXY_KEY`, `MODAL_PROXY_SECRET` and `MODEL_API_KEY` set; `BASETEN_API_KEY` enables the Spark Open customer fallback.
-- **MCP server:** `uv run python -m glint.assist.server` (stdio).
-- **With/without comparisons:** `scripts/tools_ab.py` (checkpointed; both arms on the same backend); `scripts/export_results.py` and `scripts/export_scenarios.py` regenerate the desk's data from the runs.
-- **Workspace:** working files (run data, ledger, results, `.env`) live outside the repo, under `GLINT_HOME`, which defaults to the repo's parent folder.
-- **Tests:** coverage goals and rules in [docs/testing-strategy.md](docs/testing-strategy.md); CI runs them on every PR.
+- **Bank Desk, live mode:** needs a deployed Glimmer endpoint (`modal deploy src/glint/glimmer_serve.py`) and the keys in [.env.example](.env.example), copied to `$GLINT_HOME/.env`.
+- **glint-bank in Muse Code:** see [plugins/glint-bank/README.md](plugins/glint-bank/README.md). Check an install without Muse or a model: `uv run python -m glint.bank.server --selftest`.
+- **Decision-tool MCP server:** `uv run python -m glint.assist.server` (stdio).
+- **With/without comparisons:** `scripts/tools_ab.py` (checkpointed; both arms on the same backend; a set's tools arm enforces the gates unless the set says otherwise). `scripts/export_results.py` and `scripts/export_scenarios.py` regenerate the desk's data. Every script is listed in [scripts/README.md](scripts/README.md).
+- **Workspace:** working files (run data, the spend ledger, results, `.env`) live outside the repo, under `GLINT_HOME`, which defaults to the repo's parent folder.
+- **Tests:** coverage goals and rules in [docs/testing-strategy.md](docs/testing-strategy.md); CI runs pytest with the coverage gate and ruff on every PR.
+
+## Built during the event
+- All code in this repo was written during the event (Oct 26 – Nov 4, 2026). The first commit is `952dd30` on 2026-10-26, and the full history is public.
+- The gate runner and the event log follow the design of two earlier projects by the same author (private); no code was copied from them.
+- Third-party work, used under its license: [τ²-bench](https://github.com/sierra-research/tau2-bench) (MIT, Sierra Research) is the benchmark and a dependency; its banking data is bundled in `plugins/glint-bank/data/` with its license. The desk's spacing, type and color scales follow Astryx's neutral theme (MIT, Meta Platforms).
 
 ## License
-MIT. τ²-bench (MIT, Sierra Research) is a dependency, and its banking tasks appear in the Bank Desk replay data. The desk's spacing, type and color scales follow Astryx's neutral theme (MIT, Meta Platforms).
+[MIT](LICENSE).
