@@ -1,8 +1,9 @@
 """A hash-chained, append-only event log in SQLite with one writer.
 
-Ported from agent-harness-v2: `events/bus.py` (the one writer serializes emits with an RLock and writes each event
-inside BEGIN IMMEDIATE; each row's hash is sha256 over the previous hash and the row's fields with null-byte
-separators, starting from "genesis") and `schema/schema.sql` (triggers make UPDATE and DELETE abort). One log file per
+Written for this event; the design follows the author's earlier agent-harness-v2 (private), and no code was copied
+from it. The one writer serializes emits with an RLock and writes each event inside BEGIN IMMEDIATE; each row's hash
+is sha256 over the previous hash and the row's fields with null-byte separators, starting from "genesis"; triggers
+make UPDATE and DELETE abort. One log file per
 run; `verify()` walks the chain by rowid and names the first row that does not match.
 """
 from __future__ import annotations
