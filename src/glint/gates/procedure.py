@@ -20,8 +20,8 @@ agent says or seems to have done them.
 from __future__ import annotations
 
 from glint.assist import as_flag
-from glint.assist.banking import PLAN_TOOL, TODAY
-from glint.gates.bankdb import as_date, owner, undecided_increases, verified_today
+from glint.assist.banking import OVERCHARGE, PLAN_TOOL, TODAY
+from glint.gates.bankdb import as_date, money, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 
 DISPUTES_HISTORY, PENDING_ORDERS, CLOSURE_HISTORY = ("get_user_dispute_history_7291",
@@ -235,6 +235,21 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     reasons = []
     if a.get("dispute_reason") != nxt["dispute_reason"]:
         reasons.append(f"dispute_reason {a.get('dispute_reason')!r} != the plan's {nxt['dispute_reason']!r}")
+    if nxt["dispute_reason"] == OVERCHARGE and "partial_refund_amount" not in nxt:
+        return deny("procedure.dispute_plan.ask", PLAN_SOURCE, "the plan was made without the amount the customer "
+                    f"should have been charged for {tid}", "Ask the customer what amount they should have been charged, "
+                    f"then call {PLAN_TOOL} again with expected_amount (or partial_refund_amount, the overcharge) for "
+                    "it.", details | {"next": nxt},
+                    consequence="An incorrect_amount dispute is filed as a partial refund of the overcharge, so its "
+                    "amount comes from the customer. Ask about every incorrect_amount dispute at once, without "
+                    "suggesting a full refund.", facts=[f"{tid}: dispute_reason incorrect_amount, no amount in the plan"])
+    if nxt.get("resolution_requested"):
+        if a.get("resolution_requested") != nxt["resolution_requested"]:
+            reasons.append(f"resolution_requested {a.get('resolution_requested')!r} != the plan's "
+                           f"{nxt['resolution_requested']!r}")
+        if money(a.get("partial_refund_amount")) != nxt["partial_refund_amount"]:
+            reasons.append(f"partial_refund_amount {a.get('partial_refund_amount')} != the plan's "
+                           f"{nxt['partial_refund_amount']}")
     if nxt["contacted_merchant"] is None:
         return deny("procedure.dispute_plan.ask", PLAN_SOURCE, "the plan was made without the customer's answer on "
                     f"whether they contacted the merchant about {tid}", "Ask the customer whether they tried the "
