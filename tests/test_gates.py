@@ -574,18 +574,21 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
     assert enforcer.events.path.endswith("gates-retail.sqlite") and enforcer.context() == {
         "task_id": "unknown", "trial": "unknown"}
     assert "banking-test-gated" not in tools_ab.SETS  # the banking test split is read once (decision 2026-10-28)
-    for name in ("banking-gated", "banking-p2-gated", "heldout2-gated"):
+    for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "heldout2-gated"):
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
             tools_ab.for_backend(cfg, False)
         assert tools_ab.for_backend(cfg, True)["data"].name.endswith("_gated_modal")
     assert tools_ab.SETS["banking-gated"]["tasks"] is tools_ab.banking_tasks
-    p2 = tools_ab.SETS["banking-p2-gated"]  # the same comparison as banking-gated, in its own folder
-    assert p2["tasks"] is tools_ab.banking_tasks and p2["data"] != tools_ab.SETS["banking-gated"]["data"]
-    assert p2["save"] != tools_ab.SETS["banking-gated"]["save"]
-    assert {k: p2[k] for k in ("trials", "glimmer_usd", "meta_usd", "gpu_usd")} == {
-        k: tools_ab.SETS["banking-gated"][k] for k in ("trials", "glimmer_usd", "meta_usd", "gpu_usd")}
+    # the same comparison as banking-gated, each in its own folder and result file
+    later = [tools_ab.SETS[n] for n in ("banking-gated", "banking-p2-gated", "banking-plan-gated")]
+    for key in ("data", "out", "save"):
+        assert len({str(cfg[key]) for cfg in later}) == 3
+    for cfg in later[1:]:
+        assert cfg["tasks"] is tools_ab.banking_tasks
+        assert {k: cfg[k] for k in ("trials", "glimmer_usd", "meta_usd", "gpu_usd")} == {
+            k: later[0][k] for k in ("trials", "glimmer_usd", "meta_usd", "gpu_usd")}
     assert {k: tools_ab.SETS["banking-gated"][k] for k in ("glimmer_usd", "meta_usd", "gpu_usd")} == {
         k: tools_ab.SETS["banking"][k] for k in ("glimmer_usd", "meta_usd", "gpu_usd")}
     assert not any(cfg["gates"] for name, cfg in tools_ab.SETS.items() if not name.endswith("-gated"))
