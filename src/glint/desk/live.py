@@ -148,8 +148,11 @@ class LiveSession:
                     self.waking = False
             for name, pane in self.panes.items():
                 pane.started = time.time()
-                pane.thread = threading.Thread(target=self._run, args=(pane, self._runners[name]), daemon=True)
-                pane.thread.start()
+                # published only once started: a reader that joined it in between got "cannot join thread before it
+                # is started" (test_live_session_streams_then_reports_outcomes, about 1 run in 6, 2026-10-29)
+                thread = threading.Thread(target=self._run, args=(pane, self._runners[name]), daemon=True)
+                thread.start()
+                pane.thread = thread
             for pane in self.panes.values():
                 pane.thread.join()
         finally:
