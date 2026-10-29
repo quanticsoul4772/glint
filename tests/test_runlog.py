@@ -236,3 +236,64 @@ def test_failed_reads_warn_at_3_and_10_in_a_row_and_reset_after_a_good_read(tmp_
     results.write_text("{ half", encoding="utf-8")
     watch.poll(), watch.poll()
     assert warnings() == 0  # two bad reads after the reset: not yet a streak of 3
+
+
+def _write(results, sims):
+    results.write_text(json.dumps({"simulations": sims}), encoding="utf-8")
+
+
+def test_fail_fast_after_runs_in_a_row_with_the_same_cause(tmp_path, capsys):
+    from glint import runlog
+
+    results, reasons = tmp_path / "results.json", []
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x", on_halt=reasons.append)
+    n = runlog.HALT_SAME_CAUSE["infrastructure_error"]
+    infra = lambda t, err="HTTP 303 to /x": _sim(t, 0, term="infrastructure_error", error=err)
+    overflow = _sim("o", 0, term="infrastructure_error", error="litellm.ContextWindowExceededError: too long")
+    # n - 1 in a row, then a different cause, a pass and an overflow each restart the count
+    sims = [infra(f"a{i}") for i in range(n - 1)] + [infra("b", "HTTP 503")] + [infra(f"c{i}") for i in range(n - 1)]
+    sims += [_sim("d", 0, 1.0)] + [infra(f"e{i}") for i in range(n - 1)] + [overflow] + [infra(f"f{i}") for i in range(n - 1)]
+    _write(results, sims)
+    watch.poll()
+    assert reasons == [] and watch.halted is None
+    sims.append(infra("g"))
+    _write(results, sims)
+    watch.poll()
+    assert reasons == [f"{n} runs in a row ended infrastructure_error with the same cause: HTTP 303 to /x"]
+    assert f"FAIL FAST: {reasons[0]}; stopping the arm" in capsys.readouterr().err
+    _write(results, sims + [infra("h")])
+    watch.poll()
+    assert len(reasons) == 1  # once per arm
+
+
+def test_glint_errors_stop_sooner_and_model_results_never_stop(tmp_path):
+    from glint import runlog
+
+    results, reasons = tmp_path / "results.json", []
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x", on_halt=reasons.append)
+    overflow = [_sim(f"o{i}", 0, term="infrastructure_error", error="ContextWindowExceededError") for i in range(20)]
+    _write(results, overflow)
+    watch.poll()
+    assert reasons == []
+    glint = [_sim(f"g{i}", 0, term="infrastructure_error", error="AtemParseError: no tool call parsed")
+             for i in range(runlog.HALT_SAME_CAUSE["glint_error"])]
+    assert all(runlog.outcome(s) == "glint_error" for s in glint)
+    _write(results, overflow + glint)
+    watch.poll()
+    assert len(reasons) == 1 and "glint_error" in reasons[0]
+
+
+def test_fail_fast_after_two_stall_windows_in_a_row(tmp_path, capsys):
+    results, reasons = tmp_path / "results.json", []
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x", stall_s=1200.0, on_halt=reasons.append)
+    watch._last_new = time.time() - 1300
+    watch.poll()
+    assert reasons == [] and "WARNING: no run finished in 20 min" in capsys.readouterr().err
+    _write(results, [_sim("a", 0, 0.0)])  # a finished run resets the count
+    watch.poll()
+    watch._last_new = time.time() - 1300
+    watch.poll()
+    assert reasons == []
+    watch._last_new = time.time() - 1300
+    watch.poll()
+    assert reasons == ["no run finished in 40 min"]

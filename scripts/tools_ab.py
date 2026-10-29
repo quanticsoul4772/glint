@@ -594,11 +594,18 @@ def generate(cfg: dict) -> None:
     base, glimmer = llm_utils.completion, reparsing(llm_utils.completion)
 
     halt = threading.Event()  # set by glimmer_serve.session() when the GPU cap trips or its watcher fails
+    stopped: dict[str, str | None] = {"reason": None}  # set by fail_fast (runlog: a pattern that cannot be noise)
+
+    def fail_fast(reason: str) -> None:
+        stopped["reason"] = reason
+        halt.set()  # the Modal session's event once a session is open: it stops at the session's exit as for a cap
     truncated, truncated_lock = [0], threading.Lock()  # Glimmer responses cut at max_tokens in the current arm
 
     def route(*args, **kwargs):
         if "Muse-Glimmer" not in kwargs.get("model", ""):
             return base(*args, **kwargs)
+        if stopped["reason"]:
+            raise BudgetExceeded(f"stopped early (fail fast): {stopped['reason']}")
         if halt.is_set():
             raise BudgetExceeded("the Modal session was halted (GPU cap reached or the GPU watcher failed)")
         response = glimmer(*args, **kwargs)
@@ -635,7 +642,7 @@ def generate(cfg: dict) -> None:
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
                                label=f"{arm} {domain}",
                                on_run=gate_summary.ErrorLimitAlerts() if enforcer is not None else None,
-                               domain=domain)
+                               domain=domain, on_halt=fail_fast)
             truncated[0] = 0
             glimmer_serve.reset_pool_stats()
             with events:
@@ -651,6 +658,9 @@ def generate(cfg: dict) -> None:
                 for line in gate_summary.outcome_lines(f"{arm} {domain}", gate_summary.rule_outcomes(
                         gate_events, sims, inspect.arm_diffs(domain, sims))):
                     print(line, flush=True)
+            if stopped["reason"]:  # as for a cap stop: no arm file, so a resumed run starts this arm again
+                raise BudgetExceeded(f"{arm} {domain}: stopped early (fail fast): {stopped['reason']}; the arm file is "
+                                     "not written and a resumed run starts this arm again")
             if halt.is_set():  # the drained runs are not results: no arm file, so a resume reruns this arm
                 raise BudgetExceeded(f"{arm} {domain}: the Modal session was halted mid-arm; the arm file is not "
                                      "written and a resumed run starts this arm again")
