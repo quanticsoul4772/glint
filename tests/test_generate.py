@@ -624,3 +624,55 @@ def test_a_fail_fast_pattern_stops_the_arm_names_its_cause_and_refuses_later_gli
     assert "FAIL FAST: 5 runs in a row" in capsys.readouterr().err
     with pytest.raises(BudgetExceeded, match=r"stopped early \(fail fast\)"):
         llm_utils.completion(model="openai/Muse-Glimmer-30B-modal", messages=[])
+
+
+def test_a_fail_fast_stop_on_modal_stops_the_app_at_once(stand_in, make_sim, monkeypatch, capsys):
+    import threading
+    from contextlib import contextmanager
+
+    cfg, outcomes = stand_in
+    cfg |= {"modal": True}
+    outcomes["base"] = outcomes["tools"] = [make_sim("1", 0), make_sim("1", 1)]
+    stops, stopped_now, watchers = [], threading.Event(), []
+
+    @contextmanager
+    def session(meter, cli, env, tag):
+        yield threading.Event()
+
+    class Log:
+        def __init__(self, *a):
+            self.lines = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def failure(self):
+            return None
+
+    class Watch(tools_ab.RunEvents):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            watchers.append(self)
+
+    def run(cfg_, domain, ids, arm, stamp, endpoint):
+        if arm == "tools":
+            watchers[-1]._halt("2 stall windows")
+            assert stopped_now.wait(5), "the app was not stopped while the arm was still running"
+        return _Results(outcomes[arm])
+
+    monkeypatch.setenv("MODAL_PROXY_KEY", "k")
+    monkeypatch.setenv("MODAL_PROXY_SECRET", "s")
+    monkeypatch.setattr(tools_ab.glimmer_serve, "deploy", lambda *a: "https://x.modal.run")
+    monkeypatch.setattr(tools_ab.glimmer_serve, "session", session)
+    monkeypatch.setattr(tools_ab.glimmer_serve, "LogWatch", Log)
+    monkeypatch.setattr(tools_ab.glimmer_serve, "wait_ready", lambda *a, **k: None)
+    monkeypatch.setattr(tools_ab.glimmer_serve, "stop_until_stopped",
+                        lambda cli, env: stops.append(env) or stopped_now.set() or [])
+    monkeypatch.setattr(tools_ab, "RunEvents", Watch)
+    monkeypatch.setattr(tools_ab, "_run", run)
+    with pytest.raises(BudgetExceeded, match=r"stopped early \(fail fast\): 2 stall windows"):
+        tools_ab.generate(cfg)
+    assert len(stops) == 1 and "FAIL FAST: stopping the Modal app now" in capsys.readouterr().out

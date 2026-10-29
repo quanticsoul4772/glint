@@ -7,6 +7,7 @@ finishes) from a background thread and reports every new simulation as it lands.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 import time
@@ -75,6 +76,20 @@ ALERT_SHARES = {"context_overflow": (0.15, 10), "empty_reply": (0.15, 10)}  # sh
 # finished (two 20-minute windows across 12 concurrent runs mean nothing is being served).
 HALT_SAME_CAUSE = {"infrastructure_error": 5, "eval_error": 5, "glint_error": 3}
 HALT_CAUSE_CHARS = 80
+
+
+def cause_key(error: str | None) -> str:
+    """The part of a run's info.error that is the same when the fault is: quoted text (atem quotes the model's own
+    output, 2026-10-29 review) and numbers (ids, counts, ports) are blanked, then the first HALT_CAUSE_CHARS kept."""
+    text = re.sub(r"'[^']*'|\"[^\"]*\"", "'…'", str(error or ""))
+    return re.sub(r"\d+", "#", text)[:HALT_CAUSE_CHARS]
+
+
+def run_key(sim: dict) -> tuple:
+    """A run's identity in τ²'s checkpoint: its simulation id. τ²'s resume reruns an infrastructure_error or
+    budget_stop run under the same (task, trial) and a new id, so keying by (task, trial) hid every rerun of a resumed
+    arm (2026-10-29 review); records without an id (tests, older formats) fall back to (task, trial)."""
+    return (sim["id"],) if sim.get("id") else (sim.get("task_id"), sim.get("trial"))
 HALT_STALLS = 2
 
 
@@ -113,7 +128,7 @@ class RunEvents:
         self._thread = threading.Thread(target=self._watch, daemon=True)
 
     def __enter__(self):
-        self.seen = {(s.get("task_id"), s.get("trial")) for s in self._read()}  # resumed runs are not re-reported
+        self.seen = {run_key(s) for s in self._read()}  # resumed runs are not re-reported; their reruns are
         if self.seen:
             self._say(f"{len(self.seen)} runs already in the checkpoint (resumed)")
         self._thread.start()
@@ -135,7 +150,7 @@ class RunEvents:
 
     def _track_streak(self, e: dict) -> None:
         kind = e["outcome"]
-        key = (kind, str(e.get("error") or "")[:HALT_CAUSE_CHARS]) if kind in HALT_SAME_CAUSE else None
+        key = (kind, cause_key(e.get("error"))) if kind in HALT_SAME_CAUSE else None
         n = self._streak[1] + 1 if key is not None and key == self._streak[0] else (1 if key is not None else 0)
         self._streak = (key, n)
         if key is not None and n >= HALT_SAME_CAUSE[kind]:
@@ -143,6 +158,9 @@ class RunEvents:
 
     def _halt(self, reason: str) -> None:
         if self.halted is not None:
+            return
+        if self._done.is_set():  # the arm's last poll, after τ² returned: every run already finished
+            self._say(f"WARNING: fail-fast pattern at the arm's end ({reason}); the arm had finished, so it is kept")
             return
         self.halted = reason
         self._say(f"FAIL FAST: {reason}; stopping the arm")
@@ -192,13 +210,13 @@ class RunEvents:
         return sims
 
     def poll(self) -> list[dict]:
-        new = [s for s in self._read() if (s.get("task_id"), s.get("trial")) not in self.seen]
+        new = [s for s in self._read() if run_key(s) not in self.seen]
         if new:
             self._last_new = time.time()
             self.events_path.parent.mkdir(parents=True, exist_ok=True)
             with self.events_path.open("a", encoding="utf-8") as fh:
                 for s in new:
-                    self.seen.add((s.get("task_id"), s.get("trial")))
+                    self.seen.add(run_key(s))
                     e = event(s, self.label)
                     loud = "  <-- " + e["error"][:160] if e["outcome"] not in ("pass", "fail") else ""
                     if self.diff is not None and e["outcome"] in FAILED_RUNS:
