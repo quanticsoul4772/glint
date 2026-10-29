@@ -321,7 +321,7 @@ def _register_banking(reg: GateRegistry) -> None:
                       "credit limit increase is decided before a dispute.", procedure.increase_first))
     reg.register(Gate("procedure_dispute_plan_gate", (DISPUTE,), "credit_cards_(general)_015 criterion 4: the "
                       "disputes filed first take the provisional credit, so each filing follows the plan_disputes "
-                      "plan (order from τ² train gold, tasks 039-041).", procedure.dispute_plan, toolkit=True))
+                      "plan (order from τ² train gold, tasks 037-041 and 081).", procedure.dispute_plan, toolkit=True))
 
 
 def build_registry(domain: str) -> GateRegistry:

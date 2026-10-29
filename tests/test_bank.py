@@ -340,7 +340,7 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
 
     report = _run(bank_replay.wrong, json.loads(RUNS.read_text(encoding="utf-8")))
     stopped = {r["run"]: r for r in report["stopped"]}
-    assert len(stopped) == report["denied_as_expected"] == 22
+    assert len(stopped) == report["denied_as_expected"] == 23
     assert all(r["ok"] and r["is_error"] and r["db_unchanged"] for r in stopped.values())
     over = stopped["banking12 base task_054 trial 0"]
     assert (over["write"], over["rule_id"], over["recorded_wrong"]) == (40, "banking.cli.submit.reduce_amount", True)
@@ -349,8 +349,8 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     rules_by_task = {}
     for r in stopped.values():
         rules_by_task.setdefault(r["run"].split()[2], []).append(r["rule_id"])
-    # every recorded task_040 run; with each run's own plan (replayplan), 7 of 8 leave its order before a wrong flag
-    assert sorted(rules_by_task["task_040"]) == ["banking.dispute"] + ["procedure.dispute_plan.order"] * 7
+    # every recorded task_040 run leaves the plan made from its own disputes (replayplan) before a wrong flag lands
+    assert rules_by_task["task_040"] == ["procedure.dispute_plan.order"] * 8
     # gates phase 2 stops runs earlier, on steps the recording shows were skipped: the approve of task_051 base
     # trials 0 and 1 came with no dispute-history or pending-order lookup in the whole run (they were not denied by
     # the approve rule: the customer paid down before submitting, so the policy approves on the live database)
@@ -360,8 +360,8 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     r = stopped["banking12 base task_041 trial 1"]  # no log_verification anywhere before its disputes
     assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.verified", True)
     assert stopped["banking12 tools task_041 trial 1"]["rule_id"] == "banking.verification"  # wrong time_verified
-    assert sorted(rules_by_task["task_041"]) == ["banking.dispute"] * 3 + [
-        "banking.verification", "procedure.dispute_plan.order", "procedure.dispute_plan.order", "procedure.verified"]
+    assert sorted(rules_by_task["task_041"]) == ["banking.dispute", "banking.verification"] + [
+        "procedure.dispute_plan.order"] * 5 + ["procedure.verified"]
     assert sum(r.startswith("procedure.transfer.") for r in rules_by_task["task_051"] + rules_by_task["task_054"]) == 3
 
 

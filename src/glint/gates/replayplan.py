@@ -3,8 +3,8 @@ it: τ²'s gold actions (gate_replay, bank_replay) and Glimmer's runs recorded b
 
 `with_plans(calls)` inserts, before each user's first credit card dispute filing, one plan_disputes call carrying
 that user's filings in the list, in their order (the first filing of each transaction; a retry is not listed twice).
-The plan keeps the given order inside each group, so a replay checks whether the filings follow the plan the
-conversation's own disputes give. Deterministic.
+The plan orders them by its own rule (glint.assist.banking.plan_disputes), so a replay checks whether the filings
+follow the plan the conversation's own disputes give. Deterministic.
 """
 from __future__ import annotations
 

@@ -133,8 +133,9 @@ class DisputePlanTools(ToolKitBase):
 
         The order puts first the disputes that meet every credit criterion except the count (a qualifying reason:
         unauthorized_fraudulent_charge, duplicate_charge, goods_services_not_received older than 30 days; and the
-        account age, amount and merchant criteria), and keeps the given order inside each group. The policy text sets
-        no order; this one is taken from τ²-bench train tasks 039-041. It does not change the database.
+        account age, amount and merchant criteria), largest amount first, then the rest in the given order. The
+        policy text sets no order; this one is taken from τ²-bench train tasks (037-041, 081). It does not change the
+        database.
 
         Args:
             user_id: The customer's user id.
