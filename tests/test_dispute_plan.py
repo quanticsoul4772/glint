@@ -65,6 +65,16 @@ def _verify(env, user_id: str) -> None:
           **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
 
 
+def test_the_plan_denies_state_the_credit_count_the_rule_uses():
+    # 015 criterion 4 counts the disputes before this one: with none on record, the first 3 filings can get credit
+    from glint.gates import procedure
+
+    assert "2 or fewer other disputes" in procedure.CREDIT_ORDER and "at most 2" not in procedure.CREDIT_ORDER
+    env, _, gold = _gated("task_040")
+    reply = _file(env, gold[0])
+    assert _denied(reply, "procedure.dispute_plan.none") and procedure.CREDIT_ORDER in reply.content
+
+
 def _denied(reply, rule: str) -> bool:
     return reply.error and "was NOT executed" in reply.content and f"Rule: {rule} (" in reply.content
 

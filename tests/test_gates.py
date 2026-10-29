@@ -682,6 +682,12 @@ def test_the_terse_wording_keeps_the_decision_and_uses_the_layout_before_the_pla
     assert tools_ab._enforcer(plan, "retail", tmp_path / "plan").wording == "plain"
 
 
+def test_each_submit_verdict_has_its_own_consequence():
+    assert set(rules.SUBMIT_CONSEQUENCE) == {"reduce_amount", "ask_amount", "error"}
+    assert "largest increase" in rules.SUBMIT_CONSEQUENCE["reduce_amount"]
+    assert "largest" not in rules.SUBMIT_CONSEQUENCE["ask_amount"] + rules.SUBMIT_CONSEQUENCE["error"]
+
+
 def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_an_f_string():
     # "...{{a, " f"..." "b}} ..." : the f-string part unescapes {{ but a plain string joined to it keeps }} as typed,
     # and the agent read "contacted_merchant}}" in procedure.dispute_plan.none's fix (2026-10-29)
