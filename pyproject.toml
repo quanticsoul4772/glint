@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "glint"
 version = "0.0.1"
-description = "Deterministic decision tools that take over analytical decisions for Meta's open-weight Muse Glimmer 30B"
+description = "Deterministic policy gates and decision tools for Meta's open-weight Muse Glimmer 30B: every write is checked before it runs"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"

@@ -1,8 +1,9 @@
 """Gate results, the gate registry, the fail-closed runner and the boot check.
 
-Ported from agent-harness-v2 (`enforcement/runner.py`: HookResult, the registry's purpose check, the fail-closed
-wrapper and REQUIRED_GATES) and pgharness (`intents/runner.py`: gates judge a proposed action; a gate that raises
-blocks it). A gate is a plain function of the live database and the write's arguments; it must be stateless and
+Written for this event. The design follows two earlier projects by the same author (agent-harness-v2 and pgharness,
+both private): a result type with a stated purpose, a registry that refuses a gate without one, a fail-closed runner,
+a boot check that every write has a gate, and gates that judge a proposed action before it runs. No code was copied
+from either. A gate is a plain function of the live database and the write's arguments; it must be stateless and
 deterministic, because τ²'s evaluator replays the agent's writes through the same gated environment.
 """
 from __future__ import annotations
