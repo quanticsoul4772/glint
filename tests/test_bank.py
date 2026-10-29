@@ -122,7 +122,7 @@ def test_a_denied_write_is_an_error_result_with_the_gate_text_and_leaves_the_dat
     text = denied.content[0].text
     assert text.startswith("Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\n"
                            "Rule: banking.cli.submit.reduce_amount (")
-    for part in ("\n- requested increase $4,000.00 exceeds", "\nWhy it matters: Tell the customer the largest increase",
+    for part in ("\n- requested increase $4,000.00 exceeds", "\nWhy it matters: Nothing was submitted. Tell the customer the largest increase",
                  "\nWhat to do next: Submit an increase no larger than max_increase", "\nVerdict: {"):
         assert part in text
     # the log carries the session, the task and Muse's call id

@@ -168,8 +168,11 @@ def transfer(db, a: dict) -> GateResult:
 
 
 PLAN_SOURCE = "credit_cards_(general)_015 criterion 4; filing order from τ² train gold (037-041, 081)"
-CREDIT_ORDER = ("Provisional credit goes to at most 2 disputes counted in the past 12 months, so the filing order "
-                "decides which disputes get it, and a filed dispute cannot be taken back.")
+# credit_cards_(general)_015 criterion 4: "has not filed more than 2 disputes in the past 12 months", counted before
+# the dispute being filed (glint.assist.banking.check_dispute: len(filed) + planned_before <= 2)
+CREDIT_ORDER = ("A dispute can get provisional credit only while the customer has 2 or fewer other disputes filed in "
+                "the past 12 months, so the filing order decides which disputes get it, and a filed dispute cannot be "
+                "taken back.")
 INCREASE_FIRST = ("A pending dispute or replacement card makes the increase fail, so the increase is decided first; "
                   "the disputes and the replacement can follow once it is decided.")
 REPLAN = (f"If the customer's list changed, call {PLAN_TOOL} again with every dispute not filed yet (it replaces the "
