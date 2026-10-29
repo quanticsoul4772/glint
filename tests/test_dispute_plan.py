@@ -24,7 +24,7 @@ TASKS = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" 
 TEST_SPLIT = set(json.loads((paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))
                  ["test_untouched"])
 WRAPPER = "call_discoverable_agent_tool"
-FIELDS = ("transaction_id", "dispute_reason", "contacted_merchant")
+FIELDS = ("transaction_id", "dispute_reason", "contacted_merchant", "partial_refund_amount")
 
 
 def _task(task_id: str) -> Task:
@@ -47,7 +47,7 @@ def _gold_disputes(task) -> list[dict]:
 
 
 def _items(disputes: list[dict]) -> list[dict]:
-    return [{k: d[k] for k in FIELDS} for d in disputes]
+    return [{k: d[k] for k in FIELDS if d.get(k) is not None} for d in disputes]
 
 
 def _call(env, name: str, /, **args):
@@ -153,7 +153,7 @@ def test_plan_lists_rejected_and_already_filed_disputes_and_asks_the_merchant_qu
     assert _ran(_file(env, gold[0]))
     asked = gold[1] | {"contacted_merchant": None}
     plan = banking.plan_disputes(env.tools.db, user, [
-        _items(gold[:1])[0], {k: asked[k] for k in FIELDS}, {"transaction_id": "txn_nope", "dispute_reason": "x"},
+        _items(gold[:1])[0], _items([asked])[0], {"transaction_id": "txn_nope", "dispute_reason": "x"},
         {"transaction_id": gold[2]["transaction_id"], "dispute_reason": "bogus"}, _items(gold[3:4])[0],
         _items(gold[3:4])[0], "not a dict"])
     assert plan["already_filed"] == [gold[0]["transaction_id"]]
@@ -342,6 +342,41 @@ def test_with_plans_inserts_one_plan_per_user_before_the_first_filing():
     out = with_plans(calls)
     assert [c.id for c in out] == ["0", "1-plan", "1", "2", "3", "4", "5-plan", "5"]
     assert out[1].arguments == {"user_id": "u1", "transactions": [
-        {k: a[k] for k in FIELDS}, {"transaction_id": "t2", "dispute_reason": "incorrect_amount"}]}
+        _items([a])[0], {"transaction_id": "t2", "dispute_reason": "incorrect_amount"}]}
     assert filing(calls[0]) is None and filing(calls[3]) is None
     assert plan_arguments([c])["u2"]["transactions"] == [{"transaction_id": "t3", "dispute_reason": "duplicate_charge"}]
+
+
+def test_an_incorrect_amount_dispute_is_planned_as_a_partial_refund_of_the_overcharge():
+    # task_039's Costco charge: $198.23 charged, $148.23 expected; gold files partial_refund 50 (tuned)
+    env, _, gold = _gated("task_039")
+    over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
+    user = over["user_id"]
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
+    asked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[base]).content)
+    entry = asked["order"][0]
+    assert "resolution_requested" not in entry and "should you have been charged" in entry["ask_user"]
+    assert str(asked["ready"]) == "False"
+    for item in (base | {"expected_amount": 148.23}, base | {"partial_refund_amount": 50}):
+        plan = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[item]).content)
+        assert (plan["order"][0]["resolution_requested"], float(plan["order"][0]["partial_refund_amount"])) == (
+            "partial_refund", 50.0)
+    for bad in ({"expected_amount": 198.23}, {"partial_refund_amount": 250}):
+        plan = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[base | bad]).content)
+        assert plan["order"] == [] and "overcharge must be more than $0" in plan["rejected"][0]["reason"]
+
+
+def test_the_plan_gate_holds_an_overcharge_filing_to_the_planned_partial_refund():
+    env, _, gold = _gated("task_039")
+    over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
+    user = over["user_id"]
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
+    _call(env, "plan_disputes", user_id=user, transactions=[base])
+    reply = _file(env, over)
+    assert _denied(reply, "procedure.dispute_plan.ask") and "should have been charged" in reply.content
+    _call(env, "plan_disputes", user_id=user, transactions=[base | {"partial_refund_amount": 50}])
+    full = over | {"resolution_requested": "full_refund", "partial_refund_amount": None}
+    reply = _file(env, full)
+    assert _denied(reply, "procedure.dispute_plan.values") and "resolution_requested 'full_refund'" in reply.content
+    assert "partial_refund_amount 50.0" in reply.content
+    assert _ran(_file(env, over))

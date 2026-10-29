@@ -144,11 +144,16 @@ class DisputePlanTools(ToolKitBase):
                 'duplicate_charge', 'incorrect_amount', 'goods_services_not_received',
                 'goods_services_not_as_described', 'canceled_subscription_still_charging', 'refund_never_processed',
                 "contacted_merchant": the customer's answer to "did you try to resolve this with the merchant
-                first?" (true/false; leave it out if not asked yet)}.
+                first?" (true/false; leave it out if not asked yet), and for an 'incorrect_amount' dispute either
+                "expected_amount" (what the customer should have been charged) or "partial_refund_amount" (the
+                overcharge); leave both out until the customer has said, and the plan asks for it}.
+                An incorrect_amount dispute is filed as resolution_requested 'partial_refund' with the plan's
+                partial_refund_amount (taken from τ²-bench train tasks 039-041; the policy says to ask the customer).
 
         Returns:
             dict: order (position, transaction_id, dispute_reason, contacted_merchant,
-            eligible_for_provisional_credit, provisional_credit_criteria), already_filed, rejected, ask_user, ready.
+            eligible_for_provisional_credit, provisional_credit_criteria, and resolution_requested with
+            partial_refund_amount for incorrect_amount), already_filed, rejected, ask_user, ready.
         """
         return banking.plan_disputes(self.db, user_id, transactions)
 

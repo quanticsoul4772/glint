@@ -206,6 +206,20 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
 
 
 PLAN_TOOL = "plan_disputes"
+OVERCHARGE = "incorrect_amount"
+
+
+def overcharge(charged: float, item: dict) -> tuple[float | None, str]:
+    """(partial_refund_amount, rejection) for an incorrect_amount item: from `partial_refund_amount` (the overcharge)
+    or `expected_amount` (what should have been charged); (None, "") when the customer has not been asked yet."""
+    given, expected = item.get("partial_refund_amount"), item.get("expected_amount")
+    if given in (None, "") and expected in (None, ""):
+        return None, ""
+    refund = round(_money(given), 2) if given not in (None, "") else round(charged - _money(expected), 2)
+    if not 0 < refund < charged:
+        return None, (f"the overcharge must be more than $0 and less than the ${charged:,.2f} charged (got "
+                      f"${refund:,.2f}); for the whole amount, use another dispute reason")
+    return refund, ""
 DISPUTE_REASONS = ("unauthorized_fraudulent_charge", "duplicate_charge", "incorrect_amount",
                    "goods_services_not_received", "goods_services_not_as_described",
                    "canceled_subscription_still_charging", "refund_never_processed")
@@ -240,9 +254,17 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     (research/00-decisions.md, 2026-10-28). The second group keeps the given order (no credit is at stake there); equal
     amounts keep the given order too.
 
+    An incorrect_amount dispute is filed as resolution_requested 'partial_refund' with partial_refund_amount = the
+    overcharge (the amount charged minus the amount the customer should have been charged). The policy only says to
+    ask the customer which resolution they want (credit_cards_(general)_014); τ²'s train gold files every
+    incorrect_amount dispute that way (tasks 039, 040, 041; tuned tasks), and Glimmer, asking "full refund for all?",
+    filed full_refund with no amount in 10 of 12 gated runs of those tasks (2026-10-29). So the plan asks the customer
+    the amount they should have been charged, for each such dispute, until the item carries `expected_amount` or the
+    overcharge itself as `partial_refund_amount`.
+
     `transactions`: the disputes the customer wants, each {transaction_id, dispute_reason, contacted_merchant} (the
-    last None when not asked yet). Criterion 4 counts the disputes on record in the past 12 months plus the planned
-    ones ahead. A transaction already disputed is listed under `already_filed`; an unknown transaction, a reason
+    last None when not asked yet), and for incorrect_amount `expected_amount` or `partial_refund_amount`. Criterion 4
+    counts the disputes on record in the past 12 months plus the planned ones ahead. A transaction already disputed is listed under `already_filed`; an unknown transaction, a reason
     outside τ²'s list or a repeated transaction under `rejected`. Reads the live database only; deterministic."""
     user_id = str(user_id or "")
     year_ago = TODAY.replace(year=TODAY.year - 1)
@@ -260,14 +282,17 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
                f"transaction {tid!r} does not exist for user {user_id}" if txn is None or txn.get("user_id") != user_id
                else f"dispute_reason {reason!r} is not one of {list(DISPUTE_REASONS)}"
                if reason not in DISPUTE_REASONS else "")
+        refund = None
+        if not why and reason == OVERCHARGE:
+            refund, why = overcharge(_money(txn.get("transaction_amount")), item)
         seen.add(tid)
         if why:
             rejected.append({"transaction_id": tid, "reason": why})
         elif tid in disputed:
             already.append(tid)
         else:
-            wanted.append((tid, reason, contacted, card_of_transaction(db, user_id, txn)))
-    first = [check_dispute(db, user_id, card, tid, reason, contacted) for tid, reason, contacted, card in wanted]
+            wanted.append((tid, reason, contacted, card_of_transaction(db, user_id, txn), refund))
+    first = [check_dispute(db, user_id, card, tid, reason, contacted) for tid, reason, contacted, card, _ in wanted]
     qualifies = [all(ok for name, ok in v.get("provisional_credit_criteria", {"none": False}).items()
                      if name != COUNT_CRITERION) for v in first]
     amount = {tid: _money(db.credit_card_transaction_history.data[tid].get("transaction_amount"))
@@ -275,7 +300,7 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     credit_group = sorted((w for w, q in zip(wanted, qualifies) if q), key=lambda w: -amount[w[0]])  # stable
     ordered = credit_group + [w for w, q in zip(wanted, qualifies) if not q]
     order, ask = [], []
-    for tid, reason, contacted, card in ordered:
+    for tid, reason, contacted, card, refund in ordered:
         v = check_dispute(db, user_id, card, tid, reason, contacted, planned_before=len(order))
         if "provisional_credit_criteria" not in v:
             rejected.append({"transaction_id": tid, "reason": "; ".join(v["reasons"])})
@@ -287,9 +312,18 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
                                        if name != COUNT_CRITERION),
                  "disputes_counted_before": len(on_record) + len(order),
                  "provisional_credit_criteria": v["provisional_credit_criteria"]}
+        questions = []
         if contacted is None:
-            entry["ask_user"] = f"Did you try to resolve the {tid} charge with the merchant first?"
-            ask.append(entry["ask_user"])
+            questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")
+        if reason == OVERCHARGE:
+            if refund is None:
+                questions.append(f"What amount should you have been charged for the {tid} charge "
+                                 f"(${amount[tid]:,.2f})?")
+            else:
+                entry |= {"resolution_requested": "partial_refund", "partial_refund_amount": refund}
+        if questions:
+            entry["ask_user"] = " ".join(questions)
+            ask.extend(questions)
         order.append(entry)
     return {"user_id": user_id, "rule": PLAN_RULE, "disputes_on_record_past_12_months": len(on_record),
             "order": order, "already_filed": already, "rejected": rejected, "ask_user": ask,
