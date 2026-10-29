@@ -23,6 +23,8 @@ BUDGET_STOP = "BudgetExceeded:"
 GLINT_ERRORS = ("AtemParseError:", "CallLogError:")
 # outcomes that are neither a pass nor a fail of the model; every one is counted and reported, never dropped quietly
 NOT_RESULTS = ("infrastructure_error", "budget_stop", "eval_error")
+# outcomes that count as a failed run of the model
+FAILED_RUNS = ("fail", "context_overflow", "empty_reply", "glint_error")
 
 
 def outcome(sim: dict) -> str:
@@ -74,9 +76,19 @@ class RunEvents:
     to stderr and append one JSON record to `events_path`. Warns once per `stall_s` with no new simulation."""
 
     def __init__(self, results_path: Path, events_path: Path, label: str, poll_s: float = 30.0,
-                 stall_s: float = 1200.0, on_run: Callable[[dict], str | None] | None = None):
+                 stall_s: float = 1200.0, on_run: Callable[[dict], str | None] | None = None,
+                 domain: str | None = None):
         self.results_path, self.events_path, self.label = Path(results_path), Path(events_path), label
         self.on_run = on_run  # called with each new simulation; a returned line is printed (glint.gates.summary)
+        # With the run's τ² domain, each failed run is diffed against τ²'s expected actions (glint.inspect): a compact
+        # summary goes into its event record and its line, and the arm's end prints a DIFFS line. Imported here, not
+        # at the top: glint.inspect loads τ²'s tasks and environments, which most users of this module never need.
+        self.diff = None
+        if domain is not None:
+            from glint import inspect
+
+            self.diff = lambda sim: inspect.compact(inspect.diff_run(domain, sim))
+        self.diffs: dict[tuple[str, int], dict] = {}  # (task_id, trial) -> compact diff of each failed run
         self.poll_s, self.stall_s = poll_s, stall_s
         self.seen: set[tuple] = set()
         self.counts: dict[str, int] = {}
@@ -104,6 +116,10 @@ class RunEvents:
         for kind, tasks in sorted(self.tasks_by_outcome.items()):
             if kind not in ("pass", "fail"):
                 self._say(f"{kind} by task: {dict(sorted(tasks.items()))}")
+        if self.diff is not None:
+            from glint import inspect
+
+            self._say(inspect.diffs_line(list(self.diffs.values())))
 
     def _alert(self, latest: dict | None) -> None:
         """One ALERT line when an outcome repeats past its threshold, again at each doubling, with its tasks and the
@@ -156,11 +172,21 @@ class RunEvents:
                 for s in new:
                     self.seen.add((s.get("task_id"), s.get("trial")))
                     e = event(s, self.label)
+                    loud = "  <-- " + e["error"][:160] if e["outcome"] not in ("pass", "fail") else ""
+                    if self.diff is not None and e["outcome"] in FAILED_RUNS:
+                        # a diff that cannot be computed is recorded and printed as such, and the run's event
+                        # still lands: the run log must not stop over an analysis error
+                        try:
+                            e["diff"] = self.diff(s)
+                            self.diffs[(str(e["task_id"]), int(e["trial"] or 0))] = e["diff"]
+                            loud += "  " + e["diff"]["text"]
+                        except Exception as exc:  # noqa: BLE001  (recorded in the event and printed below)
+                            e["diff_error"] = f"{type(exc).__name__}: {exc}"[:300]
+                            loud += f"  WARNING: no diff ({e['diff_error'][:160]})"
                     self.counts[e["outcome"]] = self.counts.get(e["outcome"], 0) + 1
                     by_task = self.tasks_by_outcome.setdefault(e["outcome"], {})
                     by_task[str(e["task_id"])] = by_task.get(str(e["task_id"]), 0) + 1
-                    fh.write(json.dumps(e) + "\n")
-                    loud = "  <-- " + e["error"][:160] if e["outcome"] not in ("pass", "fail") else ""
+                    fh.write(json.dumps(e, default=str) + "\n")
                     self._say(f"{e['task_id']} trial {e['trial']}: {e['outcome'].upper()} ({e['termination']}, "
                               f"{e['duration_s']:.0f} s, {e['messages']} msgs){loud}")
                     note = self.on_run(s) if self.on_run is not None else None

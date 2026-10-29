@@ -78,7 +78,7 @@ from tau2.registry import registry
 from tau2.runner.batch import run_domain, run_tasks
 from tau2.utils import llm_utils
 
-from glint import glimmer_serve, paths
+from glint import glimmer_serve, inspect, paths
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import recording
@@ -590,7 +590,8 @@ def generate(cfg: dict) -> None:
             glim_before, meta_before = glim.meta_usd, meta.meta_usd
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
                                label=f"{arm} {domain}",
-                               on_run=gate_summary.ErrorLimitAlerts() if enforcer is not None else None)
+                               on_run=gate_summary.ErrorLimitAlerts() if enforcer is not None else None,
+                               domain=domain)
             truncated[0] = 0
             glimmer_serve.reset_pool_stats()
             with events:
@@ -601,8 +602,11 @@ def generate(cfg: dict) -> None:
                   f"{glimmer_serve.POOL_WAIT_WARN_S:.0f} s, longest {pool['longest_s']:.1f} s", flush=True)
             if enforcer is not None:  # the gate decisions live only in the gate log; one line puts them in the run log
                 sims = [s.model_dump(mode="json") for s in results.simulations]
-                print(gate_summary.line(f"{arm} {domain}", gate_summary.summarize(enforcer.events.events(), sims)),
-                      flush=True)
+                gate_events = enforcer.events.events()
+                print(gate_summary.line(f"{arm} {domain}", gate_summary.summarize(gate_events, sims)), flush=True)
+                for line in gate_summary.outcome_lines(f"{arm} {domain}", gate_summary.rule_outcomes(
+                        gate_events, sims, inspect.arm_diffs(domain, sims))):
+                    print(line, flush=True)
             if halt.is_set():  # the drained runs are not results: no arm file, so a resume reruns this arm
                 raise BudgetExceeded(f"{arm} {domain}: the Modal session was halted mid-arm; the arm file is not "
                                      "written and a resumed run starts this arm again")
