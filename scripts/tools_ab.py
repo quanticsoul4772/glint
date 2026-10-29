@@ -609,6 +609,8 @@ def generate(cfg: dict) -> None:
                              daemon=True, name="glint-fail-fast-stop").start()
     truncated, truncated_lock = [0], threading.Lock()  # Glimmer responses cut at max_tokens in the current arm
 
+    last_call = [time.time()]  # when Glimmer last answered: RunEvents tells a slow run from a stalled server by it
+
     def route(*args, **kwargs):
         if "Muse-Glimmer" not in kwargs.get("model", ""):
             return base(*args, **kwargs)
@@ -617,6 +619,7 @@ def generate(cfg: dict) -> None:
         if halt.is_set():
             raise BudgetExceeded("the Modal session was halted (GPU cap reached or the GPU watcher failed)")
         response = glimmer(*args, **kwargs)
+        last_call[0] = time.time()
         if response.choices[0].finish_reason == "length":  # τ²'s own warning names no task
             task_id, trial = current_run()
             with truncated_lock:
@@ -651,7 +654,7 @@ def generate(cfg: dict) -> None:
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
                                label=f"{arm} {domain}",
                                on_run=gate_summary.ErrorLimitAlerts() if enforcer is not None else None,
-                               domain=domain, on_halt=fail_fast)
+                               domain=domain, on_halt=fail_fast, activity=lambda: last_call[0])
             truncated[0] = 0
             glimmer_serve.reset_pool_stats()
             with events:
