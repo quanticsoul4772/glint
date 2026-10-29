@@ -21,9 +21,8 @@ from loguru import logger
 from tau2.data_model.message import ToolCall
 from tau2.registry import registry
 
-from glint.assist.banking import CARD_DIGITS_TOOL, PLAN_TOOL, card_of_transaction
+from glint.assist.banking import CARD_DIGITS_TOOL, PLAN_TOOL
 from glint.gates import Enforcer, EventLog
-from glint.gates.procedure import expected_card_digits
 from glint.gates.rules import DISPUTE
 
 WRAPPER = "call_discoverable_agent_tool"
@@ -83,10 +82,7 @@ def simulate(task, filings: dict[str, dict]) -> dict:
     denied = []
     for e in plan["order"]:
         flag = str(e["eligible_for_provisional_credit"]) == "True"  # τ² shows tool-result bools as strings
-        # the card's digits as an agent following the gates files them (the simulation measures the credit flags)
-        txn = env.tools.db.credit_card_transaction_history.data[e["transaction_id"]]
-        digits, _ = expected_card_digits(env.tools.db, card_of_transaction(env.tools.db, user_id, txn))
-        args = (filings[e["transaction_id"]] | {"eligible_for_provisional_credit": flag, "card_last_4_digits": digits}
+        args = (filings[e["transaction_id"]] | {"eligible_for_provisional_credit": flag}
                 | {k: e[k] for k in ("resolution_requested", "partial_refund_amount") if k in e})
         _call(env, "unlock_discoverable_agent_tool", agent_tool_name=DISPUTE)
         reply = _call(env, WRAPPER, agent_tool_name=DISPUTE, arguments=json.dumps(args))
