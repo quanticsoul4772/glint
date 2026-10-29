@@ -699,3 +699,18 @@ def test_importing_tools_ab_logs_no_tau2_registry_dump():
     r = subprocess.run([sys.executable, "-X", "utf8", "-c", "import tools_ab"], cwd=root / "scripts", env=env,
                        capture_output=True, text=True, timeout=120, check=True)
     assert "Registering default components" not in r.stderr and "Registry info" not in r.stderr
+
+
+def test_a_one_arm_set_notes_its_arm_once_instead_of_warning_per_task(tmp_path, capsys):
+    cfg = {"data": tmp_path, "out": tmp_path / "out.json", "trials": 1, "arms": ("tools",)}
+    sims = [{"task_id": f"t{i}", "trial": 0, "termination_reason": "user_stop", "reward_info": {"reward": 1.0},
+             "messages": []} for i in range(3)]
+    (tmp_path / "tools-retail.json").write_text(json.dumps({"simulations": sims}), encoding="utf-8")
+    tools_ab.analyze(cfg)
+    out = capsys.readouterr().out
+    assert "NOTE: this set runs the tools arm only" in out and "WARNING" not in out.replace(
+        "WARNING: the tools arm for retail made 0 Glint tool calls", "")
+    two = cfg | {"arms": ("base", "tools"), "out": tmp_path / "two.json"}
+    tools_ab.analyze(two)
+    out = capsys.readouterr().out
+    assert "WARNING: no base arm for retail" in out and out.count("only the tools arm has runs") == 3

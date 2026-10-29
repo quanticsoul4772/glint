@@ -731,12 +731,17 @@ def analyze(cfg: dict) -> None:
     domains = sorted({p.stem.split("-", 1)[1] for p in cfg["data"].glob("*-*.json") if p.stem != "tasks"})
     if not domains:
         raise FileNotFoundError(f"no results in {cfg['data']}")
+    planned = tuple(cfg.get("arms", ("base", "tools")))
+    if len(planned) == 1:  # a one-arm set is compared with another set's arm (its docstring says which)
+        print(f"NOTE: this set runs the {planned[0]} arm only; its tasks are not compared within the set", flush=True)
     for arm in ("base", "tools"):
         for domain in domains:
             path = cfg["data"] / f"{arm}-{domain}.json"
             if not path.exists():
-                print(f"WARNING: no {arm} arm for {domain} ({path.name} missing): its tasks have one arm only and "
-                      "are left out of the comparison", flush=True)
+                # an arm the set never runs is not missing (13 such WARNINGs ended each one-arm run, 2026-10-29)
+                if arm in planned:
+                    print(f"WARNING: no {arm} arm for {domain} ({path.name} missing): its tasks have one arm only "
+                          "and are left out of the comparison", flush=True)
                 continue
             beyond_k = 0
             for s in json.loads(path.read_text(encoding="utf-8"))["simulations"]:
@@ -783,7 +788,7 @@ def analyze(cfg: dict) -> None:
     # Loud summary: excluded runs (infrastructure, evaluation, cap) can leave arms with different run counts, a task
     # can have one arm only, and Glint errors count against the tools
     for key, arms in sorted(report.items()):
-        if set(arms) != {"base", "tools"}:
+        if len(planned) > 1 and set(arms) != set(planned):
             print(f"WARNING: {key}: only the {', '.join(arms)} arm has runs; the task is not compared", flush=True)
         runs = {arm: row["runs"] for arm, row in arms.items()}
         excluded = {arm: {k: row[k] for k in ("infra_errors", "eval_errors", "budget_stops") if row[k]}
