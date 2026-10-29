@@ -2,7 +2,9 @@
 
 `install(domain)` wraps the registered environment constructor: every environment it builds gets the domain toolkit
 subclass below on the same live database, so the tools see the episode's current state. The
-tools are READ tools: they never change the database and are skipped when τ² replays an episode for evaluation.
+tools are READ tools: they never change the database and are skipped when τ² replays an episode for evaluation. The
+one exception is banking's plan_disputes, which τ² replays (see DisputePlanTools and glint.gates.enforce): it still
+never changes the database.
 """
 from __future__ import annotations
 
@@ -115,7 +117,42 @@ class AssistedAirlineTools(AirlineTools):
         return airline.upcoming_trips(self.db, user_id)
 
 
-class BankingDecisionTools(ToolKitBase):
+class DisputePlanTools(ToolKitBase):
+    """plan_disputes alone. Every gated banking toolkit carries it (glint.gates.enforce attaches it), because the plan
+    gate on credit card disputes needs it; BankingDecisionTools includes it."""
+
+    @is_tool(ToolType.GENERIC, mutates_state=True)
+    def plan_disputes(self, user_id: str, transactions: list[dict]) -> dict:
+        """Credit card dispute planning tool: call this BEFORE filing any credit card transaction dispute, with EVERY
+        transaction the customer wants disputed in this conversation (one transaction too). It returns the order to
+        file them in and, for each, the eligible_for_provisional_credit value to file with and the policy criteria
+        behind it. Provisional credit needs at most 2 disputes filed in the past 12 months (knowledge base
+        credit_cards_(general)_015, criterion 4), so the disputes filed first take the credit. Each dispute filing is
+        checked against this plan: file them in its order, with its values. Calling it again replaces the plan (for
+        example when the customer adds a transaction or answers the merchant question).
+
+        The order puts first the disputes that meet every credit criterion except the count (a qualifying reason:
+        unauthorized_fraudulent_charge, duplicate_charge, goods_services_not_received older than 30 days; and the
+        account age, amount and merchant criteria), and keeps the given order inside each group. The policy text sets
+        no order; this one is taken from τ²-bench train tasks 039-041. It does not change the database.
+
+        Args:
+            user_id: The customer's user id.
+            transactions: Every dispute the customer wants, in the order they gave them, each an object
+                {"transaction_id": "...", "dispute_reason": one of 'unauthorized_fraudulent_charge',
+                'duplicate_charge', 'incorrect_amount', 'goods_services_not_received',
+                'goods_services_not_as_described', 'canceled_subscription_still_charging', 'refund_never_processed',
+                "contacted_merchant": the customer's answer to "did you try to resolve this with the merchant
+                first?" (true/false; leave it out if not asked yet)}.
+
+        Returns:
+            dict: order (position, transaction_id, dispute_reason, contacted_merchant,
+            eligible_for_provisional_credit, provisional_credit_criteria), already_filed, rejected, ask_user, ready.
+        """
+        return banking.plan_disputes(self.db, user_id, transactions)
+
+
+class BankingDecisionTools(DisputePlanTools):
     """Mixed in ahead of the banking toolkit class τ² composes per retrieval variant (see `install`)."""
 
     @is_tool(ToolType.READ)
@@ -145,7 +182,8 @@ class BankingDecisionTools(ToolKitBase):
     def check_card_dispute(self, user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
                            contacted_merchant: bool | None = None, replacement_requested: bool = False,
                            other_requests: list[str] | None = None) -> dict:
-        """Credit card dispute decision tool: call this BEFORE filing each credit card transaction dispute. It
+        """Credit card dispute decision tool for one transaction (plan_disputes gives the filing order and the
+        provisional credit for all of a customer's disputes; call it first). Call this BEFORE filing each dispute. It
         returns the authoritative values to file with: card_action ('keep_active' or 'cancel_and_reissue', the same
         for every dispute on a card being replaced), eligible_for_provisional_credit with each criterion, the
         purchase date and card digits, and any question still to ask the user. Use its values in the dispute call.
@@ -173,6 +211,18 @@ class BankingDecisionTools(ToolKitBase):
 
 _ASSISTED = {"retail": AssistedRetailTools, "airline": AssistedAirlineTools}
 _ASSISTED_BANKING: dict[type, type] = {}  # composed banking toolkit class -> its assisted subclass
+_PLANNED_BANKING: dict[type, type] = {}  # composed banking toolkit class -> its subclass with plan_disputes only
+
+
+def add_plan_tool(env):
+    """Put plan_disputes on a banking environment's toolkit (in place, ahead of its class in the MRO), unless it has
+    it already. Used by glint.gates.enforce: the plan gate needs the tool on every gated banking environment."""
+    cls = type(env.tools)
+    if not issubclass(cls, DisputePlanTools):
+        if cls not in _PLANNED_BANKING:
+            _PLANNED_BANKING[cls] = type(f"Planned{cls.__name__}", (DisputePlanTools, cls), {})
+        env.tools.__class__ = _PLANNED_BANKING[cls]
+    return env
 
 
 def assist_environment(env, domain: str, enforcer=None):

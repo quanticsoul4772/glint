@@ -1,0 +1,319 @@
+"""Enforced dispute planning (decision 2026-10-28): plan_disputes (glint.assist.banking), the plan gate on credit card
+disputes (glint.gates.procedure.dispute_plan), the enforcer's plan record, τ²'s strict replay of it, glint-bank
+publishing the tool, and the replay helper (glint.gates.replayplan). Real τ² databases of TRAIN tasks only (never the
+test_untouched 20 of split-partition-banking.json); tasks 039-041 are tuned tasks from here on."""
+import json
+
+import anyio
+import pytest
+from loguru import logger
+from tau2.data_model.message import AssistantMessage, ToolCall
+from tau2.data_model.tasks import Task
+from tau2.registry import registry
+
+from glint import paths
+from glint.assist import banking
+from glint.assist.tau2_tools import BankingDecisionTools, DisputePlanTools, add_plan_tool, install
+from glint.gates import Enforcer, EventLog, rules
+from glint.gates.core import run_gate
+from glint.gates.replayplan import filing, plan_arguments, with_plans
+
+logger.remove()
+TASKS = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
+                                         "tasks.json").read_text(encoding="utf-8"))}
+TEST_SPLIT = set(json.loads((paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))
+                 ["test_untouched"])
+WRAPPER = "call_discoverable_agent_tool"
+FIELDS = ("transaction_id", "dispute_reason", "contacted_merchant")
+
+
+def _task(task_id: str) -> Task:
+    assert task_id not in TEST_SPLIT, f"{task_id} is in the banking test split"
+    return Task.model_validate(TASKS[task_id])
+
+
+def _env(task, enforcer: Enforcer | None = None):
+    env = registry.get_env_constructor("banking_knowledge")(retrieval_variant="bm25_grep", task=task)
+    init = task.initial_state
+    env.set_state(init.initialization_data if init else None, init.initialization_actions if init else None, [])
+    if enforcer is not None:
+        enforcer.attach(env)
+    return env
+
+
+def _gold_disputes(task) -> list[dict]:
+    return [json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
+            if a.name == WRAPPER and a.arguments.get("agent_tool_name") == rules.DISPUTE]
+
+
+def _items(disputes: list[dict]) -> list[dict]:
+    return [{k: d[k] for k in FIELDS} for d in disputes]
+
+
+def _call(env, name: str, /, **args):
+    return env.get_response(ToolCall(id="t", name=name, arguments=args, requestor="assistant"))
+
+
+def _file(env, args: dict):
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
+    return _call(env, WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(args))
+
+
+def _verify(env, user_id: str) -> None:
+    u = env.tools.db.users.data[user_id]
+    _call(env, "log_verification", time_verified="2025-11-14 03:40:00 EST",
+          **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
+
+
+def _denied(reply, rule: str) -> bool:
+    return reply.error and "was NOT executed" in reply.content and f"rule {rule}," in reply.content
+
+
+def _ran(reply) -> bool:
+    return "was NOT executed" not in reply.content and not str(reply.content).startswith("Error")
+
+
+def _plan_gate(env, args: dict):
+    """The plan gate's own verdict (the dispute gate before it may deny first on the live database)."""
+    gate = next(g for g in env.glint_enforcer.registry.for_tool(rules.DISPUTE) if g.name == "procedure_dispute_plan_gate")
+    return run_gate(gate, env.tools, args)[0]
+
+
+def _gated(task_id: str):
+    task = _task(task_id)
+    env = _env(task, Enforcer("banking_knowledge", EventLog(":memory:")))
+    disputes = _gold_disputes(task)
+    _verify(env, disputes[0]["user_id"])
+    return env, task, disputes
+
+
+# ---- plan_disputes on the tuned tasks ------------------------------------------------------------------------------
+
+GOLD_FLAGS = {"task_039": "TTTFFFFF", "task_040": "TTFFFFFF", "task_041": "TT" + "F" * 14}
+
+
+@pytest.mark.parametrize("task_id", sorted(GOLD_FLAGS))
+def test_plan_files_the_qualifying_disputes_first_with_golds_credit_flags(task_id):
+    task = _task(task_id)
+    db, gold = _env(task).tools.db, _gold_disputes(task)
+    user = gold[0]["user_id"]
+    flags = "".join("T" if d["eligible_for_provisional_credit"] else "F" for d in gold)
+    assert flags == GOLD_FLAGS[task_id]
+    # gold's own order comes back unchanged, with gold's flag on every transaction
+    plan = banking.plan_disputes(db, user, _items(gold))
+    assert [(e["transaction_id"], e["eligible_for_provisional_credit"]) for e in plan["order"]] == \
+        [(d["transaction_id"], d["eligible_for_provisional_credit"]) for d in gold]
+    assert plan["ready"] and plan["rejected"] == plan["already_filed"] == []
+    # the never-qualifying disputes named first are moved behind the rest; inside each group the given order is kept,
+    # so every transaction gets gold's flag
+    first = [e["transaction_id"] for e in plan["order"] if e["can_get_credit"]]
+    shuffled = [i for i in _items(gold) if i["transaction_id"] not in first] + \
+               [i for i in _items(gold) if i["transaction_id"] in first]
+    again = banking.plan_disputes(db, user, shuffled)
+    assert [e["transaction_id"] for e in again["order"]] == [d["transaction_id"] for d in gold]
+    # any given order: gold's sequence of credit flags, credit only to the first qualifying ones
+    backwards = banking.plan_disputes(db, user, list(reversed(_items(gold))))
+    assert "".join("T" if e["eligible_for_provisional_credit"] else "F" for e in backwards["order"]) == flags
+    counted = [e["disputes_counted_before"] for e in backwards["order"]]
+    assert counted == list(range(counted[0], counted[0] + len(gold)))
+
+
+def test_plan_lists_rejected_and_already_filed_disputes_and_asks_the_merchant_question():
+    env, _, gold = _gated("task_039")
+    user = gold[0]["user_id"]
+    assert _ran(_call(env, "plan_disputes", user_id=user, transactions=_items(gold[:1])))
+    assert _ran(_file(env, gold[0]))
+    asked = gold[1] | {"contacted_merchant": None}
+    plan = banking.plan_disputes(env.tools.db, user, [
+        _items(gold[:1])[0], {k: asked[k] for k in FIELDS}, {"transaction_id": "txn_nope", "dispute_reason": "x"},
+        {"transaction_id": gold[2]["transaction_id"], "dispute_reason": "bogus"}, _items(gold[3:4])[0],
+        _items(gold[3:4])[0], "not a dict"])
+    assert plan["already_filed"] == [gold[0]["transaction_id"]]
+    assert [r["transaction_id"] for r in plan["rejected"]] == ["txn_nope", gold[2]["transaction_id"],
+                                                               gold[3]["transaction_id"], ""]
+    assert "listed twice" in plan["rejected"][2]["reason"]
+    assert plan["disputes_on_record_past_12_months"] == 1 and plan["order"][0]["disputes_counted_before"] == 1
+    assert plan["ask_user"] and "ask_user" in plan["order"][0] and not plan["ready"]
+
+
+# ---- the plan gate ------------------------------------------------------------------------------------------------
+
+def test_a_dispute_without_a_plan_is_denied_and_the_plan_is_the_enforcers_record():
+    env, _, gold = _gated("task_040")
+    assert _denied(_file(env, gold[0]), "procedure.dispute_plan.none")
+    assert env.tools.glint_plans == {}
+    plan = json.loads(_call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold)).content)
+    assert env.tools.glint_plans[gold[0]["user_id"]] == plan
+    assert _ran(_file(env, gold[0]))
+
+
+def test_filings_out_of_the_plan_are_denied_and_the_plan_order_is_allowed():
+    env, _, gold = _gated("task_039")
+    user = gold[0]["user_id"]
+    _call(env, "plan_disputes", user_id=user, transactions=list(reversed(_items(gold))))
+    plan = env.tools.glint_plans[user]["order"]
+    by_id = {d["transaction_id"]: d for d in gold}
+    first, second = by_id[plan[0]["transaction_id"]], by_id[plan[1]["transaction_id"]]
+    first_flag = plan[0]["eligible_for_provisional_credit"] == "True"  # τ² shows tool-result bools as strings
+    reply = _file(env, second | {"eligible_for_provisional_credit": True})
+    assert _denied(reply, "procedure.dispute_plan.order") and f"File {first['transaction_id']} next" in reply.content
+    # the dispute gate passes the next filing either way (the live database allows both flags for a first dispute);
+    # the plan gate holds it to the plan's values
+    for wrong in ({"dispute_reason": "incorrect_amount"}, {"contacted_merchant": not first["contacted_merchant"]}):
+        reply = _file(env, first | {"eligible_for_provisional_credit": first_flag} | wrong)
+        assert reply.error and "was NOT executed" in reply.content
+    assert _denied(_file(env, {**first, "transaction_id": "txn_not_planned", "eligible_for_provisional_credit": True}),
+                   "banking.dispute.record")
+    for entry in plan:
+        args = by_id[entry["transaction_id"]] | {
+            "eligible_for_provisional_credit": entry["eligible_for_provisional_credit"] == "True"}
+        assert _ran(_file(env, args)), entry
+    flags = {r["transaction_id"]: r["eligible_for_provisional_credit"]
+             for r in env.tools.db.transaction_disputes.data.values() if r.get("user_id") == user}
+    assert "".join("T" if flags[e["transaction_id"]] else "F" for e in plan) == GOLD_FLAGS["task_039"]
+    # a second filing of a transaction already on record: τ²'s tool rejects it, so the plan gate lets it through
+    assert _plan_gate(env, first).rule_id == "procedure.dispute_plan.already_filed"
+
+
+def test_a_flag_off_the_plan_and_a_transaction_off_the_plan_are_denied():
+    env, _, gold = _gated("task_037")
+    user = gold[0]["user_id"]
+    _call(env, "plan_disputes", user_id=user, transactions=_items(gold[:1]))
+    assert _denied(_file(env, gold[1]), "procedure.dispute_plan.not_planned")
+    flipped = gold[0] | {"eligible_for_provisional_credit": not gold[0]["eligible_for_provisional_credit"]}
+    verdict = _plan_gate(env, flipped)
+    assert verdict.rule_id == "procedure.dispute_plan.values" and "eligible_for_provisional_credit" in verdict.reason
+    assert not verdict.allowed and _plan_gate(env, gold[0]).allowed
+
+
+def test_a_plan_made_before_the_merchant_answer_holds_the_filing_until_replanned():
+    env, _, gold = _gated("task_037")
+    user, item = gold[0]["user_id"], _items(gold[:1])[0]
+    _call(env, "plan_disputes", user_id=user, transactions=[{k: v for k, v in item.items() if k != FIELDS[2]}])
+    assert _denied(_file(env, gold[0]), "procedure.dispute_plan.ask")
+    _call(env, "plan_disputes", user_id=user, transactions=[item])  # calling it again replaces the plan
+    assert _ran(_file(env, gold[0]))
+
+
+def test_a_new_plan_replaces_the_old_one():
+    env, _, gold = _gated("task_037")
+    user = gold[0]["user_id"]
+    _call(env, "plan_disputes", user_id=user, transactions=_items(gold[:1]))
+    assert _denied(_file(env, gold[1]), "procedure.dispute_plan.not_planned")
+    _call(env, "plan_disputes", user_id=user, transactions=_items(gold[1:2]))
+    assert _ran(_file(env, gold[1]))
+
+
+def test_a_failed_plan_call_records_nothing():
+    env, _, gold = _gated("task_037")
+    assert _call(env, "plan_disputes", user_id=gold[0]["user_id"]).error  # transactions missing: τ² raises
+    assert env.tools.glint_plans == {}
+
+
+# ---- replay determinism ---------------------------------------------------------------------------------------------
+
+def test_plan_disputes_is_replayed_by_tau2_and_never_changes_the_database():
+    env, _, gold = _gated("task_037")
+    assert env.tools.tool_mutates_state(banking.PLAN_TOOL) and not env.tools.has_tool("check_card_dispute")
+    before = env.get_db_hash()
+    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    assert env.get_db_hash() == before
+
+
+def test_plan_gate_decisions_replay_unchanged_in_taus_strict_replay():
+    """τ²'s evaluator replays the mutating calls on a fresh environment from the same constructor, skipping READ
+    tools, and compares each result (strict=True raises on a difference). The plan is rebuilt there from the replayed
+    plan_disputes call, so the deny without a plan, the allowed filings and the out-of-order deny replay unchanged."""
+    task = _task("task_039")
+    install("banking_knowledge", Enforcer("banking_knowledge", EventLog(":memory:")))
+    constructor = registry.get_env_constructor("banking_knowledge")
+    env = constructor(retrieval_variant="bm25_grep", task=task)
+    assert isinstance(env.tools, BankingDecisionTools)
+    init = task.initial_state
+    env.set_state(init.initialization_data if init else None, init.initialization_actions if init else None, [])
+    history, gold = [], _gold_disputes(task)
+
+    def send(name, /, **args):
+        call = ToolCall(id=f"c{len(history)}", name=name, arguments=args, requestor="assistant")
+        reply = env.get_response(call)
+        history.extend([AssistantMessage(role="assistant", tool_calls=[call]), reply])
+        return reply
+
+    u = env.tools.db.users.data[gold[0]["user_id"]]
+    send("log_verification", time_verified="2025-11-14 03:40:00 EST",
+         **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
+    send("unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
+    assert _denied(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[0])),
+                   "procedure.dispute_plan.none")
+    send("plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    for d in gold[:3]:
+        assert _ran(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(d)))
+    assert _denied(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[5])),
+                   "procedure.dispute_plan.order")
+    replay = constructor(retrieval_variant="bm25_grep", task=task)
+    replay.set_state(init.initialization_data if init else None, init.initialization_actions if init else None,
+                     history, strict=True)
+    assert replay.tools.glint_plans == env.tools.glint_plans
+    assert replay.get_db_hash() == env.get_db_hash()
+
+
+def test_add_plan_tool_puts_the_tool_on_a_bare_banking_toolkit_once():
+    env = _env(_task("task_037"))
+    assert not env.tools.has_tool(banking.PLAN_TOOL)
+    cls = type(add_plan_tool(env).tools)
+    assert issubclass(cls, DisputePlanTools) and env.tools.has_tool(banking.PLAN_TOOL)
+    assert type(add_plan_tool(env).tools) is cls
+
+
+# ---- glint-bank ---------------------------------------------------------------------------------------------------
+
+def test_glint_bank_always_publishes_plan_disputes_and_its_plan_gates_the_filing(tmp_path):
+    from mcp.client.client import Client
+
+    from glint.bank.server import BankServer
+
+    server = BankServer(tmp_path, sid="plan")
+    gold = _gold_disputes(_task("task_037"))
+
+    async def body():
+        async with Client(server.mcp_server()) as client:
+            names = {t.name for t in (await client.list_tools()).tools}
+            await client.call_tool("load_scenario", {"task_id": "task_037"})
+            env = server.session().env
+            _verify(env, gold[0]["user_id"])
+            await client.call_tool("unlock_discoverable_agent_tool", {"agent_tool_name": rules.DISPUTE})
+            unplanned = await client.call_tool(WRAPPER, {"agent_tool_name": rules.DISPUTE,
+                                                         "arguments": json.dumps(gold[0])})
+            plan = await client.call_tool(banking.PLAN_TOOL, {"user_id": gold[0]["user_id"],
+                                                               "transactions": _items(gold)})
+            planned = await client.call_tool(WRAPPER, {"agent_tool_name": rules.DISPUTE,
+                                                       "arguments": json.dumps(gold[0])})
+            return names, unplanned, plan, planned
+
+    names, unplanned, plan, planned = anyio.run(body)
+    assert banking.PLAN_TOOL in names and "check_card_dispute" not in names
+    assert unplanned.is_error and "procedure.dispute_plan.none" in unplanned.content[0].text
+    assert not plan.is_error and json.loads(plan.content[0].text)["ready"]
+    assert not planned.is_error
+    server.session().events.close()
+
+
+# ---- the replay helper --------------------------------------------------------------------------------------------
+
+def test_with_plans_inserts_one_plan_per_user_before_the_first_filing():
+    a = {"user_id": "u1", "transaction_id": "t1", "dispute_reason": "duplicate_charge", "contacted_merchant": True}
+    b = {"user_id": "u1", "transaction_id": "t2", "dispute_reason": "incorrect_amount"}
+    c = {"user_id": "u2", "transaction_id": "t3", "dispute_reason": "duplicate_charge"}
+    calls = [ToolCall(id="0", name="log_verification", arguments={}, requestor="assistant"),
+             ToolCall(id="1", name=WRAPPER, arguments={"agent_tool_name": rules.DISPUTE, "arguments": json.dumps(a)},
+                      requestor="assistant"),
+             ToolCall(id="2", name=rules.DISPUTE, arguments=a, requestor="assistant"),  # a retry, by name
+             ToolCall(id="3", name=rules.DISPUTE, arguments=b, requestor="user"),  # not the agent's: ignored
+             ToolCall(id="4", name=rules.DISPUTE, arguments=b, requestor="assistant"),
+             ToolCall(id="5", name=rules.DISPUTE, arguments=c, requestor="assistant")]
+    out = with_plans(calls)
+    assert [c.id for c in out] == ["0", "1-plan", "1", "2", "3", "4", "5-plan", "5"]
+    assert out[1].arguments == {"user_id": "u1", "transactions": [
+        {k: a[k] for k in FIELDS}, {"transaction_id": "t2", "dispute_reason": "incorrect_amount"}]}
+    assert filing(calls[0]) is None and filing(calls[3]) is None
+    assert plan_arguments([c])["u2"]["transactions"] == [{"transaction_id": "t3", "dispute_reason": "duplicate_charge"}]

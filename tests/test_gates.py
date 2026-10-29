@@ -229,7 +229,18 @@ def _banking(task_id: str):
         if env.tools.tool_type(tool) == ToolType.READ:
             _call(env, "unlock_discoverable_agent_tool", agent_tool_name=tool)
             _call(env, "call_discoverable_agent_tool", agent_tool_name=tool, arguments=json.dumps(args))
+    # the plan gate files disputes in a plan_disputes plan: plan gold's disputes, in gold's order, as an agent does
+    disputes = [a for t, a in gold if t == rules.DISPUTE]
+    if disputes:
+        _plan(env, disputes)
     return env, events, gold
+
+
+def _plan(env, disputes: list[dict]):
+    items = [{k: d[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")} for d in disputes]
+    reply = _call(env, "plan_disputes", user_id=disputes[0]["user_id"], transactions=items)
+    assert not reply.error, reply.content
+    return json.loads(reply.content)
 
 
 def _hidden(env, tool: str, **args):
@@ -273,6 +284,7 @@ def test_banking_dispute_gate_counts_disputes_filed_earlier_in_the_conversation(
     fourth = disputes[3]
     # on the starting database the 4th transaction would qualify: only the filings before it make it ineligible
     fresh, _, _ = _banking("task_039")
+    _plan(fresh, [fourth])  # a plan of the 4th alone, so the plan gate files it first
     assert not _hidden(fresh, rules.DISPUTE, **(fourth | {"eligible_for_provisional_credit": True})).error
     for d in disputes[:3]:
         assert not _hidden(env, rules.DISPUTE, **d).error

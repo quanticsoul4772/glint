@@ -9,7 +9,8 @@ allows and says so in its rule_id; it never guesses. Writes no rule covers yet a
 
 Phase 2 (2026-10-28) adds the debit card rules (glint.gates.debit), the other banking writes (glint.gates.banking),
 the procedure gates (glint.gates.procedure: verification, recorded lookups, order, the transfer reason) and the
-airline and retail writes (glint.gates.travel). Rules are per write tool, never per task.
+airline and retail writes (glint.gates.travel). Rules are per write tool, never per task. Dispute planning
+(2026-10-28) adds the plan gate on credit card disputes (procedure.dispute_plan).
 """
 from __future__ import annotations
 
@@ -166,17 +167,11 @@ def _pending_increase(db, card: str) -> list[str]:
             if r.get("credit_card_account_id") == card and str(r.get("status", "")).upper() == "PENDING"]
 
 
-def _card_of_transaction(db, user_id: str, txn: dict) -> str:
-    return txn.get("credit_card_account_id") or next(
-        (k for k, v in db.credit_card_accounts.data.items()
-         if v.get("user_id") == user_id and v.get("card_type") == txn.get("credit_card_type")), "")
-
-
 def _dispute(db, a: dict) -> GateResult:
     source = "glint.assist.banking.check_dispute"
     uid, tid = a.get("user_id", ""), a.get("transaction_id", "")
     txn = db.credit_card_transaction_history.data.get(tid, {})
-    card = _card_of_transaction(db, uid, txn)
+    card = banking.card_of_transaction(db, uid, txn)
     contacted = a.get("contacted_merchant")
     v = banking.check_dispute(db, uid, card, tid, a.get("dispute_reason", ""),
                               None if contacted is None else as_flag(contacted))
@@ -324,6 +319,9 @@ def _register_banking(reg: GateRegistry) -> None:
                           "database before this write.", procedure.lookups(tool), toolkit=True))
     reg.register(Gate("procedure_increase_first_gate", (DISPUTE,), "credit_card_account_logistics_007: a submitted "
                       "credit limit increase is decided before a dispute.", procedure.increase_first))
+    reg.register(Gate("procedure_dispute_plan_gate", (DISPUTE,), "credit_cards_(general)_015 criterion 4: the "
+                      "disputes filed first take the provisional credit, so each filing follows the plan_disputes "
+                      "plan (order from τ² train gold, tasks 039-041).", procedure.dispute_plan, toolkit=True))
 
 
 def build_registry(domain: str) -> GateRegistry:
