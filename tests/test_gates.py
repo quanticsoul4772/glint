@@ -587,7 +587,7 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
         "task_id": "unknown", "trial": "unknown"}
     assert "banking-test-gated" not in tools_ab.SETS  # the banking test split is read once (decision 2026-10-28)
     for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "banking-plan-terse-gated",
-                 "banking-plan-v2-gated", "heldout2-gated"):
+                 "banking-plan-v2-gated", "banking-plan-v3-gated", "heldout2-gated"):
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
@@ -729,12 +729,13 @@ def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_a
                         assert "{{" not in part.value and "}}" not in part.value, (path.name, node.lineno, part.value)
 
 
-def test_the_v2_set_is_the_plan_gated_tools_arm_again_in_its_own_folder():
+@pytest.mark.parametrize("name", ["banking-plan-v2-gated", "banking-plan-v3-gated"])
+def test_the_v2_and_v3_sets_are_the_plan_gated_tools_arm_again_in_their_own_folders(name):
     import tools_ab
 
-    v2, plan = tools_ab.SETS["banking-plan-v2-gated"], tools_ab.SETS["banking-plan-gated"]
+    v2, plan = tools_ab.SETS[name], tools_ab.SETS["banking-plan-gated"]
     assert v2["arms"] == ("tools",) and "deny_wording" not in v2
     assert {k: v2[k] for k in ("tasks", "trials", "gates", "glimmer_usd", "requires_modal")} == {
         k: plan[k] for k in ("tasks", "trials", "gates", "glimmer_usd", "requires_modal")}
-    others = [cfg for name, cfg in tools_ab.SETS.items() if name != "banking-plan-v2-gated"]
+    others = [cfg for n, cfg in tools_ab.SETS.items() if n != name]
     assert all(v2[k] != cfg.get(k) for cfg in others for k in ("data", "out", "save"))
