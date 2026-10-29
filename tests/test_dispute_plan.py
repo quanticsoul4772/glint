@@ -66,7 +66,7 @@ def _verify(env, user_id: str) -> None:
 
 
 def _denied(reply, rule: str) -> bool:
-    return reply.error and "was NOT executed" in reply.content and f"rule {rule}," in reply.content
+    return reply.error and "was NOT executed" in reply.content and f"Rule: {rule} (" in reply.content
 
 
 def _ran(reply) -> bool:
@@ -200,7 +200,7 @@ def test_a_flag_off_the_plan_and_a_transaction_off_the_plan_are_denied():
     assert _denied(_file(env, gold[1]), "procedure.dispute_plan.not_planned")
     flipped = gold[0] | {"eligible_for_provisional_credit": not gold[0]["eligible_for_provisional_credit"]}
     verdict = _plan_gate(env, flipped)
-    assert verdict.rule_id == "procedure.dispute_plan.values" and "eligible_for_provisional_credit" in verdict.reason
+    assert verdict.rule_id == "procedure.dispute_plan.values" and any(f.startswith("eligible_for_provisional_credit") for f in verdict.facts)
     assert not verdict.allowed and _plan_gate(env, gold[0]).allowed
 
 

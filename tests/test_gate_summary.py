@@ -177,3 +177,14 @@ def test_generate_prints_gates_for_the_gated_arm_only(stand_in, make_sim, monkey
                      "(too_many_errors), 1 of them with gate denies; 10 of their 10 errors were gate denies")]
     assert made == ["retail"]  # the gates are built for the tools arm only
     assert watched[0] is None and isinstance(watched[1], summary.ErrorLimitAlerts)
+
+
+def test_parse_deny_reads_the_plain_language_format_and_the_one_older_runs_recorded():
+    new = GateResult("deny", "found", "p", "Approve it with new_credit_limit 5000.", "banking.cli.approve", "s",
+                     {"tier": "gold"}, "matters", ("a fact",)).message()
+    old = ("Error: this write was blocked by a policy gate (rule banking.cli.approve, check s) and was NOT executed."
+           "\nReason: found\nPurpose: p\nFix: Approve it with new_credit_limit 5000.\nVerdict: {\"tier\": \"gold\"}")
+    for content in (new, old):
+        assert summary.parse_deny(content) == {"rule_id": "banking.cli.approve", "reason": "found",
+                                               "fix": "Approve it with new_credit_limit 5000.",
+                                               "verdict": {"tier": "gold"}}

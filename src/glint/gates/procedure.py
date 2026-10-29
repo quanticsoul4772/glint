@@ -20,7 +20,7 @@ agent says or seems to have done them.
 from __future__ import annotations
 
 from glint.assist import as_flag
-from glint.assist.banking import LIMIT_FIRST, PLAN_TOOL, TODAY
+from glint.assist.banking import PLAN_TOOL, TODAY
 from glint.gates.bankdb import as_date, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 
@@ -78,9 +78,12 @@ def verified(db, a: dict) -> GateResult:
                      "database knows: τ²'s tool rejects or ignores it")
     if verified_today(db, user):
         return allow("procedure.verified", source, {"user_id": user})
-    return deny("procedure.verified", source, f"user {user} has no verification logged in this conversation",
-                "Verify the user (2 of: date of birth, email, phone, address), log it with log_verification "
-                "(time_verified from get_current_time), then retry this write.", {"user_id": user})
+    return deny("procedure.verified", source, f"the customer acting on {user}'s accounts has not been verified in "
+                "this conversation", "Verify the user (2 of: date of birth, email, phone, address), log it with "
+                "log_verification (time_verified from get_current_time), then retry this write.", {"user_id": user},
+                consequence="Every account change for this customer is blocked until a verification is logged. "
+                "One verification covers the rest of the conversation.",
+                facts=[f"the write acts for user {user}", f"no log_verification record for {user} dated today"])
 
 
 def lookups(tool: str):
@@ -92,10 +95,16 @@ def lookups(tool: str):
         missing = [r for r, _ in required if r not in done]
         details = {"required": [r for r, _ in required], "done": sorted(done & {r for r, _ in required})}
         if missing:
-            return deny("procedure.lookups", source, f"the procedure for {tool} looks up {missing} first; no such "
-                        "lookup ran in this conversation",
-                        f"Unlock and call {', '.join(missing)} (call_discoverable_agent_tool), check the result, then "
-                        "retry this write.", details | {"missing": missing})
+            return deny("procedure.lookups", source, "the procedure for this write starts with lookups not done "
+                        f"in this conversation: {', '.join(missing)}", f"Unlock and call {', '.join(missing)} "
+                        "(call_discoverable_agent_tool), check the result, then retry this write.",
+                        details | {"missing": missing},
+                        consequence="The lookups can change the decision itself (an open dispute or a pending "
+                        "order can make the request ineligible), so read their results before retrying, and tell the "
+                        "customer if they change the answer.",
+                        facts=[f"required before {tool}: {', '.join(r for r, _ in required)} ({source})",
+                               f"done in this conversation: {', '.join(details['done']) or 'none'}",
+                               f"missing: {', '.join(missing)}"])
         return allow("procedure.lookups", source, details)
     return gate
 
@@ -105,9 +114,10 @@ def increase_first(db, a: dict) -> GateResult:
     user = owner(db, a)
     pending = undecided_increases(db, user) if user else []
     if pending:
-        return deny("procedure.increase_first", source, LIMIT_FIRST,
+        return deny("procedure.increase_first", source, "a credit limit increase was submitted and not decided yet",
                     "Approve or deny the submitted credit limit increase first, then file the dispute.",
-                    {"undecided_increase_requests": pending})
+                    {"undecided_increase_requests": pending}, consequence=INCREASE_FIRST,
+                    facts=[f"undecided increase requests for {user}: {', '.join(map(str, pending))}"])
     return allow("procedure.increase_first", source, {"undecided_increase_requests": []})
 
 
@@ -138,21 +148,43 @@ def transfer(db, a: dict) -> GateResult:
     reason = a.get("reason", "other")
     pending = undecided_increases(db)
     if pending:
-        return deny("procedure.transfer.increase_undecided", source, f"credit limit increase request(s) {pending} "
-                    "were submitted and not decided; a transfer would leave them open",
-                    "Finish the increase first (the required lookups, then approve or deny), then transfer if the "
-                    "user still asks.", {"undecided_increase_requests": pending})
+        return deny("procedure.transfer.increase_undecided", source, "a submitted credit limit increase is not "
+                    "decided yet, and a transfer would leave it open", "Finish the increase first (the required "
+                    "lookups, then approve or deny), then transfer if the user still asks.",
+                    {"undecided_increase_requests": pending},
+                    consequence="The conversation would end with the customer's request unanswered. Tell the "
+                    "customer the decision, then transfer if they still want a human agent.",
+                    facts=[f"undecided increase requests: {', '.join(map(str, pending))}"])
     fraud = fraud_today(db)
     if fraud and reason in DISPOSITION:
-        return deny("procedure.transfer.reason", source, f"reason '{reason}' is a tier-3 disposition code, but this "
-                    f"conversation handled fraud or theft ({fraud}); _042 says to use the highest tier that applies",
-                    "Transfer with reason 'fraud_or_security_concern'.", {"fraud": fraud, "reason": reason})
+        return deny("procedure.transfer.reason", source, "this conversation handled fraud or theft, so the transfer "
+                    "carries the highest reason tier that applies, the fraud reason", "Transfer with reason "
+                    "'fraud_or_security_concern'.", {"fraud": fraud, "reason": reason},
+                    consequence="The reason code routes the customer to the right team; a fraud case sent with a "
+                    "general reason reaches the wrong queue.",
+                    facts=[f"reason given: '{reason}' (a tier-3 disposition code)",
+                           *[f"handled in this conversation: {f}" for f in fraud]])
     return allow("procedure.transfer", source, {"reason": reason, "fraud": fraud})
 
 
 PLAN_SOURCE = "credit_cards_(general)_015 criterion 4; filing order from τ² train gold (037-041, 081)"
+CREDIT_ORDER = ("Provisional credit goes to at most 2 disputes counted in the past 12 months, so the filing order "
+                "decides which disputes get it, and a filed dispute cannot be taken back.")
+INCREASE_FIRST = ("A pending dispute or replacement card makes the increase fail, so the increase is decided first; "
+                  "the disputes and the replacement can follow once it is decided.")
 REPLAN = (f"If the customer's list changed, call {PLAN_TOOL} again with every dispute not filed yet (it replaces the "
           "plan).")
+
+
+def count_fact(db, user: str) -> str:
+    """The count criterion 4 reads (glint.assist.banking.check_dispute): this user's disputes submitted in the past
+    12 months, with the ones filed in this conversation named."""
+    year_ago = TODAY.replace(year=TODAY.year - 1)
+    rows = [r for r in db.transaction_disputes.data.values() if r.get("user_id") == user
+            and (d := as_date(r.get("submitted_at"))) is not None and d > year_ago]
+    today = [str(r.get("transaction_id")) for r in rows if as_date(r.get("submitted_at")) == TODAY]
+    out = f"disputes counted for {user} in the past 12 months: {len(rows)}"
+    return out + (f" ({len(today)} filed in this conversation: {', '.join(today)})" if today else "")
 
 
 def dispute_plan(toolkit, a: dict) -> GateResult:
@@ -169,11 +201,13 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
                      reason="this transaction already has a dispute on record: τ²'s tool rejects a second filing")
     plan = getattr(toolkit, "glint_plans", {}).get(user)
     if plan is None:
-        return deny("procedure.dispute_plan.none", PLAN_SOURCE, f"no dispute plan for user {user} in this "
-                    "conversation; which disputes get provisional credit depends on the filing order",
-                    f"Call {PLAN_TOOL}(user_id, transactions=[{{transaction_id, dispute_reason, contacted_merchant}} "
-                    "for EVERY transaction the customer wants disputed]), then file the disputes in its order with "
-                    "its eligible_for_provisional_credit values.", {"user_id": user, "transaction_id": tid})
+        return deny("procedure.dispute_plan.none", PLAN_SOURCE, "no dispute plan was made for this customer in this "
+                    "conversation", f"Call {PLAN_TOOL}(user_id, transactions=[{{transaction_id, dispute_reason, "
+                    "contacted_merchant}} for EVERY transaction the customer wants disputed]), then file the "
+                    "disputes in its order with its eligible_for_provisional_credit values.",
+                    {"user_id": user, "transaction_id": tid},
+                    consequence=f"{CREDIT_ORDER} Plan every dispute the customer asked for in one call.",
+                    facts=[f"user {user} has no {PLAN_TOOL} result in this conversation", count_fact(db, user)])
     filed = {r.get("transaction_id") for r in db.transaction_disputes.data.values() if r.get("user_id") == user}
     remaining = [e for e in plan["order"] if e["transaction_id"] not in filed]
     details = {"user_id": user, "transaction_id": tid, "plan": [e["transaction_id"] for e in plan["order"]],
@@ -181,7 +215,9 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     if tid not in details["plan"]:
         return deny("procedure.dispute_plan.not_planned", PLAN_SOURCE, f"transaction {tid} is not in the current "
                     "dispute plan", f"Call {PLAN_TOOL} again with every dispute not filed yet, this one included, "
-                    "and file in its order.", details)
+                    "and file in its order.", details, consequence=f"{CREDIT_ORDER} A new plan replaces this one.",
+                    facts=[f"plan order: {', '.join(details['plan'])}",
+                           f"not filed yet: {', '.join(details['remaining']) or 'none'}", count_fact(db, user)])
     # the plan as the agent got it: τ² turns every bool in a tool result into the string "True"/"False"
     nxt = remaining[0] | {"eligible_for_provisional_credit": as_flag(remaining[0]["eligible_for_provisional_credit"])}
     if remaining[0]["contacted_merchant"] is not None:
@@ -190,21 +226,27 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
                 f"eligible_for_provisional_credit {nxt['eligible_for_provisional_credit']}). {REPLAN}")
     if tid != nxt["transaction_id"]:
         return deny("procedure.dispute_plan.order", PLAN_SOURCE, f"the plan files {nxt['transaction_id']} before "
-                    f"{tid}", fix_next, details | {"next": nxt})
+                    f"{tid}", fix_next, details | {"next": nxt}, consequence=CREDIT_ORDER,
+                    facts=[f"plan order: {', '.join(details['plan'])}",
+                           f"not filed yet: {', '.join(details['remaining'])}", count_fact(db, user)])
     reasons = []
     if a.get("dispute_reason") != nxt["dispute_reason"]:
         reasons.append(f"dispute_reason {a.get('dispute_reason')!r} != the plan's {nxt['dispute_reason']!r}")
     if nxt["contacted_merchant"] is None:
-        return deny("procedure.dispute_plan.ask", PLAN_SOURCE, f"the plan was made without the customer's answer on "
-                    f"contacting the merchant for {tid}, which criterion 5 needs",
-                    f"Ask the customer whether they tried the merchant first, then call {PLAN_TOOL} again with "
-                    "contacted_merchant set.", details | {"next": nxt})
+        return deny("procedure.dispute_plan.ask", PLAN_SOURCE, "the plan was made without the customer's answer on "
+                    f"whether they contacted the merchant about {tid}", "Ask the customer whether they tried the "
+                    f"merchant first, then call {PLAN_TOOL} again with contacted_merchant set.",
+                    details | {"next": nxt},
+                    consequence="Provisional credit depends on that answer (criterion 5), so the plan's credit "
+                    "values are not final until it is given. Ask about every planned dispute missing it at once.",
+                    facts=[f"{tid}: contacted_merchant not given in the plan"])
     if as_flag(a.get("contacted_merchant")) != nxt["contacted_merchant"]:
         reasons.append(f"contacted_merchant {a.get('contacted_merchant')} != the plan's {nxt['contacted_merchant']}")
     if as_flag(a.get("eligible_for_provisional_credit")) != nxt["eligible_for_provisional_credit"]:
         reasons.append(f"eligible_for_provisional_credit {a.get('eligible_for_provisional_credit')} != the plan's "
                        f"{nxt['eligible_for_provisional_credit']}")
     if reasons:
-        return deny("procedure.dispute_plan.values", PLAN_SOURCE, "; ".join(reasons), fix_next,
-                    details | {"next": nxt})
+        return deny("procedure.dispute_plan.values", PLAN_SOURCE, f"the filing for {tid} does not carry the plan's "
+                    "values", fix_next, details | {"next": nxt}, consequence=CREDIT_ORDER,
+                    facts=[*reasons, count_fact(db, user)])
     return allow("procedure.dispute_plan", PLAN_SOURCE, details | {"position": nxt["position"]})

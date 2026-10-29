@@ -59,9 +59,10 @@ def freeze(db, a: dict) -> GateResult:
         return _unknown_card("debit.freeze", source, a)
     status = card.get("status")
     if status != "ACTIVE":
-        return deny("debit.freeze.status", source, f"card {a['card_id']} is {status}; only an ACTIVE card can be "
-                    "frozen", "Do not freeze it. A FROZEN card is already frozen; a CLOSED or PENDING card cannot be "
-                    "frozen.", {"status": status})
+        return deny("debit.freeze.status", source, "only an ACTIVE card can be frozen", "Do not freeze it. A FROZEN "
+                    "card is already frozen; a CLOSED or PENDING card cannot be frozen.", {"status": status},
+                    consequence="The card's status is unchanged; tell the customer its current status.",
+                    facts=[f"card {a['card_id']}: {status}"])
     return allow("debit.freeze", source, {"status": status})
 
 
@@ -73,12 +74,15 @@ def unfreeze(db, a: dict) -> GateResult:
     status = card.get("status")
     account = db.accounts.data.get(card.get("account_id"), {})
     if status != "FROZEN":
-        return deny("debit.unfreeze.status", source, f"card {a['card_id']} is {status}; only a FROZEN card can be "
-                    "unfrozen", "Do not unfreeze it.", {"status": status})
+        return deny("debit.unfreeze.status", source, "only a FROZEN card can be unfrozen", "Do not unfreeze it.",
+                    {"status": status}, consequence="The card's status is unchanged; tell the customer its current "
+                    "status.", facts=[f"card {a['card_id']}: {status}"])
     if account and account.get("status") != "OPEN":
-        return deny("debit.unfreeze.account", source, f"the linked account {card.get('account_id')} is "
-                    f"{account.get('status')}, not OPEN", "Do not unfreeze it; the linked account must be OPEN.",
-                    {"account_status": account.get("status")})
+        return deny("debit.unfreeze.account", source, "a card is unfrozen only while its linked account is OPEN",
+                    "Do not unfreeze it; the linked account must be OPEN.", {"account_status": account.get("status")},
+                    consequence="The card stays frozen; tell the customer why.",
+                    facts=[f"card {a['card_id']}: FROZEN",
+                           f"linked account {card.get('account_id')}: {account.get('status')}"])
     return allow("debit.unfreeze", source, {"status": status})
 
 
@@ -90,9 +94,11 @@ def close(db, a: dict) -> GateResult:
     reason = str(a.get("reason", "")).lower()
     status = card.get("status")
     if status == "FROZEN":
-        return deny("debit.close.frozen", source, f"card {a['card_id']} is FROZEN; only an ACTIVE or PENDING card "
-                    "can be closed", "Unfreeze it with unfreeze_debit_card_3893 first, then close it.",
-                    {"status": status})
+        return deny("debit.close.frozen", source, "only an ACTIVE or PENDING card can be closed", "Unfreeze it with "
+                    "unfreeze_debit_card_3893 first, then close it.", {"status": status},
+                    consequence="The close tool rejects a frozen card; unfreezing is only the step before the "
+                    "closure the customer asked for.",
+                    facts=[f"card {a['card_id']}: FROZEN"])
     pending = [t for t in db.bank_account_transaction_history.data.values()
                if t.get("account_id") == card.get("account_id")
                and str(t.get("status", "")).lower() in ("pending", "processing")]
@@ -100,16 +106,21 @@ def close(db, a: dict) -> GateResult:
     # account; that acknowledgment is in the conversation only, so pending refunds are not judged here
     held = sorted(t["transaction_id"] for t in pending if t.get("type") != "refund")
     if held:
-        return deny("debit.close.pending_transactions", source, f"the linked account {card.get('account_id')} has "
-                    f"pending transactions {held}; a card closes only after they settle",
-                    "Do not close the card. Tell the user it can be closed once the pending transactions settle; a "
-                    "frozen card can stay frozen meanwhile.", {"pending": held})
+        return deny("debit.close.pending_transactions", source, "a card closes only after the pending transactions "
+                    "on its account settle", "Do not close the card. Tell the user it can be closed once the pending "
+                    "transactions settle; a frozen card can stay frozen meanwhile.", {"pending": held},
+                    consequence="The card cannot be closed in this conversation; a replacement card that depends on "
+                    "the closure waits too.",
+                    facts=[f"pending transactions on {card.get('account_id')}: {', '.join(held)}"])
     age = days_since(card.get("issue_date"))
     if reason not in SECURITY_REASONS and age is not None and age < 14:
         eligible = as_date(card.get("issue_date")) + timedelta(days=14)
-        return deny("debit.close.card_age", source, f"the card was issued {age} days ago; a card closed for "
-                    f"'{reason}' must be active at least 14 days (lost, stolen and fraud_suspected skip this)",
-                    f"Do not close it yet; the earliest closure date is {eligible:%m/%d/%Y}.", {"age_days": age})
+        return deny("debit.close.card_age", source, f"a card closed for '{reason}' must be at least 14 days old",
+                    f"Do not close it yet; the earliest closure date is {eligible:%m/%d/%Y}.", {"age_days": age},
+                    consequence="Lost, stolen and fraud_suspected closures skip the 14 days; for any other reason "
+                    "the customer waits until the date above.",
+                    facts=[f"card {a['card_id']} issued {card.get('issue_date')} ({age} days ago)",
+                           f"closure reason given: '{reason}'"])
     return allow("debit.close", source, {"status": status, "reason": reason})
 
 
@@ -156,25 +167,34 @@ def order(db, a: dict) -> GateResult:
             # τ²'s task_091 orders an entry-tier replacement right after a fraud_suspected closure, so the wait is
             # applied to the other closure reasons only
             when = max(as_date(c["closed_date"]) for c in recent) + timedelta(days=ENTRY_WAIT_DAYS)
-            return deny("debit.order.entry_wait", source, "entry-tier replacements wait 48 hours after the card "
-                        f"closure; a card on this account was closed {[c['card_id'] for c in recent]}",
-                        f"Do not order it now; tell the user a replacement can be ordered from {when:%m/%d/%Y}.",
-                        details | {"closed": [c["card_id"] for c in recent]})
+            return deny("debit.order.entry_wait", source, "an entry-tier replacement waits 48 hours after the card "
+                        "closure", f"Do not order it now; tell the user a replacement can be ordered from "
+                        f"{when:%m/%d/%Y}.", details | {"closed": [c["card_id"] for c in recent]},
+                        consequence="No replacement can be ordered in this conversation; the closure stands.",
+                        facts=[f"account {a['account_id']}: {tier} tier", *[
+                            f"card {c['card_id']} closed {c.get('closed_date')} ({c.get('closure_reason')})"
+                            for c in recent]])
         limit, fee = REPLACEMENT_LIMIT[tier]
         used = _replacements_in_year(cards)
         details |= {"replacements_past_12_months": [c["card_id"] for c in used], "limit": limit}
         if limit is not None and len(used) >= limit:
             oldest = min(as_date(c["issue_date"]) for c in used) + timedelta(days=365)
             if fee is None:
-                return deny("debit.order.replacement_limit", source, f"{len(used)} replacements in 12 months: the "
-                            f"{tier}-tier limit is {limit}, with no fee option", "Do not order it; tell the user a "
-                            f"replacement can be ordered once the oldest ages out ({oldest:%m/%d/%Y}).", details)
+                return deny("debit.order.replacement_limit", source, "this account has used its replacements for "
+                            "the year", "Do not order it; tell the user a replacement can be ordered once the oldest "
+                            f"ages out ({oldest:%m/%d/%Y}).", details,
+                            consequence="This tier has no paid option, so no replacement can be ordered before the "
+                            "date above.", facts=[f"account {a['account_id']}: {tier} tier, limit {limit} a year",
+                                                  f"replacements in the past 12 months: {len(used)}"])
             if excess != fee:
-                return deny("debit.order.replacement_limit", source, f"{len(used)} replacements in 12 months: the "
-                            f"{tier}-tier limit is {limit}; excess_replacement_fee {excess:g} must be {fee:g}",
-                            f"Offer the user the choice: wait until {oldest:%m/%d/%Y}, or pay the ${fee:g} excess "
-                            f"replacement fee (excess_replacement_fee {fee:g}). Order only if the user accepts the "
-                            "fee.", details)
+                return deny("debit.order.replacement_limit", source, "this account has used its replacements for "
+                            "the year, so another one carries the excess replacement fee", "Offer the user the "
+                            f"choice: wait until {oldest:%m/%d/%Y}, or pay the ${fee:g} excess replacement fee "
+                            f"(excess_replacement_fee {fee:g}). Order only if the user accepts the fee.", details,
+                            consequence="The customer decides: order now with the fee, or wait without it.",
+                            facts=[f"account {a['account_id']}: {tier} tier, limit {limit} a year",
+                                   f"replacements in the past 12 months: {len(used)}",
+                                   f"excess_replacement_fee given: {excess:g}, due: {fee:g}"])
         elif excess:
             reasons.append(f"excess_replacement_fee {excess:g}: the account is within its replacement limit")
             fixes.append("excess_replacement_fee 0")
@@ -184,7 +204,10 @@ def order(db, a: dict) -> GateResult:
             reasons.append(f"delivery_fee {delivery_fee:g} for {option} must be one of {sorted(allowed_fees)}")
             fixes.append(f"delivery_fee {BASE_DELIVERY[option]:g}")
     if reasons:
-        return deny("debit.order.fees", source, "; ".join(reasons), f"Order it with {', '.join(fixes)}.", details)
+        return deny("debit.order.fees", source, "the order's fees do not match the account's tier",
+                    f"Order it with {', '.join(fixes)}.", details,
+                    consequence="Fees follow the checking tier; tell the customer the correct fees before ordering.",
+                    facts=[f"account {a['account_id']}: {tier} tier", *reasons])
     return allow("debit.order", source, details)
 
 
@@ -199,14 +222,20 @@ def activate(tool: str):
         right = next((t for t, reasons in ACTIVATE.items() if reason in reasons), None)
         details = {"issue_reason": reason, "status": card.get("status"), "tool": right}
         if right is not None and right != tool:
-            return deny("debit.activate.variant", source, f"card {a['card_id']} has issue_reason '{reason}', which "
-                        f"{right} activates", f"Activate it with {right}.", details)
+            return deny("debit.activate.variant", source, "this card is activated with a different activation tool",
+                        f"Activate it with {right}.", details,
+                        consequence="The activation tool follows why the card was issued; nothing else changes.",
+                        facts=[f"card {a['card_id']}: issue_reason '{reason}'",
+                               f"{right} activates '{reason}' cards"])
         if card.get("status") != "PENDING":
-            return deny("debit.activate.status", source, f"card {a['card_id']} is {card.get('status')}; only a "
-                        "PENDING card can be activated", "Do not activate it.", details)
+            return deny("debit.activate.status", source, "only a PENDING card can be activated", "Do not activate "
+                        "it.", details, consequence="The card's status is unchanged; tell the customer its current "
+                        "status.", facts=[f"card {a['card_id']}: {card.get('status')}"])
         expires = as_date(card.get("expiration_date"))
         if expires is not None and expires < TODAY:
-            return deny("debit.activate.expired", source, f"card {a['card_id']} expired on {expires:%m/%d/%Y}",
-                        "Do not activate it; the customer needs a new card.", details)
+            return deny("debit.activate.expired", source, "an expired card cannot be activated", "Do not activate "
+                        "it; the customer needs a new card.", details,
+                        consequence="The customer needs a replacement card; offer to order one.",
+                        facts=[f"card {a['card_id']} expired {expires:%m/%d/%Y}"])
         return allow("debit.activate", source, details)
     return gate

@@ -21,6 +21,7 @@ AIRLINE = "airline policy.md"
 FREE_BAGS = {"regular": {"basic_economy": 0, "economy": 1, "business": 2},
              "silver": {"basic_economy": 1, "economy": 2, "business": 3},
              "gold": {"basic_economy": 2, "economy": 3, "business": 4}}
+NO_CERTIFICATE = "No certificate was sent; the rest of the request is not affected."
 PAYMENT_LIMITS = {"certificate": 1, "credit_card": 1, "gift_card": 3}
 
 
@@ -39,10 +40,11 @@ def send_certificate(db, a: dict) -> GateResult:
     covered = [r for r in reservations if member in ("silver", "gold") or r.insurance == "yes" or r.cabin == "business"]
     details = {"membership": member, "qualifying_reservations": [r.reservation_id for r in covered]}
     if not covered:
-        return deny("airline.certificate.not_eligible", source, f"user {user.user_id} is a {member} member with no "
-                    "reservation that has travel insurance or flies business; the policy gives such a user no "
-                    "compensation", "Do not send a certificate; tell the user the policy offers no compensation "
-                    "here.", details)
+        return deny("airline.certificate.not_eligible", source, "the policy gives this customer no compensation",
+                    "Do not send a certificate; tell the user the policy offers no compensation here.", details,
+                    consequence=NO_CERTIFICATE,
+                    facts=[f"user {user.user_id}: {member} member",
+                           f"reservations with travel insurance or business cabin: none of {len(reservations)}"])
     amount = float(a.get("amount") or 0)
     allowed = sorted({k * len(r.passengers) for r in covered for k in (50.0, 100.0)})
     cancelled = {r.reservation_id: 100.0 * len(r.passengers) for r in covered
@@ -52,9 +54,11 @@ def send_certificate(db, a: dict) -> GateResult:
                and str(getattr(r, "status", "") or "") != "cancelled"}
     details |= {"cancelled_flight_amounts": cancelled, "untouched_delayed_amounts": delayed}
     if amount not in allowed:
-        return deny("airline.certificate.amount", source, f"${amount:g} is neither $100 nor $50 times the passengers "
-                    f"of a qualifying reservation (possible: {allowed})", "Use $100 x passengers for a cancelled "
-                    "flight, $50 x passengers for a delayed one (after the change or cancellation).", details)
+        return deny("airline.certificate.amount", source, "the certificate amount does not match any qualifying "
+                    "reservation", "Use $100 x passengers for a cancelled flight, $50 x passengers for a delayed one "
+                    "(after the change or cancellation).", details,
+                    consequence="The amount is fixed by the policy: $100 or $50 per passenger of the affected "
+                    "reservation.", facts=[f"amount given: ${amount:g}", f"possible amounts: {allowed}"])
     if amount in cancelled.values():
         return allow("airline.certificate.cancelled_flight", source, details)
     # amounts another reading could explain: any amount of a reservation that is not an untouched delay, and $100 x
@@ -63,9 +67,10 @@ def send_certificate(db, a: dict) -> GateResult:
     others |= {100.0 * len(r.passengers) for r in covered if r.reservation_id in delayed}
     if amount in delayed.values() and amount not in others:
         return deny("airline.certificate.delay_unchanged", source, "a delay is compensated only after the "
-                    "reservation is changed or cancelled; the reservation with the delayed flight is not cancelled "
-                    "and still holds that flight", "Change or cancel the reservation as the user asks first; if the "
-                    "user only wants compensation, the policy offers none for a delay.", details)
+                    "reservation is changed or cancelled", "Change or cancel the reservation as the user asks first; "
+                    "if the user only wants compensation, the policy offers none for a delay.", details,
+                    consequence=NO_CERTIFICATE + " If the customer changes or cancels the reservation, the "
+                    "certificate can follow.", facts=[f"reservations with an untouched delayed flight: {', '.join(delayed)}"])
     return allow(NO_RULE, source, details, reason="whether this certificate is due (a delay with a change or "
                  "cancellation, or a flight no longer in the reservation) is not settled by the database")
 
@@ -100,9 +105,11 @@ def book_reservation(db, a: dict) -> GateResult:
             reasons.append(f"nonfree_baggages {nonfree} != {wanted} ({total} bags, {allowance} free per "
                            f"{a.get('cabin')} passenger for a {user.membership} member)")
     if reasons:
-        return deny("airline.book", source, "; ".join(reasons), "Book it within the policy: at most five "
-                    "passengers; at most one certificate, one credit card and three gift cards; nonfree_baggages as "
-                    "the verdict says.", details)
+        return deny("airline.book", source, "the booking breaks the booking policy", "Book it within the policy: at "
+                    "most five passengers; at most one certificate, one credit card and three gift cards; "
+                    "nonfree_baggages as the verdict says.", details,
+                    consequence="Nothing was booked or charged. Tell the customer what must change, then book.",
+                    facts=reasons)
     return allow("airline.book", source, details)
 
 
@@ -114,7 +121,8 @@ def modify_user_address(db, a: dict) -> GateResult:
     fields = ("address1", "city", "state", "country", "zip")
     missing = [f for f in fields if not str(a.get(f) or "").strip()]
     if missing:
-        return deny("retail.user_address.missing", source, f"the new address has no {missing}",
-                    "Ask the user for the full address (address1, address2 or '', city, state, country, zip).",
-                    {"missing": missing})
+        return deny("retail.user_address.missing", source, "the new address is incomplete", "Ask the user for the "
+                    "full address (address1, address2 or '', city, state, country, zip).", {"missing": missing},
+                    consequence="The address on file is unchanged until a complete one is given.",
+                    facts=[f"missing fields: {', '.join(missing)}"])
     return allow("retail.user_address", source, {"user_id": a.get("user_id")})

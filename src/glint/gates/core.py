@@ -29,7 +29,13 @@ DENY_PREFIX = "Error: this write was blocked by a policy gate"
 
 @dataclass(frozen=True)
 class GateResult:
-    """One gate's verdict on one write. A deny must carry `reason` and `fix`; `purpose` is filled from the gate."""
+    """One gate's verdict on one write. A deny must carry `reason`, `fix`, `consequence` and `facts`; `purpose` is
+    filled from the gate.
+
+    The agent reads a deny in plain language: what the check found (`reason`), the facts it used (`facts`: the
+    database values and arguments the decision rests on), what that means for the rest of the customer's request
+    (`consequence`) and the next step (`fix`). `fix` stays the immediate step, because glint.gates.summary judges
+    from its wording whether the agent followed it."""
     decision: Decision
     reason: str = ""
     purpose: str = ""
@@ -37,6 +43,8 @@ class GateResult:
     rule_id: str = ""
     source: str = ""
     details: dict = field(default_factory=dict)
+    consequence: str = ""
+    facts: tuple[str, ...] = ()
 
     @property
     def allowed(self) -> bool:
@@ -45,16 +53,20 @@ class GateResult:
     def message(self) -> str:
         """The tool result the agent sees on a deny: deterministic, so τ²'s replay of the call matches it."""
         verdict = json.dumps(self.details, sort_keys=True, default=str)
-        return (f"{DENY_PREFIX} (rule {self.rule_id}, check {self.source}) and was NOT executed."
-                f"\nReason: {self.reason}\nPurpose: {self.purpose}\nFix: {self.fix}\nVerdict: {verdict}")
+        facts = "".join(f"\n- {f}" for f in self.facts)
+        return (f"{DENY_PREFIX} and was NOT executed. Nothing changed.\nRule: {self.rule_id} ({self.source})"
+                f"\nWhat the check found: {self.reason}\nFacts it used:{facts}\nWhy it matters: {self.consequence}"
+                f"\nWhat to do next: {self.fix}\nVerdict: {verdict}")
 
 
 def allow(rule_id: str, source: str, details: dict | None = None, reason: str = "") -> GateResult:
     return GateResult("allow", reason=reason, rule_id=rule_id, source=source, details=details or {})
 
 
-def deny(rule_id: str, source: str, reason: str, fix: str, details: dict | None = None) -> GateResult:
-    return GateResult("deny", reason=reason, fix=fix, rule_id=rule_id, source=source, details=details or {})
+def deny(rule_id: str, source: str, reason: str, fix: str, details: dict | None = None, *, consequence: str,
+         facts: list[str] | tuple[str, ...]) -> GateResult:
+    return GateResult("deny", reason=reason, fix=fix, rule_id=rule_id, source=source, details=details or {},
+                      consequence=consequence, facts=tuple(facts))
 
 
 GateFn = Callable[[Any, dict], GateResult]
@@ -104,6 +116,14 @@ def assert_required(registry: GateRegistry, required: set[str], where: str) -> N
                            "ungated write is silently open; register a gate (or a no-rule-yet gate) for each.")
 
 
+CANNOT_DECIDE = ("A check that cannot decide blocks the write by design, so a write it cannot judge never runs "
+                 "unchecked. The rest of the request is not affected.")
+
+
+def _cannot_decide(rule_id: str, gate: Gate, reason: str, fact: str, fix: str) -> GateResult:
+    return deny(rule_id, gate.name, reason, fix, consequence=CANNOT_DECIDE, facts=[fact])
+
+
 _POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="glint-gate")
 
 
@@ -118,21 +138,28 @@ def run_gate(gate: Gate, db, args: dict, wait: bool = False) -> tuple[GateResult
     except FutureTimeout:
         log.error("gate %s timed out after %ss: failing closed; τ²'s replay of this call waits and may decide "
                   "differently", gate.name, gate.timeout_s)
-        result = deny("gate_timeout", gate.name, f"gate {gate.name!r} timed out after {gate.timeout_s}s",
-                      "Retry later or report it; a gate that cannot decide blocks the write by design.")
+        result = _cannot_decide("gate_timeout", gate, f"the check {gate.name!r} did not finish within "
+                                f"{gate.timeout_s:g} s", f"timeout: {gate.timeout_s:g} s",
+                                "Retry this write once; if it is blocked again, tell the customer it cannot be done "
+                                "right now.")
     except Exception as exc:
         log.exception("gate %s raised: failing closed", gate.name)
-        result = deny("gate_error", gate.name, f"gate {gate.name!r} raised {type(exc).__name__}: {exc}",
-                      "Check the write's arguments; a gate that cannot decide blocks the write by design.")
+        result = _cannot_decide("gate_error", gate, f"the check {gate.name!r} failed with an error",
+                                f"error: {type(exc).__name__}: {exc}", "Check the write's arguments against the tool's "
+                                "description, then retry with corrected arguments.")
     if not isinstance(result, GateResult):
-        result = deny("gate_error", gate.name, f"gate {gate.name!r} returned {type(result).__name__}, not a "
-                      "GateResult", "Fix the gate; a gate that cannot decide blocks the write by design.")
+        result = _cannot_decide("gate_error", gate, f"the check {gate.name!r} returned no verdict",
+                                f"returned: {type(result).__name__}", "Fix the gate.")
     elif result.decision not in ("allow", "deny"):
-        result = deny("gate_error", gate.name, f"gate {gate.name!r} returned decision {result.decision!r}",
-                      "Fix the gate; a gate that cannot decide blocks the write by design.")
-    elif not result.allowed and not (result.reason and result.fix):
-        result = deny(result.rule_id or "gate_error", gate.name, result.reason or f"gate {gate.name!r} denied "
-                      "without a reason", result.fix or "Fix the gate: every deny names its fix.", result.details)
+        result = _cannot_decide("gate_error", gate, f"the check {gate.name!r} returned an unknown decision",
+                                f"decision: {result.decision!r}", "Fix the gate.")
+    elif not result.allowed and not (result.reason and result.fix and result.consequence and result.facts):
+        missing = [k for k in ("reason", "fix", "consequence", "facts") if not getattr(result, k)]
+        result = GateResult("deny", result.reason or f"gate {gate.name!r} denied without a reason",
+                            fix=result.fix or "Fix the gate: every deny names its fix.", rule_id=result.rule_id
+                            or "gate_error", details=result.details,
+                            consequence=result.consequence or CANNOT_DECIDE,
+                            facts=result.facts or (f"the deny is missing {missing}",))
     result = GateResult(result.decision, result.reason, gate.purpose, result.fix, result.rule_id,
-                        result.source or gate.name, result.details)
+                        result.source or gate.name, result.details, result.consequence, result.facts)
     return result, (time.perf_counter() - start) * 1000

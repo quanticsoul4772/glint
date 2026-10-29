@@ -19,6 +19,10 @@ from glint.gates.core import GateResult, allow, deny
 
 VERIFY_FIELDS = (("name", "name"), ("address", "address"), ("email", "email"), ("phone_number", "phone_number"),
                  ("date_of_birth", "date_of_birth"))
+NOT_VERIFIED = ("Until a verification is logged, every account change for this customer is blocked; the details "
+                "must match the record on file.")
+CANNOT_CLOSE = ("The account stays open and no retention offer is made until each item below is resolved; tell the "
+                "customer what they are and help with any of them they ask about.")
 RETENTION_CREDIT = {"entry": 5.0, "mid": 20.0, "premium": 50.0, "elite": 50.0, "invitation": 50.0}
 CREDIT_TYPES = ("rebate_credit", "fee_refund")
 FEE_TYPES = ("atm_fee", "fee", "debit_card_fee", "monthly_fee", "overdraft_fee")
@@ -32,17 +36,19 @@ def log_verification(db, a: dict) -> GateResult:
     source = "log_verification docstring; get_current_time"
     user = db.users.data.get(a.get("user_id", ""))
     if user is None:
-        return deny("banking.verification.user", source, f"no user {a.get('user_id')!r} on file",
+        return deny("banking.verification.user", source, "the verification names a user who is not on file",
                     "Look the user up (get_user_information_by_*) and log the verification with their user_id.",
-                    {"user_id": a.get("user_id")})
+                    {"user_id": a.get("user_id")}, consequence=NOT_VERIFIED,
+                    facts=[f"user_id {a.get('user_id')!r}: no such user"])
     wrong = [arg for arg, field in VERIFY_FIELDS if arg in a and _norm(a[arg]) != _norm(user.get(field))]
     reasons = [f"{arg} {a[arg]!r} differs from the record on file" for arg in wrong]
     if str(a.get("time_verified", "")).strip() != NOW_TEXT:
         reasons.append(f"time_verified {a.get('time_verified')!r} is not the current time {NOW_TEXT!r}")
     if reasons:
-        return deny("banking.verification", source, "; ".join(reasons),
-                    "Log the verification with the user's details exactly as on file and time_verified from "
-                    "get_current_time.", {"mismatched": wrong})
+        return deny("banking.verification", source, "the verification does not match the customer's record or the "
+                    "current time", "Log the verification with the user's details exactly as on file and "
+                    "time_verified from get_current_time.", {"mismatched": wrong}, consequence=NOT_VERIFIED,
+                    facts=reasons)
     return allow("banking.verification", source, {"user_id": a["user_id"]})
 
 
@@ -51,7 +57,9 @@ def change_email(db, a: dict) -> GateResult:
     user = db.users.data.get(a.get("user_id", ""))
     if user is not None and _norm(a.get("new_email")) == _norm(user.get("email")):
         return deny("banking.change_email.same", source, "the new email is already the email on file",
-                    "Do not change it; tell the user the email on file already is that address.", {})
+                    "Do not change it; tell the user the email on file already is that address.", {},
+                    consequence="Nothing needs changing; continue with the rest of the customer's request.",
+                    facts=[f"email on file for {a.get('user_id')}: {user.get('email')}"])
     return allow("banking.change_email", source, {"user_id": a.get("user_id")})
 
 
@@ -63,11 +71,15 @@ def update_rewards(db, a: dict) -> GateResult:
                 and str(r.get("resolution", "")).upper() == "APPROVED"]
     details = {"transaction_id": tid, "disputes": [r.get("dispute_id") for r in disputes]}
     if not approved:
-        return deny("banking.update_rewards.no_resolved_dispute", source, f"transaction {tid} has no resolved and "
-                    "approved cash back dispute; rewards are corrected only after one",
-                    "Give the user the submit_cash_back_dispute_0589 tool (give_discoverable_user_tool) so the user "
-                    "files the dispute; update rewards only for a transaction whose dispute is RESOLVED/APPROVED.",
-                    details)
+        return deny("banking.update_rewards.no_resolved_dispute", source, f"transaction {tid} has no approved cash "
+                    "back dispute, and rewards are corrected only after one", "Give the user the "
+                    "submit_cash_back_dispute_0589 tool (give_discoverable_user_tool) so the user files the dispute; "
+                    "update rewards only for a transaction whose dispute is RESOLVED/APPROVED.", details,
+                    consequence="The customer files the cash back dispute with their own tool; the rewards are "
+                    "corrected after it is approved, not in this conversation.",
+                    facts=[f"cash back disputes on {tid}: " + (", ".join(
+                        f"{r.get('dispute_id')} {r.get('status')}/{r.get('resolution')}" for r in disputes)
+                        or "none")])
     return allow("banking.update_rewards", source, details)
 
 
@@ -84,16 +96,23 @@ def checking_credit(db, a: dict) -> GateResult:
                "account per interaction") if today else "a credit was applied to this account within 14 days"
         return deny("banking.checking_credit.once", source, why,
                     "Do not apply another credit to this account. When several corrections apply, combine them into "
-                    "ONE credit with the total amount.", details)
+                    "ONE credit with the total amount.", details,
+                    consequence="This account takes no further credit now; tell the customer what was already "
+                    "credited.",
+                    facts=[f"credits on {acc_id} in the past 14 days: " + ", ".join(
+                        f"{t.get('transaction_id')} ({t.get('type')}, {t.get('date')})" for t in credits)])
     amount = money(a.get("amount"))
     if a.get("credit_type") == "fee_refund":
         fees = round(-sum(money(t.get("amount")) for t in rows if t.get("type") in FEE_TYPES
                           and money(t.get("amount")) < 0), 2)
         details["fees_charged"] = fees
         if amount > fees:
-            return deny("banking.checking_credit.amount", source, f"fee refund ${amount:,.2f} exceeds the ${fees:,.2f} "
-                        "of fees charged to this account", "Refund only the fees that were charged wrongly (net "
-                        "of any undercharges); recompute from the account's transactions.", details)
+            return deny("banking.checking_credit.amount", source, "the fee refund is larger than the fees charged to "
+                        "this account", "Refund only the fees that were charged wrongly (net of any undercharges); "
+                        "recompute from the account's transactions.", details,
+                        consequence="The account takes one credit per conversation, so the single credit must "
+                        "carry the full corrected amount.",
+                        facts=[f"refund asked: ${amount:,.2f}", f"fees charged to {acc_id}: ${fees:,.2f}"])
     return allow("banking.checking_credit", source, details)
 
 
@@ -136,9 +155,9 @@ def log_closure_reason(db, a: dict) -> GateResult:
         return allow("banking.closure_reason.unknown_card", source, reason="no such account: the tool decides")
     blockers = closure_blockers(db, card)
     if blockers:
-        return deny("banking.closure_reason.ineligible", source, f"{card} cannot be closed: {blockers}",
+        return deny("banking.closure_reason.ineligible", source, f"credit card account {card} cannot be closed yet",
                     "Do not log a closure reason or make retention offers; tell the user what must be resolved "
-                    "first.", {"blockers": blockers})
+                    "first.", {"blockers": blockers}, consequence=CANNOT_CLOSE, facts=blockers)
     return allow("banking.closure_reason", source, {"credit_card_account_id": card})
 
 
@@ -149,13 +168,17 @@ def close_card(db, a: dict) -> GateResult:
         return allow("banking.close_card.unknown_card", source, reason="no such account: the tool decides")
     blockers = closure_blockers(db, card)
     if blockers:
-        return deny("banking.close_card.ineligible", source, f"{card} cannot be closed: {blockers}",
-                    "Do not close it; tell the user what must be resolved first.", {"blockers": blockers})
+        return deny("banking.close_card.ineligible", source, f"credit card account {card} cannot be closed yet",
+                    "Do not close it; tell the user what must be resolved first.", {"blockers": blockers},
+                    consequence=CANNOT_CLOSE, facts=blockers)
     today, earlier = _reasons_logged(db, card)
     if not today and not earlier:
         return deny("banking.close_card.no_reason", source, "no closure reason is on record for this account",
                     "Ask why the user is closing and log it with log_credit_card_closure_reason_4521 (then the "
-                    "retention steps), before closing.", {})
+                    "retention steps), before closing.", {},
+                    consequence="The reason decides which retention offer applies, so it comes before the closure; "
+                    "close only if the customer still wants it after the offer.",
+                    facts=[f"closure reasons for {card} in the past year: none"])
     return allow("banking.close_card", source, {"reasons_today": len(today), "reasons_past_year": len(earlier)})
 
 
@@ -165,12 +188,17 @@ def _retention(db, a: dict, rule: str, what: str) -> GateResult | None:
     card = a.get("credit_card_account_id", "")
     today, earlier = _reasons_logged(db, card)
     if earlier:
-        return deny(f"{rule}.prior_retention", source, f"{card} has a closure reason on record within the past year; "
-                    f"retention offers are skipped for it ({what})", "Do not make a retention offer; proceed with "
-                    "the closure the user asked for.", {"earlier": [r.get("record_id") for r in earlier]})
+        return deny(f"{rule}.prior_retention", source, f"this account already had a closure reason logged within "
+                    f"the past year, so no retention offer ({what}) is made", "Do not make a retention offer; proceed "
+                    "with the closure the user asked for.", {"earlier": [r.get("record_id") for r in earlier]},
+                    consequence="Retention offers are made once a year; the closure itself can go ahead.",
+                    facts=[f"closure reasons for {card} in the past year: " + ", ".join(
+                        f"{r.get('closure_reason')} ({r.get('logged_at')})" for r in earlier)])
     if not today:
         return deny(f"{rule}.no_reason", source, f"no closure reason was logged for {card} before this {what}",
-                    "Log the user's closure reason with log_credit_card_closure_reason_4521 first.", {})
+                    "Log the user's closure reason with log_credit_card_closure_reason_4521 first.", {},
+                    consequence="The logged reason decides which retention offer applies, if any.",
+                    facts=[f"closure reasons for {card} today: none"])
     return None
 
 
@@ -184,9 +212,11 @@ def account_flag(db, a: dict) -> GateResult:
         return blocked
     today, _ = _reasons_logged(db, a.get("credit_card_account_id", ""))
     if not any(r.get("closure_reason") == "annual_fee" for r in today):
-        return deny("banking.fee_waiver.reason", source, "the annual fee waiver answers an 'annual_fee' closure "
-                    f"reason; the reason logged is {[r.get('closure_reason') for r in today]}",
-                    "Offer the waiver only to a user closing over the annual fee.", {})
+        logged = [r.get("closure_reason") for r in today]
+        return deny("banking.fee_waiver.reason", source, "the annual fee waiver is offered only to a customer "
+                    "closing over the annual fee", "Offer the waiver only to a user closing over the annual fee.", {},
+                    consequence="The retention offer must match the reason the customer gave; the other steps of "
+                    "the closure are not affected.", facts=[f"closure reason logged today: {', '.join(logged)}"])
     return allow("banking.fee_waiver", source, {})
 
 
@@ -202,7 +232,9 @@ def statement_credit(db, a: dict) -> GateResult:
     tier = _tier(acc.get("card_type", ""))
     wanted = RETENTION_CREDIT.get(tier)
     if wanted is not None and money(a.get("amount")) != wanted:
-        return deny("banking.retention_credit.amount", source, f"a {tier}-tier card's retention credit is "
-                    f"${wanted:g}, not ${money(a.get('amount')):g}", f"Apply amount {wanted:g}.",
-                    {"tier": tier, "card_type": acc.get("card_type")})
+        return deny("banking.retention_credit.amount", source, "the retention credit amount does not match the "
+                    "card's tier", f"Apply amount {wanted:g}.", {"tier": tier, "card_type": acc.get("card_type")},
+                    consequence="The retention credit is fixed by card tier; offer the customer that amount.",
+                    facts=[f"card type {acc.get('card_type')} ({tier} tier): ${wanted:g}",
+                           f"amount given: ${money(a.get('amount')):g}"])
     return allow("banking.retention_credit", source, {"tier": tier})

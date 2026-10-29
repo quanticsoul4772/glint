@@ -19,7 +19,8 @@ Run: python -m glint.bank.server [--decision-tools]    (stdio MCP server)
   every credit card dispute filed without its plan, so a client without the tool could file none. It is annotated
   read-only (it never changes the bank) although τ² types it as mutating so its evaluator replays it.
 - **Results.** A gate deny and a τ² tool error both return `is_error=true` with the message text (a deny carries the
-  rule, reason, purpose, fix and verdict). An unknown tool is a protocol error.
+  rule, what the check found, the facts it used, why it matters, the next step and the verdict). An unknown tool is
+  a protocol error.
 - **stdout.** τ² prints to stdout (a task file that fails to load is reported with print()), which would corrupt the
   stdio JSON-RPC stream: every τ² load and call runs with stdout redirected to stderr.
 """

@@ -86,9 +86,10 @@ def _retail_gate(action: str):
                                      a.get("item_ids"), a.get("new_item_ids"))
         if v["allowed"]:
             return allow(f"retail.{action}", source, v)
-        return deny(f"retail.{action}", source, "; ".join(v["reasons"]),
+        return deny(f"retail.{action}", source, f"the retail policy does not allow this {action.replace('_', ' ')}",
                     "Do not repeat this write. Tell the user what the policy does not allow and why (rules in the "
-                    "verdict); use only the payment methods the verdict allows.", v)
+                    "verdict); use only the payment methods the verdict allows.", v,
+                    consequence=POLICY_NO, facts=v["reasons"])
     return gate
 
 
@@ -96,6 +97,14 @@ def _retail_gate(action: str):
 
 AIRLINE_SOURCE = "glint.assist.airline.check_eligibility"
 AIRLINE_FIX = "Do not repeat this write. Tell the user the policy does not allow it (rules in the verdict)."
+POLICY_NO = ("This write cannot succeed for this record however it is retried. Tell the customer why, then continue "
+             "with any other part of their request.")
+
+
+def _airline_deny(rule: str, v: dict) -> GateResult:
+    what = rule.split(".", 1)[1].replace("_", " ")
+    return deny(rule, AIRLINE_SOURCE, f"the airline policy does not allow this {what}", AIRLINE_FIX, v,
+                consequence=POLICY_NO, facts=v["reasons"])
 
 
 def _airline_cancel(db, a: dict) -> GateResult:
@@ -109,7 +118,7 @@ def _airline_cancel(db, a: dict) -> GateResult:
         # marks this case "uncertain"): allow and log, never deny what may be allowed
         return allow("airline.cancel.insurance_reason_unseen", AIRLINE_SOURCE, covered,
                      reason="allowed only if the user's reason is covered by insurance; the call does not show it")
-    return deny("airline.cancel", AIRLINE_SOURCE, "; ".join(plain["reasons"]), AIRLINE_FIX, plain)
+    return _airline_deny("airline.cancel", plain)
 
 
 def _airline_flights(db, a: dict) -> GateResult:
@@ -126,7 +135,7 @@ def _airline_flights(db, a: dict) -> GateResult:
     v = airline.check_eligibility(db, rid, action)
     if v["allowed"]:
         return allow(f"airline.{action}", AIRLINE_SOURCE, v)
-    return deny(f"airline.{action}", AIRLINE_SOURCE, "; ".join(v["reasons"]), AIRLINE_FIX, v)
+    return _airline_deny(f"airline.{action}", v)
 
 
 def _airline_baggages(db, a: dict) -> GateResult:
@@ -137,7 +146,7 @@ def _airline_baggages(db, a: dict) -> GateResult:
     v = airline.check_eligibility(db, rid, action)
     if v["allowed"]:
         return allow(f"airline.{action}", AIRLINE_SOURCE, v)
-    return deny(f"airline.{action}", AIRLINE_SOURCE, "; ".join(v["reasons"]), AIRLINE_FIX, v)
+    return _airline_deny(f"airline.{action}", v)
 
 
 def _airline_passengers(db, a: dict) -> GateResult:
@@ -145,13 +154,17 @@ def _airline_passengers(db, a: dict) -> GateResult:
     res = db.reservations.get(rid)
     if res is not None and len(a.get("passengers") or []) != len(res.passengers):
         details = {"reservation_passengers": len(res.passengers), "requested": len(a.get("passengers") or [])}
-        return deny("airline.change_passengers.count", AIRLINE_SOURCE, "the number of passengers cannot change",
-                    "Keep the same number of passengers; only names and details may change.",
-                    details | {"rules": [airline.RULES["passengers"]]})
+        return deny("airline.change_passengers.count", AIRLINE_SOURCE, "the number of passengers on a reservation "
+                    "cannot change", "Keep the same number of passengers; only names and details may change.",
+                    details | {"rules": [airline.RULES["passengers"]]},
+                    consequence="Passenger details can still be corrected; adding or removing a passenger is not "
+                    "possible on this reservation.",
+                    facts=[f"passengers on {rid}: {details['reservation_passengers']}",
+                           f"passengers in the call: {details['requested']}"])
     v = airline.check_eligibility(db, rid, "change_passengers")
     if v["allowed"]:
         return allow("airline.change_passengers", AIRLINE_SOURCE, v)
-    return deny("airline.change_passengers", AIRLINE_SOURCE, "; ".join(v["reasons"]), AIRLINE_FIX, v)
+    return _airline_deny("airline.change_passengers", v)
 
 
 # ---- banking ------------------------------------------------------------------------------------------------------
@@ -176,20 +189,24 @@ def _dispute(db, a: dict) -> GateResult:
     v = banking.check_dispute(db, uid, card, tid, a.get("dispute_reason", ""),
                               None if contacted is None else as_flag(contacted))
     if "card_action" not in v:
-        return deny("banking.dispute.record", source, "; ".join(v["reasons"]),
-                    "Check the user id and the transaction id; dispute only a transaction of this user.", v)
+        return deny("banking.dispute.record", source, "the dispute does not name a transaction of this user",
+                    "Check the user id and the transaction id; dispute only a transaction of this user.", v,
+                    consequence="Nothing was filed. Look the transaction up on the customer's own cards before "
+                    "filing.", facts=v["reasons"])
     reasons = []
     if v["card_action"] == "cancel_and_reissue" and a.get("card_action") != "cancel_and_reissue":
         reasons.append(f"card_action {a.get('card_action')!r}: a replacement for this card was ordered today, so "
                        "every dispute on it must use 'cancel_and_reissue'")
     if as_flag(a.get("eligible_for_provisional_credit")) != v["eligible_for_provisional_credit"]:
-        failed = [k for k, ok in v["provisional_credit_criteria"].items() if not ok]
-        reasons.append(f"eligible_for_provisional_credit {a.get('eligible_for_provisional_credit')} != "
-                       f"{v['eligible_for_provisional_credit']}" + (f" (failed: {failed})" if failed else ""))
+        reasons.append(f"eligible_for_provisional_credit given {a.get('eligible_for_provisional_credit')}, policy "
+                       f"{v['eligible_for_provisional_credit']}")
     if reasons:
-        return deny("banking.dispute", source, "; ".join(reasons),
+        failed = [k for k, ok in v["provisional_credit_criteria"].items() if not ok]
+        return deny("banking.dispute", source, "the dispute's values do not match the policy",
                     "File the dispute with the card_action and eligible_for_provisional_credit values in the verdict.",
-                    v)
+                    v, consequence="Nothing was filed. The values come from the policy, not from the customer's "
+                    "wishes; file with them and tell the customer what they mean.",
+                    facts=[*reasons, f"provisional credit criteria failed: {', '.join(failed) or 'none'}"])
     if a.get("card_action") == "cancel_and_reissue" and v["card_action"] == "keep_active":
         # a replacement may still be ordered later in the conversation; the database cannot show that yet
         return allow("banking.dispute.card_action_unseen", source, v,
@@ -202,13 +219,16 @@ def _increase_verdict(db, a: dict, amount: float) -> dict:
 
 
 CLI_SOURCE = "glint.assist.banking.check_credit_limit_increase"
+INCREASE_ORDER = "The increase goes submit, then the required lookups, then approve or deny; nothing was decided."
 
 
 def _submit(db, a: dict) -> GateResult:
     v = _increase_verdict(db, a, banking._money(a.get("requested_increase_amount")))
     if v["verdict"] in ("reduce_amount", "ask_amount", "error"):
-        return deny(f"banking.cli.submit.{v['verdict']}", CLI_SOURCE, "; ".join(v["reasons"]),
-                    "Submit an increase no larger than max_increase in the verdict, for an account of this user.", v)
+        return deny(f"banking.cli.submit.{v['verdict']}", CLI_SOURCE, "the requested increase cannot be submitted "
+                    "as given", "Submit an increase no larger than max_increase in the verdict, for an account of "
+                    "this user.", v, consequence="Tell the customer the largest increase their card allows and ask "
+                    "whether to submit that; nothing was submitted.", facts=v["reasons"])
     return allow(f"banking.cli.submit.{v['verdict']}", CLI_SOURCE, v)
 
 
@@ -219,32 +239,40 @@ def _decision(db, a: dict, approving: bool) -> GateResult:
                  if r.get("credit_card_account_id") == card and str(r.get("status", "")).upper() == "PENDING"]
     rule = "banking.cli.approve" if approving else "banking.cli.deny"
     if not submitted:
-        return deny(f"{rule}.not_submitted", CLI_SOURCE,
-                    "no credit limit increase request was submitted for this card before this decision",
-                    "Submit the request first (submit_credit_limit_increase_request_7392), then do the lookups, then "
-                    "decide.", {"credit_card_account_id": card})
+        return deny(f"{rule}.not_submitted", CLI_SOURCE, "a decision needs a submitted request, and none is on "
+                    "record for this card", "Submit the request first (submit_credit_limit_increase_request_7392), "
+                    "then do the lookups, then decide.", {"credit_card_account_id": card},
+                    consequence=INCREASE_ORDER, facts=[f"pending increase requests for {card}: none"])
     amount = banking._money(submitted[-1].get("requested_increase_amount"))
     v = _increase_verdict(db, a, amount)
     if v["verdict"] not in ("approve", "deny"):
         return allow(f"{rule}.no_verdict", CLI_SOURCE, v, reason="the check gives no approve/deny verdict here")
     if approving:
         if v["verdict"] != "approve":
-            return deny(rule, CLI_SOURCE, f"the policy denies this increase: {v['denial_reason']} "
-                        f"({'; '.join(v['reasons'])})", f"Deny it with denial_reason {v['denial_reason']!r}.", v)
+            return deny(rule, CLI_SOURCE, "a policy check fails, so the increase is denied, not approved",
+                        f"Deny it with denial_reason {v['denial_reason']!r}.", v,
+                        consequence="The request is decided by the checks; tell the customer the reason for the "
+                        "denial.", facts=[f"first failing check: {v['denial_reason']}", *v["reasons"]])
         wanted = round(banking._money(acc.get("credit_limit")) + amount)
         new = banking._money(a.get("new_credit_limit"))
         if round(new) != wanted:
-            return deny(f"{rule}.new_limit", CLI_SOURCE,
-                        f"new_credit_limit {new:,.0f} != current limit + submitted increase {wanted:,}",
-                        f"Approve with new_credit_limit {wanted}.", v)
+            return deny(f"{rule}.new_limit", CLI_SOURCE, "the new limit must be the current limit plus the "
+                        "submitted increase", f"Approve with new_credit_limit {wanted}.", v,
+                        consequence="The approval is right; only the new limit is wrong.",
+                        facts=[f"current limit: {banking._money(acc.get('credit_limit')):,.0f}",
+                               f"submitted increase: {amount:,.0f}", f"new_credit_limit given: {new:,.0f}"])
         return allow(rule, CLI_SOURCE, v)
     if v["verdict"] == "approve":
-        return deny(rule, CLI_SOURCE, "every check passes; the policy approves this increase",
-                    f"Approve it with new_credit_limit {v['new_credit_limit']}.", v)
+        return deny(rule, CLI_SOURCE, "every policy check passes, so the increase is approved, not denied",
+                    f"Approve it with new_credit_limit {v['new_credit_limit']}.", v,
+                    consequence="The request is decided by the checks; tell the customer it is approved and the new "
+                    "limit.", facts=v["reasons"] or ["every check passed"])
     if a.get("denial_reason") != v["denial_reason"]:
-        return deny(f"{rule}.reason", CLI_SOURCE, f"denial_reason {a.get('denial_reason')!r} != "
-                    f"{v['denial_reason']!r} (the first failing check in the policy's order)",
-                    f"Deny with denial_reason {v['denial_reason']!r}.", v)
+        return deny(f"{rule}.reason", CLI_SOURCE, "the denial reason must be the first failing check in the "
+                    "policy's order", f"Deny with denial_reason {v['denial_reason']!r}.", v,
+                    consequence="The denial is right; only its reason is wrong.",
+                    facts=[f"denial_reason given: {a.get('denial_reason')!r}",
+                           f"first failing check: {v['denial_reason']!r}", *v["reasons"]])
     return allow(rule, CLI_SOURCE, v)
 
 
@@ -253,8 +281,10 @@ def _replacement(db, a: dict) -> GateResult:
     pending = _pending_increase(db, card)
     details = {"credit_card_account_id": card, "undecided_increase_requests": pending}
     if pending:
-        return deny("banking.replacement.increase_first", "glint.assist.banking.LIMIT_FIRST", banking.LIMIT_FIRST,
-                    "Approve or deny the submitted credit limit increase first, then order the replacement.", details)
+        return deny("banking.replacement.increase_first", "glint.assist.banking.LIMIT_FIRST", "a credit limit "
+                    "increase was submitted and not decided yet", "Approve or deny the submitted credit limit "
+                    "increase first, then order the replacement.", details, consequence=procedure.INCREASE_FIRST,
+                    facts=[f"undecided increase requests for {card}: {', '.join(map(str, pending))}"])
     return allow("banking.replacement", "glint.assist.banking.LIMIT_FIRST", details)
 
 

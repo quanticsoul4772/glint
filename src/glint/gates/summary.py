@@ -144,10 +144,14 @@ def gated_tools(events: list[dict]) -> set[str]:
 
 
 def parse_deny(content: str) -> dict:
-    """rule_id, reason, fix and verdict from the deny message the agent saw (glint.gates.core.GateResult.message)."""
-    rule = re.search(r"\(rule (\S+), check", content)
+    """rule_id, reason, fix and verdict from the deny message the agent saw (glint.gates.core.GateResult.message).
+    Reads both formats: the plain-language one ("Rule: X (source)", "What the check found:", "What to do next:") and
+    the one runs recorded before 2026-10-29 carry ("(rule X, check ...)", "Reason:", "Fix:")."""
+    rule = re.search(r"^Rule: (\S+)", content, re.MULTILINE) or re.search(r"\(rule (\S+), check", content)
     lines = dict(line.split(": ", 1) for line in content.splitlines()[1:] if ": " in line)
-    return {"rule_id": rule.group(1) if rule else None, "reason": lines.get("Reason", ""), "fix": lines.get("Fix", ""),
+    return {"rule_id": rule.group(1) if rule else None,
+            "reason": lines.get("What the check found", lines.get("Reason", "")),
+            "fix": lines.get("What to do next", lines.get("Fix", "")),
             "verdict": json.loads(lines["Verdict"]) if "Verdict" in lines else {}}
 
 
