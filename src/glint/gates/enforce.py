@@ -4,7 +4,8 @@
 `enforcer.attach(env)` checks that every write tool of that environment's toolkit has a gate, then wraps THAT
 instance's `get_response`. Only `requestor == "assistant"` calls to WRITE tools are gated; a banking
 `call_discoverable_agent_tool` is unwrapped and its hidden tool gated. On a deny the write does not run and the agent
-gets an error message carrying the reason, purpose, fix and verdict; arguments are never rewritten. τ²'s gold actions
+gets an error message carrying the rule, what the check found, the facts it used, why it matters, the next step
+and the verdict; arguments are never rewritten. τ²'s gold actions
 go through `make_tool_call`, not `get_response`, so they stay ungated. A few GENERIC tools that end or change the
 conversation are gated like writes (rules.GATED_GENERIC: banking's transfer_to_human_agents).
 
@@ -36,7 +37,7 @@ from tau2.environment.toolkit import ToolType
 
 from glint.assist.banking import PLAN_TOOL
 from glint.assist.tau2_tools import add_plan_tool
-from glint.gates.core import GateResult, assert_required, deny, run_gate
+from glint.gates.core import CANNOT_DECIDE, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import GATED_GENERIC, REQUIRED_GATES, build_registry, manifest, parse_hidden_arguments
 
@@ -75,21 +76,24 @@ class Enforcer:
         """Run every gate on the write; the first deny wins. Each gate's decision is logged as gate.fired. A gate with
         `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`."""
         if args is None:
-            result = deny("unparsed_arguments", "glint.gates.enforce", "the hidden tool's arguments are not a JSON "
-                          "object", "Pass `arguments` as a JSON object string.")
+            result = deny("unparsed_arguments", "glint.gates.enforce", "the hidden tool's arguments could not be "
+                          "read, so no check could judge the write", "Pass `arguments` as a JSON object string.",
+                          consequence="The tool was not called. Retrying with readable arguments is enough; the rest "
+                          "of the request is not affected.", facts=["`arguments` is not a JSON object"])
             self._log(tool, args, result, 0.0, replay, "unparsed")
             return result
         final = None
         for gate in self.registry.for_tool(tool):
             if gate.toolkit and toolkit is None:
-                result, ms = deny("gate_error", gate.name, f"gate {gate.name!r} needs the environment's toolkit and "
-                                  "was given none", "Call Enforcer.check with toolkit=env.tools."), 0.0
+                result, ms = deny("gate_error", gate.name, f"the check {gate.name!r} needs the environment's "
+                                  "toolkit and was given none", "Call Enforcer.check with toolkit=env.tools.",
+                                  consequence=CANNOT_DECIDE, facts=["toolkit: none"]), 0.0
             else:
                 result, ms = run_gate(gate, toolkit if gate.toolkit else db, args, wait=replay)
             if not self._log(tool, args, result, ms, replay, gate.name):
-                result = deny("audit_failed", gate.name, f"gate {gate.name!r} fired but its event could not be "
-                              "logged; denying rather than allowing a write with no audit trail",
-                              "Check the gate log file.")
+                result = deny("audit_failed", gate.name, f"the check {gate.name!r} ran but its decision could not "
+                              "be logged, and no write runs without a logged decision", "Check the gate log file.",
+                              consequence=CANNOT_DECIDE, facts=["the gate.fired event was not written"])
             if not result.allowed:
                 return result
             final = final or result

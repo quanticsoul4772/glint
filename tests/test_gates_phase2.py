@@ -183,7 +183,7 @@ def test_order_past_the_replacement_limit_needs_the_excess_fee():
     assert _ran(_hidden(env, "close_debit_card_4721", card_id="dbc_kj93a7b2e1_lightgreen", reason="fraud_suspected"))
     assert _ran(_hidden(env, "order_debit_card_5739", **order))  # the 2nd replacement in 12 months
     assert _ran(_hidden(env, "close_debit_card_4721", card_id=_new_card(env, account), reason="fraud_suspected"))
-    assert _denied(_hidden(env, "order_debit_card_5739", **order), "excess_replacement_fee 0 must be 25")
+    assert _denied(_hidden(env, "order_debit_card_5739", **order), "excess_replacement_fee given: 0, due: 25")
     _hidden(env, "order_debit_card_5739", **(order | {"excess_replacement_fee": 25}))
     fired = [e["payload"] for e in events.events("gate.fired") if e["payload"]["tool"] == "order_debit_card_5739"]
     assert fired[-1]["decision"] == "allow"  # τ²'s own tool then refuses: the 2nd order is still pending
@@ -215,7 +215,8 @@ def test_log_verification_matches_the_record_and_the_clock():
 
 def test_change_email_needs_a_verified_user_and_a_new_address():
     env, _, _ = _bank("task_005")
-    assert _denied(_call(env, "change_user_email", user_id="6680a37184", new_email="k@new.com"), "no verification")
+    assert _denied(_call(env, "change_user_email", user_id="6680a37184", new_email="k@new.com"),
+                   "has not been verified")
     _verify(env, "6680a37184")
     email = env.tools.db.users.data["6680a37184"]["email"]
     assert _denied(_call(env, "change_user_email", user_id="6680a37184", new_email=email), "already")
@@ -241,7 +242,7 @@ def test_checking_credit_once_per_account_and_within_the_fees():
     assert _denied(_hidden(env, "apply_checking_account_credit_5829", **(first | {"amount": 1.0})), "ONE credit")
     other = next(k for k in ("chk_kj93a7b2e1_1", "chk_kj93a7b2e1_2", "chk_kj93a7b2e1_3") if k != first["account_id"])
     assert _denied(_hidden(env, "apply_checking_account_credit_5829", account_id=other, amount=5000.0,
-                           credit_type="fee_refund"), "exceeds")
+                           credit_type="fee_refund"), "larger than the fees charged")
     assert _ran(_hidden(env, "apply_checking_account_credit_5829", account_id=other, amount=1.0,
                         credit_type="rebate_credit"))
 
@@ -283,13 +284,13 @@ def test_fee_waiver_needs_the_annual_fee_reason():
     assert _ran(_hidden(env, "log_credit_card_closure_reason_4521", **log))  # found_better_card
     flag = {"credit_card_account_id": log["credit_card_account_id"], "user_id": log["user_id"],
             "flag_type": "annual_fee_waived", "expiration_date": "11/14/2026", "reason": "loyalty_benefit"}
-    assert _denied(_hidden(env, "apply_credit_card_account_flag_6147", **flag), "'annual_fee' closure reason")
+    assert _denied(_hidden(env, "apply_credit_card_account_flag_6147", **flag), "closing over the annual fee")
 
 
 def test_retention_credit_amount_by_card_tier():
     env, task, _ = _bank("task_045")
     gold = _play(env, task, "apply_statement_credit_8472")  # a Silver (mid-tier) card: $20
-    assert _denied(_hidden(env, "apply_statement_credit_8472", **(gold | {"amount": 50.0})), "retention credit is $20")
+    assert _denied(_hidden(env, "apply_statement_credit_8472", **(gold | {"amount": 50.0})), "tier): $20")
     assert _ran(_hidden(env, "apply_statement_credit_8472", **gold))
 
 
@@ -297,7 +298,7 @@ def test_retention_credit_amount_by_card_tier():
 
 def test_a_write_needs_the_user_verified_in_this_conversation():
     env, task, _ = _bank("task_081")
-    assert _denied(_hidden(env, "freeze_debit_card_3892", card_id="dbc_tm92c4d7e8_blue"), "no verification")
+    assert _denied(_hidden(env, "freeze_debit_card_3892", card_id="dbc_tm92c4d7e8_blue"), "has not been verified")
     _play(env, task, "freeze_debit_card_3892")
     assert _ran(_hidden(env, "freeze_debit_card_3892", card_id="dbc_tm92c4d7e8_blue"))
 
@@ -414,7 +415,7 @@ def test_certificate_only_where_the_policy_compensates():
     assert _denied(_call(env, "send_certificate", user_id="olivia_jackson_4826", amount=100), "no compensation")
     # a gold member whose delayed reservation is unchanged: no certificate for the delay alone (airline task 38)
     assert _denied(_call(env, "send_certificate", user_id="noah_muller_9847", amount=50), "changed or cancelled")
-    assert _denied(_call(env, "send_certificate", user_id="noah_muller_9847", amount=75), "neither $100 nor $50")
+    assert _denied(_call(env, "send_certificate", user_id="noah_muller_9847", amount=75), "possible amounts:")
     assert _ran(_call(env, "send_certificate", user_id="isabella_anderson_9682", amount=100))
     assert _rule(events) == "airline.certificate.cancelled_flight"
     assert _ran(_call(env, "send_certificate", user_id="noah_muller_9847", amount=100))
@@ -437,7 +438,7 @@ def test_user_address_needs_every_field():
     user = next(iter(env.tools.db.users))
     address = {"user_id": user, "address1": "1 Main St", "address2": "", "city": "Austin", "state": "TX",
                "country": "USA", "zip": "78701"}
-    assert _denied(_call(env, "modify_user_address", **(address | {"city": " "})), "['city']")
+    assert _denied(_call(env, "modify_user_address", **(address | {"city": " "})), "missing fields: city")
     assert _ran(_call(env, "modify_user_address", **address))
     assert env.tools.db.users[user].address.city == "Austin"
 

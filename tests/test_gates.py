@@ -308,7 +308,7 @@ def test_banking_approve_increase():
     env, _, gold = _banking("task_054")
     approve = _gold(gold, rules.APPROVE)
     reply = _hidden(env, rules.APPROVE, **approve)  # nothing submitted yet
-    assert _denied(reply) and "no credit limit increase request was submitted" in reply.content
+    assert _denied(reply) and "a decision needs a submitted request" in reply.content
     _hidden(env, rules.SUBMIT, **_gold(gold, rules.SUBMIT))
     reply = _hidden(env, rules.APPROVE, **(approve | {"new_credit_limit": 9000}))
     assert _denied(reply) and "new_credit_limit" in reply.content
@@ -330,7 +330,7 @@ def test_banking_deny_increase():
     _hidden(env, rules.SUBMIT, **_gold(gold, rules.SUBMIT))
     reply = _hidden(env, rules.DENY, user_id="584f9c5d00", credit_card_account_id="cc_584f9c5d00_gold",
                     denial_reason="high_utilization")
-    assert _denied(reply) and "the policy approves" in reply.content
+    assert _denied(reply) and "every policy check passes" in reply.content
 
 
 def test_banking_replacement_waits_for_the_increase_decision():
@@ -415,16 +415,17 @@ def test_a_gate_that_raises_or_hangs_fails_closed():
         raise KeyError("order_id")
 
     result, _ = run_gate(Gate("boom", ("t",), "purpose", boom), None, {})
-    assert not result.allowed and "raised KeyError" in result.reason and result.purpose == "purpose"
+    assert not result.allowed and result.facts == ("error: KeyError: 'order_id'",) and result.purpose == "purpose"
+    assert result.consequence and "failed with an error" in result.reason
     release = threading.Event()
     result, ms = run_gate(Gate("slow", ("t",), "p", lambda db, a: release.wait(5) or allow("r", "s"),
                                timeout_s=0.05), None, {})
     release.set()
-    assert not result.allowed and "timed out" in result.reason and ms < 4000
+    assert not result.allowed and "did not finish within" in result.reason and ms < 4000
     result, _ = run_gate(Gate("bad", ("t",), "p", lambda db, a: "yes"), None, {})
-    assert not result.allowed and "not a GateResult" in result.reason
+    assert not result.allowed and "returned no verdict" in result.reason and result.facts == ("returned: str",)
     result, _ = run_gate(Gate("odd", ("t",), "p", lambda db, a: GateResult("maybe")), None, {})
-    assert not result.allowed and "'maybe'" in result.reason
+    assert not result.allowed and result.facts == ("decision: 'maybe'",)
     result, _ = run_gate(Gate("bare", ("t",), "p", lambda db, a: GateResult("deny")), None, {})
     assert not result.allowed and result.reason and result.fix
 
@@ -449,12 +450,17 @@ def test_an_event_that_cannot_be_logged_turns_the_write_into_a_deny():
     assert env.tools.db.orders["#W5918442"].status == "pending"
 
 
-def test_the_deny_message_carries_reason_purpose_fix_and_verdict_and_rewrites_nothing():
+def test_the_deny_message_carries_finding_facts_consequence_fix_and_verdict_and_rewrites_nothing():
     env, _ = _gated("retail")
     args = {"order_id": "#W4817420", "reason": "no longer needed"}
     first, second = _call(env, "cancel_pending_order", **args), _call(env, "cancel_pending_order", **args)
     assert first.content == second.content
-    for part in ("Reason:", "Purpose:", "Fix:", "Verdict:", "rule retail.cancel"):
+    lines = first.content.splitlines()
+    assert [line.split(":", 1)[0] for line in lines[1:4]] == ["Rule", "What the check found", "Facts it used"]
+    assert lines[1].startswith("Rule: retail.cancel (")
+    facts = lines[4:lines.index(next(x for x in lines if x.startswith("Why it matters: ")))]
+    assert facts and all(f.startswith("- ") for f in facts)
+    for part in ("\nWhy it matters: ", "\nWhat to do next: Do not repeat this write.", "\nVerdict: {"):
         assert part in first.content
     assert args == {"order_id": "#W4817420", "reason": "no longer needed"}
 
@@ -622,3 +628,14 @@ def test_gate_replay_main_reports_and_exits_by_the_count(tmp_path, monkeypatch, 
     monkeypatch.setattr(rules, "_retail_gate", lambda action: lambda db, a: deny("x", "s", "no", "fix"))
     assert gate_replay.main([]) == 1
     assert "FALSE REFUSAL" in capsys.readouterr().out
+
+
+def test_a_deny_without_its_consequence_or_facts_is_kept_as_a_deny_that_names_what_is_missing():
+    bare = GateResult("deny", reason="r", fix="f", rule_id="x.rule")
+    result, _ = run_gate(Gate("bare", ("t",), "purpose", lambda db, a: bare), None, {})
+    assert not result.allowed and result.rule_id == "x.rule" and result.reason == "r" and result.fix == "f"
+    assert result.facts == ("the deny is missing ['consequence', 'facts']",) and result.consequence
+    full, _ = run_gate(Gate("full", ("t",), "purpose", lambda db, a: deny("x.rule", "s", "r", "f", consequence="c",
+                                                                          facts=["a", "b"])), None, {})
+    assert (full.consequence, full.facts, full.purpose) == ("c", ("a", "b"), "purpose")
+    assert "\nFacts it used:\n- a\n- b\nWhy it matters: c\nWhat to do next: f\n" in full.message()

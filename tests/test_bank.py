@@ -117,12 +117,13 @@ def test_a_denied_write_is_an_error_result_with_the_gate_text_and_leaves_the_dat
     fired = [e["payload"] for e in server.session().events.events("gate.fired")
              if e["payload"]["tool"] == rules.SUBMIT and e["payload"]["gate"] == "banking_cli_submit_gate"]
     # before any verification even a submit within the maximum is blocked (gates phase 2: procedure.verified)
-    assert unverified.is_error and "rule procedure.verified" in unverified.content[0].text
+    assert unverified.is_error and "Rule: procedure.verified (" in unverified.content[0].text
     assert denied.is_error and after_deny == before
     text = denied.content[0].text
-    assert text.startswith("Error: this write was blocked by a policy gate (rule banking.cli.submit.reduce_amount")
-    for part in ("Reason: requested increase $4,000.00 exceeds", "Purpose: credit_card_account_logistics_005",
-                 "Fix: Submit an increase no larger than max_increase", "Verdict: {"):
+    assert text.startswith("Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\n"
+                           "Rule: banking.cli.submit.reduce_amount (")
+    for part in ("\n- requested increase $4,000.00 exceeds", "\nWhy it matters: Tell the customer the largest increase",
+                 "\nWhat to do next: Submit an increase no larger than max_increase", "\nVerdict: {"):
         assert part in text
     # the log carries the session, the task and Muse's call id
     fired = fired[1:]  # the submit gate's allow of the unverified call, which procedure.verified then blocked
@@ -345,7 +346,7 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     over = stopped["banking12 base task_054 trial 0"]
     assert (over["write"], over["rule_id"], over["recorded_wrong"]) == (40, "banking.cli.submit.reduce_amount", True)
     assert stopped["banking12 tools task_051 trial 0"]["rule_id"] == "banking.cli.approve"
-    assert "high_utilization" in stopped["banking12 tools task_051 trial 0"]["reason"]
+    assert "first failing check: high_utilization" in stopped["banking12 tools task_051 trial 0"]["message"]
     rules_by_task = {}
     for r in stopped.values():
         rules_by_task.setdefault(r["run"].split()[2], []).append(r["rule_id"])
