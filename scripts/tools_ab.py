@@ -337,19 +337,28 @@ def keep_failed_runs_on_resume() -> None:
 # τ²'s two ERROR records for a failed simulation, (logger name, function, line): the failed model call and the failed
 # run. The `[runs]` line (glint.runlog.RunEvents) carries the same outcome and cause once. A record from any other place
 # still prints; if τ² moves these lines, they print again rather than anything else being dropped.
-RUN_LOG_DROPPED = {("tau2.utils.llm_utils", "generate", 417), ("tau2.runner.progress", "run_with_retry", 101)}
+# (the orchestrator's "Simulation loop exited with an exception" names no cause; the run's own line, with info.error,
+# follows when the run finishes)
+RUN_LOG_DROPPED = {("tau2.utils.llm_utils", "generate", 417), ("tau2.runner.progress", "run_with_retry", 101),
+                   ("tau2.orchestrator.orchestrator", "run", 287)}
 # τ² console lines left out of the run log: a resume prints one per finished run (the RESUME line lists what reruns),
 # and a failed run's error is printed again, wrapped, after its two ERROR records
+# τ²'s "N/M (trial t/k). Running task X, trial t" start line is dropped too: the run's own line reports its end
 QUIET_LINES = (re.compile(r"Skipping task \S+, trial \d+ because it has already been run\."),
-               re.compile(r"  Task \S+ failed permanently after \d+ attempts: .*", re.DOTALL))
+               re.compile(r"  Task \S+ failed permanently after \d+ attempts: .*", re.DOTALL),
+               re.compile(r".*\. Running task \S+, trial \d+"))
+# τ²'s "Status: n/N complete ..." progress line prints every few seconds while runs are open (313 lines in a 96-run
+# log); one every STATUS_EVERY_S is kept, so the log still shows what is running
+STATUS = re.compile(r"Status: \d+/\d+ complete\..*", re.DOTALL)
+STATUS_EVERY_S = 600.0
 # The (task id, trial) of the simulation the current thread runs, set around τ²'s run_with_retry
 CURRENT_RUN: ContextVar[tuple[str, int] | None] = ContextVar("glint_current_run", default=None)
 
 
 def run_log_filter(record) -> bool:
-    """loguru filter for the run log: False for the two known duplicate ERROR records only."""
-    return not (record["level"].name == "ERROR"
-                and (record["name"], record["function"], record["line"]) in RUN_LOG_DROPPED)
+    """loguru filter for the run log: False for the records RUN_LOG_DROPPED names by their source line only (τ²'s two
+    duplicate ERROR records of a failed run, and its cause-free simulation loop WARNING)."""
+    return (record["name"], record["function"], record["line"]) not in RUN_LOG_DROPPED
 
 
 class _RunLogLogger:
@@ -370,17 +379,23 @@ class _RunLogLogger:
 
 
 class _QuietConsole:
-    """τ²'s shared rich console without QUIET_LINES; everything else (the Status lines) prints as before."""
+    """τ²'s shared rich console without QUIET_LINES, and with one Status line every STATUS_EVERY_S."""
 
-    def __init__(self, real):
-        self._real = real
+    def __init__(self, real, clock=time.monotonic):
+        self._real, self._clock, self._last_status = real, clock, None
 
     def print(self, *objects, **kwargs):
         from rich.text import Text
 
-        if len(objects) == 1 and isinstance(objects[0], Text) and any(p.fullmatch(objects[0].plain)
-                                                                      for p in QUIET_LINES):
-            return None
+        if len(objects) == 1 and isinstance(objects[0], Text):
+            plain = objects[0].plain
+            if any(p.fullmatch(plain) for p in QUIET_LINES):
+                return None
+            if STATUS.fullmatch(plain):
+                now = self._clock()
+                if self._last_status is not None and now - self._last_status < STATUS_EVERY_S:
+                    return None
+                self._last_status = now
         return self._real.print(*objects, **kwargs)
 
     def __getattr__(self, name):
@@ -650,8 +665,10 @@ def generate(cfg: dict) -> None:
                       "reward (τ²'s evaluation failed); they are excluded from the analysis", flush=True)
             if kinds["infrastructure_error"]:
                 print(f"WARNING: {arm} {domain}: {kinds['infrastructure_error']} of {len(results.simulations)} runs "
-                      "ended in an infrastructure error; they are excluded from the analysis and are not retried",
-                      flush=True)
+                      "ended in an infrastructure error; they are excluded from the analysis and are not retried. "
+                      "Rerun them with: python scripts/tools_ab.py "
+                      f"{' '.join(a for a in sys.argv[1:] if a != '--rerun-infrastructure-errors')} "
+                      "--rerun-infrastructure-errors (and --allow-mixed-code if the code changed)", flush=True)
             if kinds["context_overflow"]:
                 print(f"WARNING: {arm} {domain}: {kinds['context_overflow']} of {len(results.simulations)} runs "
                       "overflowed the context; they count as failed runs", flush=True)

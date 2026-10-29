@@ -187,12 +187,14 @@ class RunEvents:
                     by_task = self.tasks_by_outcome.setdefault(e["outcome"], {})
                     by_task[str(e["task_id"])] = by_task.get(str(e["task_id"]), 0) + 1
                     fh.write(json.dumps(e, default=str) + "\n")
-                    self._say(f"{e['task_id']} trial {e['trial']}: {e['outcome'].upper()} ({e['termination']}, "
-                              f"{e['duration_s']:.0f} s, {e['messages']} msgs){loud}")
+                    kept = (f"{e['duration_s']:.0f} s, {e['messages']} msgs" if e["messages"] else
+                            "τ² kept no messages or time")
+                    tally = ", ".join(f"{k} {v}" for k, v in sorted(self.counts.items()))
+                    self._say(f"{e['task_id']} trial {e['trial']}: {e['outcome'].upper()} (τ²: {e['termination']}, "
+                              f"{kept}; so far {tally}){loud}")
                     note = self.on_run(s) if self.on_run is not None else None
                     if note:
                         self._say(note)
-            self._say(f"totals {self.counts}")
             self._alert(new[-1] if new else None)
         elif time.time() - self._last_new > self.stall_s:
             self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({len(self.seen)} so far)")

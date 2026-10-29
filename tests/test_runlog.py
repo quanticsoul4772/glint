@@ -192,7 +192,20 @@ def test_counts_add_up_per_outcome_and_task(tmp_path, capsys):
     watch.poll()
     assert watch.counts == {"fail": 3, "pass": 1}
     assert watch.tasks_by_outcome == {"fail": {"a": 2, "b": 1}, "pass": {"b": 1}}
-    assert "totals {'fail': 3, 'pass': 1}" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "b trial 1: PASS (τ²: user_stop, " in err and "; so far fail 3, pass 1)" in err
+    assert "totals" not in err
+
+
+def test_a_run_tau_kept_nothing_of_does_not_print_zero_seconds_and_messages(tmp_path, capsys):
+    results = tmp_path / "results.json"
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x")
+    empty = _sim("a", 0, term="infrastructure_error", error="boom") | {"duration": 0.0, "messages": []}
+    results.write_text(json.dumps({"simulations": [empty]}), encoding="utf-8")
+    watch.poll()
+    err = capsys.readouterr().err
+    assert "a trial 0: INFRASTRUCTURE_ERROR (τ²: infrastructure_error, τ² kept no messages or time; so far " in err
+    assert "0 s" not in err and "0 msgs" not in err
 
 
 def test_stall_warning_only_after_the_stall_time(tmp_path, capsys):
