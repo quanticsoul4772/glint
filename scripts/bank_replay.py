@@ -5,10 +5,14 @@
   the user's straight into the session environment as `requestor="user"` (the server never takes customer calls). An
   ungated twin environment takes the same calls in step. A deny of a gold write the twin's τ² tool runs is a false
   refusal (target 0); a deny the twin's tool also rejects is counted apart. At the end the session's agent and user
-  database hashes must equal the twin's.
+  database hashes must equal the twin's. Gold never calls plan_disputes, which the plan gate requires before a credit
+  card dispute: the call an agent following the gate's Fix makes (glint.gates.replayplan, gold's own filings) goes
+  through `call_tool` before the first filing; the twin has no such tool and skips it.
 - **wrong** (V2): the recorded wrong writes of Glimmer's banking12 runs (research/5-measurements/
   failure-review-2026-10-28/recs.json): task_054's over-maximum increase submit, task_051's approve with no prior deny,
-  task_040/041's dispute with wrong arguments. Each run's writes are sent in order through the server on a fresh
+  task_040/041's dispute with wrong arguments. A run recorded before plan_disputes existed gets the plan made from its
+  own filings, in its order (glint.gates.replayplan), before its first dispute; a plan-gate deny then means the run
+  left that plan. Each run's writes are sent in order through the server on a fresh
   scenario until the first deny, which must carry the task's expected rule, or a gates-phase-2 procedure rule
   (verification, required lookups, transfer) on a step the run's full call list shows it skipped, or on a write the
   review marked wrong or extra. The failure review judged writes against
@@ -35,8 +39,10 @@ from mcp.client.client import Client
 from tau2.data_model.message import ToolCall
 
 from glint import paths
+from glint.assist.banking import PLAN_TOOL
 from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
+from glint.gates.replayplan import plan_arguments, with_plans
 
 RECS = paths.RESULTS / "failure-review-2026-10-28" / "recs.json"
 DOMAIN = "banking_knowledge"
@@ -80,9 +86,15 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                     raise RuntimeError(f"load_scenario({task_id}) failed: {_text(loaded)}")
                 session, twin = bank.session(), build_environment(task)
                 actions = task.evaluation_criteria.actions or [] if task.evaluation_criteria else []
-                for k, action in enumerate(actions):
-                    call = ToolCall(id=f"gold-{k}", name=action.name, arguments=action.arguments,
-                                    requestor=action.requestor)
+                calls = with_plans([ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments,
+                                             requestor=a.requestor) for k, a in enumerate(actions)])
+                for call in calls:
+                    k, action = call.id.removeprefix("gold-"), call
+                    if call.name == PLAN_TOOL:  # Glint's tool: the ungated twin has none
+                        reply = await client.call_tool(PLAN_TOOL, call.arguments)
+                        if reply.is_error:
+                            errors.append({"task_id": task_id, "action": k, "tool": PLAN_TOOL, "text": _text(reply)})
+                        continue
                     ungated = twin.get_response(call)
                     if action.requestor != "assistant":
                         with session.lock:
@@ -130,6 +142,7 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
 # ---- V2: recorded wrong writes ------------------------------------------------------------------------------------
 
 PROCEDURE_RULES = ("procedure.", "banking.verification")  # gates phase 2: the steps before a write, and its record
+PLAN_RULES = "procedure.dispute_plan"  # the run left the plan made from its own disputes (order or values)
 LOOKUP = re.compile(r"get_[a-z_]+_\d{4}")
 
 
@@ -180,9 +193,13 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                 run = f"{rec['set']} {rec['arm']} {rec['task']} trial {rec['trial']}"
                 await client.call_tool("load_scenario", {"task_id": rec["task"]})
                 session, row = bank.session(), None
+                plans = plan_arguments([w["args"] for w in rec["writes"] if w["name"] == rules.DISPUTE])
                 for i, w in enumerate(rec["writes"]):
                     if w["name"].startswith(("give:", "U:")):
                         continue
+                    user = str(w["args"].get("user_id", ""))
+                    if w["name"] == rules.DISPUTE and user in plans:
+                        await client.call_tool(PLAN_TOOL, plans.pop(user))
                     before, db = session.events.count(), session.env.get_db_hash()
                     reply = await _send(client, w["name"], w["args"])
                     denied = _denies(session, before)
@@ -193,7 +210,7 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                                "is_error": reply.is_error, "db_unchanged": session.env.get_db_hash() == db,
                                "reason": denied[0]["reason"], "message": _text(reply)}
                         row["skipped_in_recording"] = skipped_in_recording(rec, i, row["rule_id"], row["reason"])
-                        reason_ok = row["rule_id"] == expected or (
+                        reason_ok = row["rule_id"] == expected or row["rule_id"].startswith(PLAN_RULES) or (
                             row["rule_id"].startswith(PROCEDURE_RULES) and row["skipped_in_recording"] is not False
                             and (row["recorded_wrong"] or row["skipped_in_recording"] or w["st"] != "ok"))
                         row["ok"] = reason_ok and row["is_error"] and row["db_unchanged"]

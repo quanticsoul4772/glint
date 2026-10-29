@@ -152,11 +152,12 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
 
 def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
                   contacted_merchant: bool | None = None, replacement_requested: bool = False,
-                  other_requests: list[str] | None = None) -> dict:
+                  other_requests: list[str] | None = None, planned_before: int = 0) -> dict:
     """The field values a credit card dispute must carry: `card_action`, `eligible_for_provisional_credit` (with each
     criterion), the purchase date and card digits, and what still has to be asked of the user. When the user also
     wants a credit limit increase, `sequencing` says to finish it before this dispute: Glimmer called this tool first
-    and filed the dispute before the increase, which then failed (task_054 on Modal, 2026-10-27)."""
+    and filed the dispute before the increase, which then failed (task_054 on Modal, 2026-10-27). `planned_before`
+    counts disputes not filed yet that a plan (plan_disputes) files ahead of this one, for criterion 4."""
     acc, error = _account(db, credit_card_account_id, user_id)
     if error:
         return {"ready": False, "reasons": [error]}
@@ -190,7 +191,7 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
             dispute_reason != "goods_services_not_received"
             or (purchased is not None and (TODAY - purchased).days > 30)),
         "amount_in_range": tier in PROVISIONAL_MAX and 25.0 <= out["amount"] <= PROVISIONAL_MAX[tier],
-        "at_most_2_disputes_past_12_months": len(filed) <= 2,
+        "at_most_2_disputes_past_12_months": len(filed) + planned_before <= 2,
         "merchant_contacted_if_not_fraud": fraud or bool(contacted_merchant),
     }
     out["provisional_credit_criteria"] = criteria
@@ -202,3 +203,87 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
         out["sequencing"] = LIMIT_FIRST  # this dispute waits until the increase is approved or denied
     out["ready"] = not out["ask_user"] and "sequencing" not in out
     return out
+
+
+PLAN_TOOL = "plan_disputes"
+DISPUTE_REASONS = ("unauthorized_fraudulent_charge", "duplicate_charge", "incorrect_amount",
+                   "goods_services_not_received", "goods_services_not_as_described",
+                   "canceled_subscription_still_charging", "refund_never_processed")
+COUNT_CRITERION = "at_most_2_disputes_past_12_months"
+PLAN_RULE = ("File the disputes in this order, each with its eligible_for_provisional_credit. Provisional credit "
+             "needs at most 2 disputes filed in the past 12 months (credit_cards_(general)_015 criterion 4), so the "
+             "disputes filed first take the credit; the disputes that meet every other criterion are filed first.")
+
+
+def card_of_transaction(db, user_id: str, txn: dict) -> str:
+    """The credit card account a transaction was charged to (by its account id, else by the user's card type)."""
+    return txn.get("credit_card_account_id") or next(
+        (k for k, v in db.credit_card_accounts.data.items()
+         if v.get("user_id") == user_id and v.get("card_type") == txn.get("credit_card_type")), "")
+
+
+def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
+    """The filing order of a customer's credit card disputes and each one's provisional credit.
+
+    Policy: `credit_cards_(general)_015` (provisional credit criteria 1-5: account open 60 days, a qualifying reason,
+    the amount in the tier's range, at most 2 disputes filed in the past 12 months, the merchant contacted unless the
+    charge is fraud). Criterion 4 makes credit depend on filing order, and the policy text gives no order. The order
+    used here comes from τ²'s TRAIN gold, not from the policy: in tasks 039, 040 and 041 the expected actions file
+    every dispute whose reason can qualify first (unauthorized_fraudulent_charge, duplicate_charge,
+    goods_services_not_received older than 30 days), then the rest, and credit goes to the first qualifying ones until
+    criterion 4 stops it. The first group is the disputes that meet every criterion but 4 (in 039-041 these are
+    exactly the qualifying reasons; task_038's gold files a duplicate_charge whose merchant was not contacted after a
+    non-qualifying reason, so a qualifying reason alone does not put a dispute first). Inside each group the given
+    order is kept.
+
+    `transactions`: the disputes the customer wants, each {transaction_id, dispute_reason, contacted_merchant} (the
+    last None when not asked yet). Criterion 4 counts the disputes on record in the past 12 months plus the planned
+    ones ahead. A transaction already disputed is listed under `already_filed`; an unknown transaction, a reason
+    outside τ²'s list or a repeated transaction under `rejected`. Reads the live database only; deterministic."""
+    user_id = str(user_id or "")
+    year_ago = TODAY.replace(year=TODAY.year - 1)
+    on_record = [r for r in _rows(db.transaction_disputes, user_id=user_id)
+                 if (d := _date(r.get("submitted_at"))) and d > year_ago]
+    disputed = {r.get("transaction_id") for r in _rows(db.transaction_disputes, user_id=user_id)}
+    wanted, rejected, already, seen = [], [], [], set()
+    for item in transactions or []:
+        item = item if isinstance(item, dict) else {}
+        tid, reason = str(item.get("transaction_id") or ""), str(item.get("dispute_reason") or "")
+        contacted = item.get("contacted_merchant")
+        contacted = None if contacted is None or contacted == "" else as_flag(contacted)
+        txn = db.credit_card_transaction_history.data.get(tid)
+        why = ("listed twice" if tid in seen else
+               f"transaction {tid!r} does not exist for user {user_id}" if txn is None or txn.get("user_id") != user_id
+               else f"dispute_reason {reason!r} is not one of {list(DISPUTE_REASONS)}"
+               if reason not in DISPUTE_REASONS else "")
+        seen.add(tid)
+        if why:
+            rejected.append({"transaction_id": tid, "reason": why})
+        elif tid in disputed:
+            already.append(tid)
+        else:
+            wanted.append((tid, reason, contacted, card_of_transaction(db, user_id, txn)))
+    first = [check_dispute(db, user_id, card, tid, reason, contacted) for tid, reason, contacted, card in wanted]
+    qualifies = [all(ok for name, ok in v.get("provisional_credit_criteria", {"none": False}).items()
+                     if name != COUNT_CRITERION) for v in first]
+    ordered = [w for w, q in zip(wanted, qualifies) if q] + [w for w, q in zip(wanted, qualifies) if not q]
+    order, ask = [], []
+    for tid, reason, contacted, card in ordered:
+        v = check_dispute(db, user_id, card, tid, reason, contacted, planned_before=len(order))
+        if "provisional_credit_criteria" not in v:
+            rejected.append({"transaction_id": tid, "reason": "; ".join(v["reasons"])})
+            continue
+        entry = {"position": len(order) + 1, "transaction_id": tid, "dispute_reason": reason,
+                 "contacted_merchant": contacted,
+                 "eligible_for_provisional_credit": v["eligible_for_provisional_credit"],
+                 "can_get_credit": all(ok for name, ok in v["provisional_credit_criteria"].items()
+                                       if name != COUNT_CRITERION),
+                 "disputes_counted_before": len(on_record) + len(order),
+                 "provisional_credit_criteria": v["provisional_credit_criteria"]}
+        if contacted is None:
+            entry["ask_user"] = f"Did you try to resolve the {tid} charge with the merchant first?"
+            ask.append(entry["ask_user"])
+        order.append(entry)
+    return {"user_id": user_id, "rule": PLAN_RULE, "disputes_on_record_past_12_months": len(on_record),
+            "order": order, "already_filed": already, "rejected": rejected, "ask_user": ask,
+            "ready": bool(order) and not ask and not rejected}

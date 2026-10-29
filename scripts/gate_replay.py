@@ -6,7 +6,9 @@ environment is set to the task's initial state and gated with glint.gates; each 
 the environment takes the same calls in step: a denied gold write that τ²'s own tool also rejects on the twin (gold
 data with an action the environment refuses, such as an exchange on a pending order) changes nothing either way and
 is counted as `also_rejected`, not as a false refusal; a denied gold write of PLACEHOLDER_GOLD is listed apart. The
-target is 0 false refusals. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
+target is 0 false refusals. Gold never calls Glint's plan_disputes, which the banking plan gate requires before a
+credit card dispute: the replay inserts the call an agent following the gate's Fix makes (glint.gates.replayplan:
+the task's own gold filings, in gold's order) before the first filing, so the gate judges gold's order and flags. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
 
 Usage: python scripts/gate_replay.py [--log PATH] [--json OUT]
 """
@@ -21,7 +23,9 @@ from tau2.data_model.message import ToolCall
 from tau2.registry import registry
 
 from glint import paths
+from glint.assist.banking import PLAN_TOOL
 from glint.gates import Enforcer, EventLog
+from glint.gates.replayplan import with_plans
 
 DOMAINS = ("retail", "airline", "banking_knowledge")
 BANKING_SPLIT = paths.RESULTS / "split-partition-banking.json"
@@ -61,9 +65,14 @@ def replay(domain: str, tasks: list, events: EventLog) -> dict:
         for e in (env, twin):
             e.set_state(init.initialization_data if init else None, init.initialization_actions if init else None,
                         (init.message_history if init else None) or [])
-        for k, action in enumerate(task.evaluation_criteria.actions or [] if task.evaluation_criteria else []):
-            call = ToolCall(id=f"gold-{k}", name=action.name, arguments=action.arguments,
-                            requestor=action.requestor)
+        gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
+                for k, a in enumerate(task.evaluation_criteria.actions or [] if task.evaluation_criteria else [])]
+        for call in with_plans(gold) if domain == "banking_knowledge" else gold:
+            k = call.id.removeprefix("gold-")
+            if call.name == PLAN_TOOL:  # Glint's tool: the ungated twin has none
+                if env.get_response(call).error:
+                    raise RuntimeError(f"{task.id}: plan_disputes failed on gold's disputes")
+                continue
             write = enforcer.write_call(env, call)
             ungated = twin.get_response(call)
             if write is None:

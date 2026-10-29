@@ -11,10 +11,16 @@ agent says or seems to have done them.
   (credit_card_account_logistics_007: a pending dispute fails the increase).
 - transfer_to_human_agents: the reason code follows bank_accounts_(general)_042 where the database shows the
   situation, and a submitted increase is decided before the user is handed off.
+- Dispute plan: a credit card dispute follows the user's current plan_disputes plan (its order, reason, merchant
+  answer and provisional credit flag), on the enforcer's own record of the plans made in this conversation
+  (`toolkit.glint_plans`, kept by glint.gates.enforce). Provisional credit needs at most 2 disputes in the past 12
+  months (credit_cards_(general)_015 criterion 4), so the order decides which disputes get it; the order itself comes
+  from τ²'s train gold (tasks 039-041), not from the policy text.
 """
 from __future__ import annotations
 
-from glint.assist.banking import LIMIT_FIRST, TODAY
+from glint.assist import as_flag
+from glint.assist.banking import LIMIT_FIRST, PLAN_TOOL, TODAY
 from glint.gates.bankdb import as_date, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 
@@ -142,3 +148,63 @@ def transfer(db, a: dict) -> GateResult:
                     f"conversation handled fraud or theft ({fraud}); _042 says to use the highest tier that applies",
                     "Transfer with reason 'fraud_or_security_concern'.", {"fraud": fraud, "reason": reason})
     return allow("procedure.transfer", source, {"reason": reason, "fraud": fraud})
+
+
+PLAN_SOURCE = "credit_cards_(general)_015 criterion 4; filing order from τ² train gold (tasks 039-041)"
+REPLAN = (f"If the customer's list changed, call {PLAN_TOOL} again with every dispute not filed yet (it replaces the "
+          "plan).")
+
+
+def dispute_plan(toolkit, a: dict) -> GateResult:
+    """A credit card dispute must be the next filing of the user's current plan, with the plan's values.
+
+    Every dispute needs a plan, a single one included: the gate sees the database and this call, not the customer's
+    request, so it cannot tell a one-dispute request from the first of several, and a dispute filed out of order
+    cannot be taken back (its credit slot is used). A one-transaction plan is one call and gives the flag
+    check_dispute gives. A transaction that already has a dispute on record is allowed through: τ²'s tool rejects a
+    second filing itself and nothing changes."""
+    db, user, tid = toolkit.db, str(a.get("user_id", "")), str(a.get("transaction_id", ""))
+    if any(r.get("user_id") == user and r.get("transaction_id") == tid for r in db.transaction_disputes.data.values()):
+        return allow("procedure.dispute_plan.already_filed", PLAN_SOURCE, {"transaction_id": tid},
+                     reason="this transaction already has a dispute on record: τ²'s tool rejects a second filing")
+    plan = getattr(toolkit, "glint_plans", {}).get(user)
+    if plan is None:
+        return deny("procedure.dispute_plan.none", PLAN_SOURCE, f"no dispute plan for user {user} in this "
+                    "conversation; which disputes get provisional credit depends on the filing order",
+                    f"Call {PLAN_TOOL}(user_id, transactions=[{{transaction_id, dispute_reason, contacted_merchant}} "
+                    "for EVERY transaction the customer wants disputed]), then file the disputes in its order with "
+                    "its eligible_for_provisional_credit values.", {"user_id": user, "transaction_id": tid})
+    filed = {r.get("transaction_id") for r in db.transaction_disputes.data.values() if r.get("user_id") == user}
+    remaining = [e for e in plan["order"] if e["transaction_id"] not in filed]
+    details = {"user_id": user, "transaction_id": tid, "plan": [e["transaction_id"] for e in plan["order"]],
+               "remaining": [e["transaction_id"] for e in remaining]}
+    if tid not in details["plan"]:
+        return deny("procedure.dispute_plan.not_planned", PLAN_SOURCE, f"transaction {tid} is not in the current "
+                    "dispute plan", f"Call {PLAN_TOOL} again with every dispute not filed yet, this one included, "
+                    "and file in its order.", details)
+    # the plan as the agent got it: τ² turns every bool in a tool result into the string "True"/"False"
+    nxt = remaining[0] | {"eligible_for_provisional_credit": as_flag(remaining[0]["eligible_for_provisional_credit"])}
+    if remaining[0]["contacted_merchant"] is not None:
+        nxt["contacted_merchant"] = as_flag(remaining[0]["contacted_merchant"])
+    fix_next = (f"File {nxt['transaction_id']} next (dispute_reason {nxt['dispute_reason']!r}, "
+                f"eligible_for_provisional_credit {nxt['eligible_for_provisional_credit']}). {REPLAN}")
+    if tid != nxt["transaction_id"]:
+        return deny("procedure.dispute_plan.order", PLAN_SOURCE, f"the plan files {nxt['transaction_id']} before "
+                    f"{tid}", fix_next, details | {"next": nxt})
+    reasons = []
+    if a.get("dispute_reason") != nxt["dispute_reason"]:
+        reasons.append(f"dispute_reason {a.get('dispute_reason')!r} != the plan's {nxt['dispute_reason']!r}")
+    if nxt["contacted_merchant"] is None:
+        return deny("procedure.dispute_plan.ask", PLAN_SOURCE, f"the plan was made without the customer's answer on "
+                    f"contacting the merchant for {tid}, which criterion 5 needs",
+                    f"Ask the customer whether they tried the merchant first, then call {PLAN_TOOL} again with "
+                    "contacted_merchant set.", details | {"next": nxt})
+    if as_flag(a.get("contacted_merchant")) != nxt["contacted_merchant"]:
+        reasons.append(f"contacted_merchant {a.get('contacted_merchant')} != the plan's {nxt['contacted_merchant']}")
+    if as_flag(a.get("eligible_for_provisional_credit")) != nxt["eligible_for_provisional_credit"]:
+        reasons.append(f"eligible_for_provisional_credit {a.get('eligible_for_provisional_credit')} != the plan's "
+                       f"{nxt['eligible_for_provisional_credit']}")
+    if reasons:
+        return deny("procedure.dispute_plan.values", PLAN_SOURCE, "; ".join(reasons), fix_next,
+                    details | {"next": nxt})
+    return allow("procedure.dispute_plan", PLAN_SOURCE, details | {"position": nxt["position"]})

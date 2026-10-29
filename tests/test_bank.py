@@ -65,12 +65,15 @@ def test_tool_list_is_the_toolkits_tools_with_their_schemas_and_annotations(serv
     listed = {t.name: t for t in _run(_with_client, server, body)}
     env = bank.build_environment()
     tools = env.tools.get_tools()
-    assert set(listed) == set(tools) | {bank.LOAD, bank.POLICY} and len(tools) == 16
+    assert set(listed) == set(tools) | {bank.LOAD, bank.POLICY, bank.PLAN_TOOL} and len(tools) == 16
     for name, tool in tools.items():
         schema = tool.openai_schema["function"]
         assert listed[name].input_schema == schema["parameters"] and listed[name].description == schema["description"]
         assert listed[name].annotations.read_only_hint is (not env.tools.tool_mutates_state(name))
         assert listed[name].annotations.destructive_hint is (env.tools.tool_type(name) == ToolType.WRITE)
+    # plan_disputes is always published (the plan gate needs it) and never changes the bank
+    plan = listed[bank.PLAN_TOOL]
+    assert plan.annotations.read_only_hint and not plan.annotations.destructive_hint
     assert listed["KB_search"].annotations.read_only_hint and not listed["KB_search"].annotations.destructive_hint
     assert listed["call_discoverable_agent_tool"].annotations.destructive_hint
     assert not listed["unlock_discoverable_agent_tool"].annotations.read_only_hint  # mutates, but not a WRITE
@@ -236,7 +239,7 @@ def test_selftest_round_trips_over_stdio_with_a_clean_stdout(capsys):
     """--selftest starts the server as a stdio subprocess and talks JSON-RPC to it: any stray stdout breaks it."""
     assert bank.main(["--selftest"]) == 0
     report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
-    assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 18
+    assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 19  # 16 τ², plan_disputes, 2 server
 
 
 def test_every_stdout_line_of_the_stdio_server_is_json_rpc(tmp_path):
@@ -270,7 +273,7 @@ def test_every_stdout_line_of_the_stdio_server_is_json_rpc(tmp_path):
         proc.wait(timeout=30)
     messages = [json.loads(line) for line in lines]  # a stray print would raise here
     assert all(m["jsonrpc"] == "2.0" for m in messages)
-    assert len(messages[-2]["result"]["tools"]) == 18 and not messages[-1]["result"]["isError"]
+    assert len(messages[-2]["result"]["tools"]) == 19 and not messages[-1]["result"]["isError"]
 
 
 def test_selftest_fails_when_the_round_trip_does(monkeypatch, capsys):
@@ -337,7 +340,7 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
 
     report = _run(bank_replay.wrong, json.loads(RUNS.read_text(encoding="utf-8")))
     stopped = {r["run"]: r for r in report["stopped"]}
-    assert len(stopped) == report["denied_as_expected"] == 20
+    assert len(stopped) == report["denied_as_expected"] == 22
     assert all(r["ok"] and r["is_error"] and r["db_unchanged"] for r in stopped.values())
     over = stopped["banking12 base task_054 trial 0"]
     assert (over["write"], over["rule_id"], over["recorded_wrong"]) == (40, "banking.cli.submit.reduce_amount", True)
@@ -346,7 +349,8 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     rules_by_task = {}
     for r in stopped.values():
         rules_by_task.setdefault(r["run"].split()[2], []).append(r["rule_id"])
-    assert rules_by_task["task_040"] == ["banking.dispute"] * 8  # every recorded task_040 run
+    # every recorded task_040 run; with each run's own plan (replayplan), 7 of 8 leave its order before a wrong flag
+    assert sorted(rules_by_task["task_040"]) == ["banking.dispute"] + ["procedure.dispute_plan.order"] * 7
     # gates phase 2 stops runs earlier, on steps the recording shows were skipped: the approve of task_051 base
     # trials 0 and 1 came with no dispute-history or pending-order lookup in the whole run (they were not denied by
     # the approve rule: the customer paid down before submitting, so the policy approves on the live database)
@@ -356,8 +360,8 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     r = stopped["banking12 base task_041 trial 1"]  # no log_verification anywhere before its disputes
     assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.verified", True)
     assert stopped["banking12 tools task_041 trial 1"]["rule_id"] == "banking.verification"  # wrong time_verified
-    assert sorted(rules_by_task["task_041"]) == ["banking.dispute"] * 3 + ["banking.verification",
-                                                                             "procedure.verified"]
+    assert sorted(rules_by_task["task_041"]) == ["banking.dispute"] * 3 + [
+        "banking.verification", "procedure.dispute_plan.order", "procedure.dispute_plan.order", "procedure.verified"]
     assert sum(r.startswith("procedure.transfer.") for r in rules_by_task["task_051"] + rules_by_task["task_054"]) == 3
 
 

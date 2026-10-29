@@ -15,7 +15,9 @@ Run: python -m glint.bank.server [--decision-tools]    (stdio MCP server)
   read-only annotation on each tool that does not mutate state, and a destructive one on each WRITE tool. Plus the
   server's `load_scenario(task_id)` (fresh environment at the task's initial state) and `get_bank_policy`. Glint's
   banking decision tools are left out unless `--decision-tools` is given: with them, the agent may check first and
-  never make the wrong write the demo shows being denied.
+  never make the wrong write the demo shows being denied. `plan_disputes` is always published: the plan gate denies
+  every credit card dispute filed without its plan, so a client without the tool could file none. It is annotated
+  read-only (it never changes the bank) although τ² types it as mutating so its evaluator replays it.
 - **Results.** A gate deny and a τ² tool error both return `is_error=true` with the message text (a deny carries the
   rule, reason, purpose, fix and verdict). An unknown tool is a protocol error.
 - **stdout.** τ² prints to stdout (a task file that fails to load is reported with print()), which would corrupt the
@@ -54,6 +56,7 @@ with quiet_stdout():
     from tau2.domains.banking_knowledge.environment import get_environment, get_tasks
     from tau2.environment.toolkit import ToolType
 
+    from glint.assist.banking import PLAN_TOOL
     from glint.assist.tau2_tools import assist_environment
     from glint.gates import Enforcer, EventLog
 
@@ -148,7 +151,7 @@ class BankServer:
         base = set(env.tools.get_tools())
         assist_environment(env, DOMAIN, s.enforcer)
         s.env = env
-        s.published = set(env.tools.get_tools()) if self.decision_tools else base
+        s.published = set(env.tools.get_tools()) if self.decision_tools else base | {PLAN_TOOL}
 
     def load_scenario(self, sid: str | None, task_id: str) -> tuple[str, bool]:
         """A fresh environment at the task's initial state (the base database for an empty task_id). Returns only the
@@ -182,7 +185,7 @@ class BankServer:
                 schema = tool.openai_schema["function"]
                 out.append(types.Tool(name=name, description=schema.get("description") or "",
                                       input_schema=schema["parameters"], annotations=types.ToolAnnotations(
-                                          read_only_hint=not toolkit.tool_mutates_state(name),
+                                          read_only_hint=name == PLAN_TOOL or not toolkit.tool_mutates_state(name),
                                           destructive_hint=toolkit.tool_type(name) == ToolType.WRITE)))
         return out + [
             types.Tool(name=LOAD, description=(

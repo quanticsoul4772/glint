@@ -13,18 +13,29 @@ The wrapper also keeps the environment's own record of the hidden READ tools the
 call_discoverable_agent_tool, a WRITE that τ²'s evaluator replays, so the replay rebuilds the same record and every
 gate decision replays unchanged. In replay a gate runs without a wall-clock timeout (core.run_gate).
 
+On banking it also keeps the dispute plans (`env.tools.glint_plans`: user id -> the latest plan_disputes result the
+agent got), which the plan gate judges each dispute on. τ²'s evaluator replays only mutating calls and skips READ
+tools, so a plan recorded from a READ call would be missing in replay and the gate would decide differently there.
+plan_disputes is therefore typed GENERIC with mutates_state=True (like τ²'s own give_discoverable_user_tool): τ²
+replays it, it never writes the database (the database hash is unchanged), and its result depends only on the
+database and its arguments, so the strict replay compare matches and the replay rebuilds the same plans. attach()
+puts plan_disputes on every gated banking toolkit, with or without the other decision tools: the gate needs it.
+
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": GateResult.message()} } to block a call (research/5-measurements/M0-results.md, M6a).
 """
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 
 from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
+from glint.assist.banking import PLAN_TOOL
+from glint.assist.tau2_tools import add_plan_tool
 from glint.gates.core import GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import GATED_GENERIC, REQUIRED_GATES, build_registry, manifest, parse_hidden_arguments
@@ -108,6 +119,25 @@ class Enforcer:
         if env.tools.tool_type(name) == ToolType.READ:
             env.tools.glint_reads.add(name)
 
+    def _record_plan(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
+        """Keep the dispute plan the agent got from plan_disputes; a later plan for the same user replaces it."""
+        if call.requestor != "assistant" or call.name != PLAN_TOOL or reply.error:
+            return
+        try:
+            plan = json.loads(reply.content)
+        except (TypeError, json.JSONDecodeError):
+            return
+        if not isinstance(plan, dict) or not plan.get("user_id") or not isinstance(plan.get("order"), list):
+            return
+        env.tools.glint_plans[plan["user_id"]] = plan
+        try:
+            self.events.emit("dispute_plan.recorded", {
+                "domain": self.domain, "user_id": plan["user_id"], "replay": replay,
+                "order": [[e["transaction_id"], e["eligible_for_provisional_credit"]] for e in plan["order"]],
+                **self.context()})
+        except Exception:
+            log.exception("the dispute_plan.recorded event was not logged")
+
     def attach(self, env):
         """Gate this environment instance's writes. Raises when a write tool of its toolkit has no gate."""
         if getattr(env, "glint_enforcer", None) is self:
@@ -118,13 +148,16 @@ class Enforcer:
         original_response, original_set_state = env.get_response, env.set_state
         state = {"replay": False}
 
-        env.tools.glint_reads = set()
+        if self.domain == "banking_knowledge":
+            add_plan_tool(env)
+        env.tools.glint_reads, env.tools.glint_plans = set(), {}
 
         def get_response(message: ToolCall) -> ToolMessage:
             write = self.write_call(env, message)
             if write is None:
                 reply = original_response(message)
                 self._record_read(env, message, reply)
+                self._record_plan(env, message, reply, state["replay"])
                 return reply
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:

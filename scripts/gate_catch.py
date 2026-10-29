@@ -8,7 +8,9 @@ and its cause labels (`final.json`). A run is replayed only when its set has a `
 For each run, a fresh environment is set to the task's initial state and gated, and EVERY tool call of the run (reads
 included, so the gates' own record of hidden lookups is rebuilt) is sent through `get_response` in order. An ungated
 twin takes the same calls in step. A deny of a call τ²'s own tool also rejected changes nothing and the replay goes
-on; any other deny stops it.
+on; any other deny stops it. The runs were recorded before plan_disputes existed: a banking run gets the plan made
+from its own dispute filings, in its order (glint.gates.replayplan), before its first filing, as an agent following
+the plan gate's Fix would; a plan-gate deny then means the run filed out of that plan's order or with other values.
 
 - A FAILED run is `caught` when the first deny is its first wrong or extra gated write, `denied_earlier` when the
   gates deny an earlier write labeled ok (a procedure gate stopping the run before its mistake, or a false refusal:
@@ -36,6 +38,7 @@ from tau2.registry import registry
 
 from glint import paths
 from glint.gates import Enforcer, EventLog
+from glint.gates.replayplan import with_plans
 
 CAUSES = {"a": "wrong policy value", "b": "procedure step skipped or out of order",
           "c": "extra write", "d": "did not use a needed tool or info", "e": "overflow or max steps",
@@ -83,8 +86,13 @@ def label_of(call: dict, labels: dict) -> str | None:
 def replay_run(dom: str, task, calls: list[dict], labels: dict, events: EventLog, enforcer: Enforcer) -> dict:
     env, twin = enforcer.attach(environment(dom, task)), environment(dom, task)
     first_bad, gated, also_rejected = None, 0, 0
-    for k, c in enumerate(calls):
-        call = ToolCall(id=f"r{k}", name=c["name"], arguments=c["arguments"], requestor=c["requestor"])
+    recorded = {f"r{k}": c for k, c in enumerate(calls)}
+    sent = [ToolCall(id=k, name=c["name"], arguments=c["arguments"], requestor=c["requestor"])
+            for k, c in recorded.items()]
+    if dom == "banking_knowledge":
+        sent = with_plans(sent)
+    for k, call in enumerate(sent):
+        c = recorded.get(call.id, {"i": -1, "name": call.name, "arguments": call.arguments})
         if not env.tools.has_tool(call.name) and not (env.user_tools and env.user_tools.has_tool(call.name)):
             continue
         if call.name != WRAPPER and env.tools.has_tool(call.name) and env.tools.tool_type(call.name) == ToolType.READ:

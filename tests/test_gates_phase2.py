@@ -13,6 +13,7 @@ from tau2.registry import registry
 from glint import paths
 from glint.gates import Enforcer, EventLog, Gate, GateRegistry, allow, rules
 from glint.gates import procedure as proc
+from glint.gates.replayplan import with_plans
 
 logger.remove()
 BANKING = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
@@ -38,16 +39,18 @@ def _name(action) -> str:
 
 def _play(env, task, tool: str, n: int = 0) -> dict:
     """Send τ²'s gold actions through the gated environment up to (not including) the n-th call of `tool`; return
-    that call's arguments. Every gold action on the way must be allowed."""
+    that call's arguments. Every gold action on the way must be allowed. Gold's disputes are planned before the
+    first one (glint.gates.replayplan), as an agent following the plan gate does."""
     seen = 0
-    for k, action in enumerate(task.evaluation_criteria.actions):
+    gold = [ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
+            for k, a in enumerate(task.evaluation_criteria.actions)]
+    for action in with_plans(gold):
         if _name(action) == tool:
             if seen == n:
                 args = action.arguments
                 return json.loads(args["arguments"]) if action.name == "call_discoverable_agent_tool" else dict(args)
             seen += 1
-        reply = env.get_response(ToolCall(id=f"g{k}", name=action.name, arguments=action.arguments,
-                                          requestor=action.requestor))
+        reply = env.get_response(action)
         assert "was NOT executed" not in str(reply.content), (action.name, reply.content)
     raise AssertionError(f"{tool} #{n} is not in {task.id}'s gold actions")
 
@@ -351,6 +354,7 @@ def test_a_dispute_waits_for_the_submitted_increase():
                               if _name(a) == rules.DISPUTE))
     assert _denied(_hidden(env, rules.DISPUTE, **dispute), "credit limit increase first")
     assert _ran(_hidden(env, rules.APPROVE, **approve))
+    _call(env, "plan_disputes", user_id=dispute["user_id"], transactions=[dispute])
     assert _ran(_hidden(env, rules.DISPUTE, **dispute))
 
 
