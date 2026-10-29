@@ -39,6 +39,10 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   Reason line, no consequence line).
   Against `banking-plan-gated`'s tools arm it separates the messages from the planning (decision 2026-10-29). Set
   key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS).
+- `banking-plan-v2-gated`: the tools arm of `banking-plan-gated` only, after the incorrect_amount dispute became a
+  planned partial refund of the overcharge with the customer's choice winning and neutral asking (#101, #102). It is
+  compared with `banking-plan-gated`'s arms from the same day (its base arm runs no gates, so these changes cannot
+  touch it).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -56,7 +60,8 @@ log reports it). Sets without the key keep τ²'s client unchanged, so their run
 it.
 
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
-                           banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|heldout2-gated|
+                           banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|banking-plan-v2-gated|
+                           heldout2-gated|
                            banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
@@ -213,6 +218,12 @@ SETS = {
                                  "data": MEASURE / "tools_ab_banking12_plan_terse_gated",
                                  "out": RESULTS / "tools-ab-banking12-gated-plan-terse.json",
                                  "save": "tools-ab-banking12-gated-plan-terse"},
+    # The overcharge partial refund with customer choice and neutral asking (#101, #102; decision 2026-10-29)
+    "banking-plan-v2-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
+                              "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
+                              "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v2_gated",
+                              "out": RESULTS / "tools-ab-banking12-gated-plan-v2.json",
+                              "save": "tools-ab-banking12-gated-plan-v2"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
