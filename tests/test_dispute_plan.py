@@ -380,3 +380,20 @@ def test_the_plan_gate_holds_an_overcharge_filing_to_the_planned_partial_refund(
     assert _denied(reply, "procedure.dispute_plan.values") and "resolution_requested 'full_refund'" in reply.content
     assert "partial_refund_amount 50.0" in reply.content
     assert _ran(_file(env, over))
+
+
+def test_a_customer_who_asks_for_a_full_refund_gets_one():
+    # the policy says to ask the customer (credit_cards_(general)_014); the partial default must not override them
+    env, _, gold = _gated("task_039")
+    over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
+    user = over["user_id"]
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
+    plan = json.loads(_call(env, "plan_disputes", user_id=user,
+                            transactions=[base | {"resolution_requested": "full_refund"}]).content)
+    entry = plan["order"][0]
+    assert entry["resolution_requested"] == "full_refund" and "partial_refund_amount" not in entry
+    assert "ask_user" not in entry
+    full = over | {"resolution_requested": "full_refund", "partial_refund_amount": None}
+    partial = _file(env, over)  # against a full-refund plan, the partial filing is the one refused
+    assert _denied(partial, "procedure.dispute_plan.values") and "the plan's 'full_refund'" in partial.content
+    assert _ran(_file(env, full))
