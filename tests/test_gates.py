@@ -467,6 +467,15 @@ def test_the_deny_message_carries_finding_facts_consequence_fix_and_verdict_and_
     assert args == {"order_id": "#W4817420", "reason": "no longer needed"}
 
 
+def test_the_gate_log_keeps_each_denys_facts_and_consequence():
+    env, events = _gated("retail")
+    reply = _call(env, "cancel_pending_order", order_id="#W4817420", reason="no longer needed")
+    denied = [f for f in _fired(events) if f["decision"] == "deny"]
+    assert len(denied) == 1 and denied[0]["consequence"] and denied[0]["consequence"] in reply.content
+    assert denied[0]["facts"] and all(f"\n- {f}" in reply.content for f in denied[0]["facts"])
+    assert all(f["facts"] == [] and f["consequence"] == "" for f in _fired(events) if f["decision"] == "allow")
+
+
 # ---- event log ----------------------------------------------------------------------------------------------------
 
 def test_every_decision_and_the_manifest_are_logged(tmp_path):
@@ -694,6 +703,12 @@ def test_a_retail_deny_on_the_arguments_says_a_corrected_call_can_succeed(monkey
     monkeypatch.setattr(retail_checks, "check_eligibility",
                         lambda *a, **k: {"allowed": False, "reasons": [reason], "rules": []})
     assert rules._retail_gate("modify_payment")(None, {"order_id": "#W1"}).consequence == getattr(rules, expected)
+
+
+def test_each_submit_verdict_has_its_own_consequence():
+    assert set(rules.SUBMIT_CONSEQUENCE) == {"reduce_amount", "ask_amount", "error"}
+    assert "largest increase" in rules.SUBMIT_CONSEQUENCE["reduce_amount"]
+    assert "largest" not in rules.SUBMIT_CONSEQUENCE["ask_amount"] + rules.SUBMIT_CONSEQUENCE["error"]
 
 
 def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_an_f_string():

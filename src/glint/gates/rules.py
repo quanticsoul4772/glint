@@ -225,6 +225,13 @@ def _increase_verdict(db, a: dict, amount: float) -> dict:
 
 
 CLI_SOURCE = "glint.assist.banking.check_credit_limit_increase"
+SUBMIT_CONSEQUENCE = {
+    "reduce_amount": ("Nothing was submitted. Tell the customer the largest increase their card allows and ask whether "
+                      "to submit that."),
+    "ask_amount": "Nothing was submitted. Ask the customer how large an increase they want, in dollars.",
+    "error": ("Nothing was submitted. The request names a card that is not this customer's; look up their cards "
+              "first."),
+}
 INCREASE_ORDER = "The increase goes submit, then the required lookups, then approve or deny; nothing was decided."
 
 
@@ -233,8 +240,7 @@ def _submit(db, a: dict) -> GateResult:
     if v["verdict"] in ("reduce_amount", "ask_amount", "error"):
         return deny(f"banking.cli.submit.{v['verdict']}", CLI_SOURCE, "the requested increase cannot be submitted "
                     "as given", "Submit an increase no larger than max_increase in the verdict, for an account of "
-                    "this user.", v, consequence="Tell the customer the largest increase their card allows and ask "
-                    "whether to submit that; nothing was submitted.", facts=v["reasons"])
+                    "this user.", v, consequence=SUBMIT_CONSEQUENCE[v["verdict"]], facts=v["reasons"])
     return allow(f"banking.cli.submit.{v['verdict']}", CLI_SOURCE, v)
 
 
