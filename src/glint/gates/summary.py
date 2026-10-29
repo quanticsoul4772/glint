@@ -9,18 +9,28 @@ early; the summary says how many error-limit endings had gate denies among their
 
 Only live decisions count: τ²'s evaluator replays every run's writes through the same gates (payload replay=true).
 The log is one file per data folder, so a resumed or released-and-rerun arm counts the decisions of every attempt.
+
+Deny outcomes (`rule_outcomes`): per rule, how many denies the agent got, how many it followed (`fix_followed`: the
+next relevant call matches the deny's fix), and how the runs with that deny ended. The failed runs' differences from
+τ²'s expected actions come in as `diffs`, computed by the caller with glint.inspect: this package never reads gold
+(the expected actions), so a gate cannot grade itself against the answer (tests/test_inspect_imports.py checks).
 """
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import Counter
 from pathlib import Path
 
 from glint.gates.core import DENY_PREFIX
+from glint.gates.rules import parse_hidden_arguments
+from glint.runlog import FAILED_RUNS, outcome
 
 ERROR_LIMIT = "too_many_errors"  # τ²'s TerminationReason.TOO_MANY_ERRORS
 UNPARSED = "unparsed"  # the gate name Enforcer.check logs for a hidden write whose arguments do not parse
+WRAPPER = "call_discoverable_agent_tool"  # τ²'s call of a hidden banking tool: `arguments` is a JSON string
+NAMING_ARGS = ("agent_tool_name", "discoverable_tool_name")  # unlock/give calls name a hidden tool, no arguments
 
 
 def ended_on_error_limit(sim: dict) -> bool:
@@ -120,3 +130,188 @@ class ErrorLimitAlerts:
         return (f"ALERT: {self.count} runs ended on τ²'s error limit ({ERROR_LIMIT}) with gate denies among their "
                 f"errors, tasks {dict(sorted(self.tasks.items()))}; latest {sim.get('task_id')} trial "
                 f"{sim.get('trial')}: {denied} of {errors} errors were gate denies")
+
+
+def gated_tools(events: list[dict]) -> set[str]:
+    """Every tool any gates.manifest in the log gates: all of the domain's writes, and the gated generic tools."""
+    tools = set()
+    for e in events:
+        if e["type"] == "gates.manifest":
+            tools.update(e["payload"].get("gated_generic") or [])
+            for gate in e["payload"]["gates"]:
+                tools.update(gate["tools"])
+    return tools
+
+
+def parse_deny(content: str) -> dict:
+    """rule_id, reason, fix and verdict from the deny message the agent saw (glint.gates.core.GateResult.message)."""
+    rule = re.search(r"\(rule (\S+), check", content)
+    lines = dict(line.split(": ", 1) for line in content.splitlines()[1:] if ": " in line)
+    return {"rule_id": rule.group(1) if rule else None, "reason": lines.get("Reason", ""), "fix": lines.get("Fix", ""),
+            "verdict": json.loads(lines["Verdict"]) if "Verdict" in lines else {}}
+
+
+def run_calls(sim: dict) -> list[dict]:
+    """The agent's tool calls in order, each with its reply: `tool` and `args` with a hidden banking tool unwrapped
+    (`args` None when its arguments do not parse), `named` (the hidden tool an unlock or give call names), `error`
+    (the environment or a gate refused it) and `deny` (the gate's rule_id, reason, fix and verdict). A deny reply
+    with no call before it is kept, with tool None."""
+    out, pending = [], []
+    for i, m in enumerate(sim.get("messages") or []):
+        if m.get("role") in ("assistant", "user"):
+            pending = [(m["role"], tc) for tc in m.get("tool_calls") or []]
+            continue
+        if m.get("role") != "tool":
+            continue
+        role, tc = pending.pop(0) if pending else ("assistant", None)
+        if role != "assistant":
+            continue
+        content = str(m.get("content") or "")
+        name, args = (tc["name"], tc.get("arguments") or {}) if tc else (None, None)
+        named = next((args[k] for k in NAMING_ARGS if args and args.get(k)), None)
+        if name == WRAPPER:
+            name, args = str(args.get("agent_tool_name", "")), parse_hidden_arguments(args.get("arguments", "{}"))
+        out.append({"index": i, "tool": name, "args": args, "named": named, "content": content,
+                    "error": bool(m.get("error")) or content.startswith("Error"),
+                    "deny": parse_deny(content) if content.startswith(DENY_PREFIX) else None})
+    return out
+
+
+def norm(value):
+    """A value as τ² compares it: a number as a float, a "True"/"False" string as the bool (τ² shows every bool to the
+    model as text, so a model can send it back as a string)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower() == "true"
+    return value
+
+
+def same_target(a: dict | None, b: dict | None) -> bool:
+    """Two calls act on the same record: every `*_id` argument both carry is equal."""
+    a, b = a or {}, b or {}
+    return all(norm(a[k]) == norm(b[k]) for k in a.keys() & b.keys() if k.endswith("_id"))
+
+
+def _number(text: str):
+    return float(text) if re.fullmatch(r"-?\d+(?:\.\d+)?", text) else text
+
+
+def expected_values(deny: dict, args: dict | None) -> dict:
+    """The values a deny's fix asks for: `with field value[, field value]` pairs in the fix ("Approve it with
+    new_credit_limit 5000.", "Apply amount 75."), and the verdict's values for the denied call's own arguments that
+    the fix names ("File the dispute with the card_action and eligible_for_provisional_credit values in the
+    verdict.")."""
+    out = {}
+    clause = re.search(r"\b(?:with|Apply) (.+?)\.?$", deny["fix"])
+    for part in re.split(r", | and ", clause.group(1)) if clause else []:
+        pair = re.fullmatch(r"([a-z]+(?:_[a-z0-9]+)*) '?([^' ]+?)'?", part.strip())
+        # a name ending in four digits is a hidden tool ("Unfreeze it with unfreeze_debit_card_3893 first"), not a field
+        if pair and ("_" in pair.group(1) or pair.group(1) in ("amount", "reason")) \
+                and not re.search(r"_\d{4}$", pair.group(1)):
+            out[pair.group(1)] = _number(pair.group(2))
+    for key, value in (deny.get("verdict") or {}).items():
+        if (key in (args or {}) and re.search(rf"\b{re.escape(key)}\b", deny["fix"]) and value is not None
+                and not isinstance(value, (dict, list))):
+            out.setdefault(key, value)
+    return out
+
+
+def fix_followed(call: dict, later: list[dict], writes: set[str]) -> tuple[bool, str]:
+    """Did the agent follow the deny's fix? Judged on the calls after the deny, by the kind of fix:
+    - "Do not ...": the denied tool is not called again on the same record;
+    - values to use (expected_values): the next call on the same record of the denied tool, or of a write that carries
+      one of those fields, carries them all;
+    - a tool to call first or instead ("Unlock and call X ..., then retry", "Unfreeze it with X first", "Activate it
+      with X"): X is called (or unlocked or given) before the denied tool is retried on the same record;
+    - anything else: the denied tool is retried on the same record and the retry is not refused.
+    Returns (followed, how)."""
+    deny, tool, args = call["deny"], call["tool"], call["args"]
+    retry = next((c for c in later if c["tool"] == tool and same_target(args, c["args"])), None)
+    if deny["fix"].startswith("Do not"):
+        return retry is None, "not retried" if retry is None else f"retried {tool}"
+    expected = expected_values(deny, args)
+    if expected:
+        nxt = next((c for c in later if same_target(args, c["args"]) and (c["tool"] == tool or (
+            c["tool"] in writes and expected.keys() & (c["args"] or {}).keys()))), None)
+        if nxt is None:
+            return False, "no later call on the same record"
+        wrong = sorted(k for k, v in expected.items() if norm((nxt["args"] or {}).get(k)) != norm(v))
+        return not wrong, f"{nxt['tool']} " + (f"still differs on {wrong}" if wrong else "with the fix values")
+    named = [t for t in re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", deny["fix"])
+             if t != tool and (t in writes or re.search(r"_\d{4}$", t))]
+    if named and re.search(r"\bfirst\b|then retry|^Activate it with|^Give the user", deny["fix"]):
+        before = later[:later.index(retry)] if retry is not None else later
+        hit = next((c for c in before if c["tool"] in named or c["named"] in named), None)
+        return hit is not None, f"called {hit['tool']}" if hit else f"did not call {named}"
+    if retry is None:
+        return False, "not retried"
+    return not retry["error"], f"retry of {tool} {'refused' if retry['error'] else 'executed'}"
+
+
+def deny_followups(sim: dict, writes: set[str]) -> list[dict]:
+    """Every gate deny in one run, in order: its rule_id, reason and fix, the denied call, the next write the agent
+    made, and whether it followed the fix (fix_followed)."""
+    calls = run_calls(sim)
+    out = []
+    for k, call in enumerate(calls):
+        if call["deny"] is None:
+            continue
+        later = calls[k + 1:]
+        nxt = next((c for c in later if c["tool"] in writes), None)
+        followed, how = fix_followed(call, later, writes)
+        out.append({"rule_id": call["deny"]["rule_id"], "reason": call["deny"]["reason"], "fix": call["deny"]["fix"],
+                    "tool": call["tool"], "args": call["args"], "index": call["index"],
+                    "next_write": None if nxt is None else {"tool": nxt["tool"], "args": nxt["args"],
+                                                           "refused": nxt["error"]},
+                    "fix_followed": followed, "how": how})
+    return out
+
+
+def rule_outcomes(events: list[dict], sims: list[dict], diffs: dict | None = None) -> dict:
+    """Per rule: denies, fix_followed, and the runs with that deny by how they ended (passed, failed, not a result).
+    `diffs` maps (task_id, trial) to a failed run's compact diff (glint.inspect.compact), from which the failed runs'
+    differing fields are counted."""
+    writes, table = gated_tools(events), {}
+    for sim in sims:
+        followups = deny_followups(sim, writes)
+        kind = outcome(sim)
+        ended = "passed" if kind == "pass" else "failed" if kind in FAILED_RUNS else "not_result"
+        diff = (diffs or {}).get((str(sim.get("task_id")), int(sim.get("trial") or 0)))
+        for rule in sorted({f["rule_id"] for f in followups}, key=str):
+            row = table.setdefault(rule, {"denies": 0, "fix_followed": 0, "passed": 0, "failed": 0, "not_result": 0,
+                                          "failed_fields": Counter(), "failed_missing": 0, "failed_extra": 0,
+                                          "failed_not_diffed": 0})
+            mine = [f for f in followups if f["rule_id"] == rule]
+            row["denies"] += len(mine)
+            row["fix_followed"] += sum(f["fix_followed"] for f in mine)
+            row[ended] += 1
+            row["failed_not_diffed"] += ended == "failed" and diffs is not None and diff is None
+            if ended == "failed" and diff:
+                row["failed_fields"].update(diff["fields"])
+                row["failed_missing"] += diff["missing"]
+                row["failed_extra"] += diff["extra"]
+    return dict(sorted(table.items(), key=lambda kv: str(kv[0])))
+
+
+def outcome_lines(label: str, table: dict, top: int = 3) -> list[str]:
+    """One GATE OUTCOMES line per rule (rule_outcomes)."""
+    if not table:
+        return [f"GATE OUTCOMES: {label}: no denies in the saved runs"]
+    lines = []
+    for rule, r in table.items():
+        line = (f"GATE OUTCOMES: {label}: {rule}: {r['denies']} denies, fix followed {r['fix_followed']}; runs with "
+                f"this deny: {r['passed']} passed, {r['failed']} failed")
+        if r["not_result"]:
+            line += f", {r['not_result']} not results"
+        diffs = [f"{k} x{n}" for k, n in r["failed_fields"].most_common(top)]
+        diffs += [f"missing {r['failed_missing']}"] * bool(r["failed_missing"])
+        diffs += [f"extra {r['failed_extra']}"] * bool(r["failed_extra"])
+        if r["failed"] and diffs:
+            line += f" (failed runs differ on: {', '.join(diffs)})"
+        if r["failed_not_diffed"]:
+            line += f"; {r['failed_not_diffed']} failed runs not diffed (task not in τ²'s tasks)"
+        lines.append(line)
+    return lines

@@ -1,7 +1,9 @@
 """The GATES line tools_ab prints at a gated arm's end, for a set's data folder that already exists (finished or not).
 
 For every gate log `gates-<domain>.sqlite` in the folder, the arm that wrote it is `tools-<domain>.json` (only the tools
-arm is gated). Both are opened read-only; nothing is written into the folder.
+arm is gated). Both are opened read-only; nothing is written into the folder. After each GATES line, one GATE OUTCOMES
+line per rule: its denies, how many of them the agent followed, and how the runs with that deny ended, with the fields
+the failed ones got wrong against τ²'s expected writes (glint.inspect).
 
 Usage: python scripts/gate_summary.py DATA_FOLDER
 """
@@ -9,6 +11,7 @@ import json
 import sys
 from pathlib import Path
 
+from glint import inspect
 from glint.gates import summary
 
 
@@ -24,7 +27,10 @@ def folder_lines(data: Path) -> list[str]:
             raise FileNotFoundError(f"{arm} is missing: the tools arm of {domain} has not finished, so its runs are "
                                     "not saved in the data folder")
         sims = json.loads(arm.read_text(encoding="utf-8"))["simulations"]
-        lines.append(summary.line(f"tools {domain}", summary.summarize(summary.read_log(log), sims)))
+        events = summary.read_log(log)
+        lines.append(summary.line(f"tools {domain}", summary.summarize(events, sims)))
+        lines += summary.outcome_lines(f"tools {domain}", summary.rule_outcomes(events, sims,
+                                                                                inspect.arm_diffs(domain, sims)))
     return lines
 
 
