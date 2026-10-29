@@ -657,7 +657,12 @@ def test_the_terse_wording_keeps_the_decision_and_uses_the_layout_before_the_pla
     lines = terse.content.splitlines()
     assert lines[0].startswith(core.DENY_PREFIX + " (rule retail.cancel, check ")
     assert [line.split(":", 1)[0] for line in lines[1:]] == ["Reason", "Purpose", "Fix", "Verdict"]
-    assert summary.parse_deny(terse.content) == summary.parse_deny(plain.content)
+    plain_deny, terse_deny = summary.parse_deny(plain.content), summary.parse_deny(terse.content)
+    facts = [line[2:] for line in plain.content.splitlines() if line.startswith("- ")]
+    assert facts and terse_deny["reason"] == "; ".join([plain_deny["reason"], *facts])
+    assert {k: v for k, v in terse_deny.items() if k != "reason"} == {
+        k: v for k, v in plain_deny.items() if k != "reason"}
+    assert "Why it matters" not in terse.content
     assert [e["payload"]["wording"] for e in terse_events.events("gates.manifest")] == ["terse"]
     def decisions(events):
         return [{k: v for k, v in f.items() if k != "duration_ms"} for f in _fired(events)]
@@ -675,3 +680,17 @@ def test_the_terse_wording_keeps_the_decision_and_uses_the_layout_before_the_pla
     assert tools_ab._enforcer(terse_set, "retail", tmp_path).wording == "terse"
     (tmp_path / "plan").mkdir()
     assert tools_ab._enforcer(plan, "retail", tmp_path / "plan").wording == "plain"
+
+
+def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_an_f_string():
+    # "...{{a, " f"..." "b}} ..." : the f-string part unescapes {{ but a plain string joined to it keeps }} as typed,
+    # and the agent read "contacted_merchant}}" in procedure.dispute_plan.none's fix (2026-10-29)
+    import ast
+    from pathlib import Path
+
+    for path in sorted((Path(__file__).parents[1] / "src" / "glint" / "gates").glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.JoinedStr):
+                for part in node.values:
+                    if isinstance(part, ast.Constant):
+                        assert "{{" not in part.value and "}}" not in part.value, (path.name, node.lineno, part.value)
