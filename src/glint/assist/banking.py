@@ -207,6 +207,9 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
 
 PLAN_TOOL = "plan_disputes"
 OVERCHARGE = "incorrect_amount"
+OVERCHARGE_NOTE = ("Ask what the customer should have been charged, as written; do not offer or suggest a full refund. "
+                   "Plan resolution_requested 'full_refund' only when the customer asks for the whole charge back "
+                   "without being offered it.")
 
 
 def overcharge(charged: float, item: dict) -> tuple[dict | None, str]:
@@ -321,6 +324,9 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
         if contacted is None:
             questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")
         if reason == OVERCHARGE:
+            # for the agent, not the customer: Glimmer's "full refund for all?" was agreed to and filed as the
+            # customer's choice (039-041, 2026-10-29); a suggested full refund is not the customer asking for one
+            entry["note"] = OVERCHARGE_NOTE
             if refund is None:
                 questions.append(f"What amount should you have been charged for the {tid} charge "
                                  f"(${amount[tid]:,.2f})?")

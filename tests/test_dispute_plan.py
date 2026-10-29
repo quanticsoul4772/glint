@@ -397,3 +397,16 @@ def test_a_customer_who_asks_for_a_full_refund_gets_one():
     partial = _file(env, over)  # against a full-refund plan, the partial filing is the one refused
     assert _denied(partial, "procedure.dispute_plan.values") and "the plan's 'full_refund'" in partial.content
     assert _ran(_file(env, full))
+
+
+def test_every_overcharge_entry_tells_the_agent_not_to_suggest_a_full_refund():
+    from glint.assist import banking
+
+    env, _, gold = _gated("task_039")
+    over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
+    plan = json.loads(_call(env, "plan_disputes", user_id=over["user_id"], transactions=_items(gold)).content)
+    notes = {e["transaction_id"]: e.get("note") for e in plan["order"]}
+    assert notes[over["transaction_id"]] == banking.OVERCHARGE_NOTE and "do not offer or suggest" in notes[
+        over["transaction_id"]]
+    assert all(n is None for t, n in notes.items() if t != over["transaction_id"])
+    assert "full refund" not in str(plan["ask_user"]).lower()  # the question for the customer stays neutral
