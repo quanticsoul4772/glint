@@ -20,9 +20,11 @@ from glint.gates import (
     GateResult,
     allow,
     assert_required,
+    core,
     deny,
     rules,
     run_gate,
+    summary,
 )
 from glint.gates.core import NO_RULE
 
@@ -30,9 +32,9 @@ logger.remove()
 BANKING_TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.json"
 
 
-def _gated(domain: str, task=None):
+def _gated(domain: str, task=None, wording: str = "plain"):
     events = EventLog(":memory:")
-    enforcer = Enforcer(domain, events)
+    enforcer = Enforcer(domain, events, wording=wording)
     if domain == "banking_knowledge":
         env = registry.get_env_constructor(domain)(retrieval_variant="bm25_grep", task=task)
     else:
@@ -574,7 +576,8 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
     assert enforcer.events.path.endswith("gates-retail.sqlite") and enforcer.context() == {
         "task_id": "unknown", "trial": "unknown"}
     assert "banking-test-gated" not in tools_ab.SETS  # the banking test split is read once (decision 2026-10-28)
-    for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "heldout2-gated"):
+    for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "banking-plan-terse-gated",
+                 "heldout2-gated"):
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
@@ -642,3 +645,33 @@ def test_a_deny_without_its_consequence_or_facts_is_kept_as_a_deny_that_names_wh
                                                                           facts=["a", "b"])), None, {})
     assert (full.consequence, full.facts, full.purpose) == ("c", ("a", "b"), "purpose")
     assert "\nFacts it used:\n- a\n- b\nWhy it matters: c\nWhat to do next: f\n" in full.message()
+
+
+def test_the_terse_wording_keeps_the_decision_and_uses_the_layout_before_the_plain_messages(tmp_path):
+    import tools_ab
+
+    args = {"order_id": "#W4817420", "reason": "no longer needed"}
+    (plain_env, plain_events), (terse_env, terse_events) = _gated("retail"), _gated("retail", wording="terse")
+    plain, terse = _call(plain_env, "cancel_pending_order", **args), _call(terse_env, "cancel_pending_order", **args)
+    assert plain.error and terse.error and terse.content != plain.content
+    lines = terse.content.splitlines()
+    assert lines[0].startswith(core.DENY_PREFIX + " (rule retail.cancel, check ")
+    assert [line.split(":", 1)[0] for line in lines[1:]] == ["Reason", "Purpose", "Fix", "Verdict"]
+    assert summary.parse_deny(terse.content) == summary.parse_deny(plain.content)
+    assert [e["payload"]["wording"] for e in terse_events.events("gates.manifest")] == ["terse"]
+    def decisions(events):
+        return [{k: v for k, v in f.items() if k != "duration_ms"} for f in _fired(events)]
+
+    assert decisions(terse_events) == decisions(plain_events)
+    with pytest.raises(ValueError, match="unknown deny wording"):
+        Enforcer("retail", EventLog(":memory:"), wording="loud")
+    with pytest.raises(ValueError, match="unknown deny wording"):
+        core.GateResult("deny").message("loud")
+    terse_set, plan = tools_ab.SETS["banking-plan-terse-gated"], tools_ab.SETS["banking-plan-gated"]
+    assert terse_set["arms"] == ("tools",) and terse_set["deny_wording"] == "terse" and "deny_wording" not in plan
+    assert {k: terse_set[k] for k in ("tasks", "trials", "gates", "glimmer_usd")} == {
+        k: plan[k] for k in ("tasks", "trials", "gates", "glimmer_usd")}
+    assert all(terse_set[k] != plan[k] for k in ("data", "out", "save"))
+    assert tools_ab._enforcer(terse_set, "retail", tmp_path).wording == "terse"
+    (tmp_path / "plan").mkdir()
+    assert tools_ab._enforcer(plan, "retail", tmp_path / "plan").wording == "plain"

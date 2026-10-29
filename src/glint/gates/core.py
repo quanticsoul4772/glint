@@ -19,6 +19,10 @@ from typing import Any, Literal
 log = logging.getLogger("glint.gates")
 
 Decision = Literal["allow", "deny"]
+# How a deny reads to the agent: "plain" (what the check found, the facts it used, why it matters, what to do next;
+# since #87) or "terse" (#86's layout: Reason, Purpose, Fix and Verdict, without the facts and consequence lines).
+# "terse" exists for the measurement that separates dispute planning from the plain-language messages.
+WORDINGS = ("plain", "terse")
 # A gate reads a few database rows; 60 s is far beyond any real evaluation. A live timeout is the one way a live
 # decision can differ from τ²'s replay (which waits without a clock, see run_gate), so it is logged as an ERROR.
 DEFAULT_TIMEOUT_S = 60.0
@@ -50,9 +54,14 @@ class GateResult:
     def allowed(self) -> bool:
         return self.decision == "allow"
 
-    def message(self) -> str:
+    def message(self, wording: str = "plain") -> str:
         """The tool result the agent sees on a deny: deterministic, so τ²'s replay of the call matches it."""
         verdict = json.dumps(self.details, sort_keys=True, default=str)
+        if wording == "terse":
+            return (f"{DENY_PREFIX} (rule {self.rule_id}, check {self.source}) and was NOT executed."
+                    f"\nReason: {self.reason}\nPurpose: {self.purpose}\nFix: {self.fix}\nVerdict: {verdict}")
+        if wording != "plain":
+            raise ValueError(f"unknown deny wording {wording!r}; one of {WORDINGS}")
         facts = "".join(f"\n- {f}" for f in self.facts)
         return (f"{DENY_PREFIX} and was NOT executed. Nothing changed.\nRule: {self.rule_id} ({self.source})"
                 f"\nWhat the check found: {self.reason}\nFacts it used:{facts}\nWhy it matters: {self.consequence}"
