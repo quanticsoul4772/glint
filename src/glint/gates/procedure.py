@@ -203,7 +203,7 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     if plan is None:
         return deny("procedure.dispute_plan.none", PLAN_SOURCE, "no dispute plan was made for this customer in this "
                     "conversation", f"Call {PLAN_TOOL}(user_id, transactions=[{{transaction_id, dispute_reason, "
-                    "contacted_merchant}} for EVERY transaction the customer wants disputed]), then file the "
+                    "contacted_merchant} for EVERY transaction the customer wants disputed]), then file the "
                     "disputes in its order with its eligible_for_provisional_credit values.",
                     {"user_id": user, "transaction_id": tid},
                     consequence=f"{CREDIT_ORDER} Plan every dispute the customer asked for in one call.",

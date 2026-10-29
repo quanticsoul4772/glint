@@ -35,7 +35,8 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 - `banking-plan-gated`: `banking-p2-gated` again after dispute planning (#85, #86) and the plain-language deny
   messages (#87), in its own folder. It measures the two changes together, not either one alone.
 - `banking-plan-terse-gated`: the tools arm of `banking-plan-gated` only, with `deny_wording` "terse": the same gates
-  and dispute planning, with each deny in #86's layout (Reason, Purpose, Fix, Verdict; no facts or consequence lines).
+  and dispute planning, with each deny in #86's layout (Reason, Purpose, Fix, Verdict; the facts joined into the
+  Reason line, no consequence line).
   Against `banking-plan-gated`'s tools arm it separates the messages from the planning (decision 2026-10-29). Set
   key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
