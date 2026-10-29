@@ -120,6 +120,7 @@ def test_logwatch_restarts_an_ended_stream_and_drops_replayed_lines():
     watch.history, watch.lines, watch.restarts, watch._seen = [], [], 0, set()
     watch._buf, watch._closed, watch._proc, watch._restart_s = watch.lines, False, None, 0.05
     watch._lock = threading.Lock()
+    watch.suppressed, watch.last_periodic, watch._echoed, watch.stage_repeats = 0, None, set(), 0
     watch._cmd = [sys.executable, "-c", "print('INFO Loading weights'); print('KV cache size: 950,814 tokens')"]
     watch._env = dict(os.environ)
     threading.Thread(target=watch._run, daemon=True).start()
@@ -566,6 +567,7 @@ def _watch():
     watch.history, watch.lines, watch._seen, watch.restarts = [], [], set(), 0
     watch._buf, watch._lock, watch._closed, watch._proc = watch.lines, threading.Lock(), False, None
     watch.suppressed, watch.last_periodic = 0, None
+    watch._echoed, watch.stage_repeats = set(), 0
     return watch
 
 
@@ -589,7 +591,57 @@ def test_vllm_stats_lines_are_counted_not_echoed_and_other_lines_still_print(cap
     watch._take(STATS.format(30, 9).replace("INFO", "ERROR"))
     assert "ERROR [loggers.py:123]" in capsys.readouterr().err and watch.suppressed == 3
     watch.__exit__(None, None, None)
-    assert f"3 periodic stats lines not echoed; last: {STATS.format(20, 1300)}" in capsys.readouterr().err
+    assert (f"3 periodic stats lines and 0 repeated boot stage lines not echoed; last stats: {STATS.format(20, 1300)}"
+            in capsys.readouterr().err)
+
+
+def test_boot_stages_echo_once_per_container_and_trouble_every_time(capsys):
+    watch = _watch()
+    kv = "2026-10-29T14:35:{:02d} {} (EngineCore pid={}) INFO GPU KV cache size: 1,068,306 tokens"
+    loading = "2026-10-29T14:35:{:02d} {} (Worker pid={}) INFO Loading model from scratch"
+    oom = "2026-10-29T14:36:00 ta-01 (EngineCore pid=25) torch.OutOfMemoryError: CUDA out of memory"
+    for line in (loading.format(1, "ta-01", 25), loading.format(2, "ta-01", 26), loading.format(3, "ta-01", 27),
+                 kv.format(4, "ta-01", 25), kv.format(5, "ta-01", 25), oom, oom.replace("14:36:00", "14:36:01"),
+                 kv.format(9, "ta-02", 31)):  # a new container (a restart) shows its boot again
+        watch._take(line)
+    err = capsys.readouterr().err
+    assert err.count("Loading model") == 1 and err.count("KV cache size") == 2  # ta-01 once, ta-02 once
+    assert err.count("OutOfMemoryError") == 2  # trouble is never held back
+    assert watch.stage_repeats == 3 and len(watch.lines) == 8
+
+
+def test_health_polls_print_on_a_change_or_once_a_minute(monkeypatch, capsys):
+    import httpx
+
+    from glint import glimmer_serve
+
+    clock = {"t": 0.0}
+    outcomes = iter([httpx.ReadTimeout("t")] * 9 + [httpx.ConnectError("c")] + [200])
+
+    class Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def get(self, url):
+            nxt = next(outcomes)
+            if isinstance(nxt, Exception):
+                raise nxt
+            return type("R", (), {"status_code": nxt})()
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    monkeypatch.setattr(glimmer_serve.time, "time", lambda: clock["t"])
+    monkeypatch.setattr(glimmer_serve.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
+    glimmer_serve.wait_ready("https://x.modal.run", "k", "s", poll_s=10.0)
+    err = capsys.readouterr().err
+    # 9 ReadTimeouts 10 s apart: the first, then one at 60 s; the change to ConnectError; then READY
+    assert err.count("/health -> ReadTimeout") == 2 and err.count("/health -> ConnectError") == 1
+    assert "READY after 100 s" in err
 
 
 def test_crash_detection_reads_through_the_held_back_stats_lines(capsys):

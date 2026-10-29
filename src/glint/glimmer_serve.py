@@ -210,6 +210,9 @@ def say(msg: str) -> None:
     print(f"[serve {time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
 
 
+HEALTH_SAY_EVERY_S = 60.0
+
+
 def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 900.0, poll_s: float = 10.0,
                failed=None, request_timeout_s: float = 30.0, log_lines=None) -> float:
     """Block until the endpoint's vLLM answers GET /health with 200; returns the seconds waited.
@@ -229,6 +232,8 @@ def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 90
     headers = {"Modal-Key": token_id, "Modal-Secret": token_secret}
     t0 = time.time()
     say(f"waiting for {url}/health (limit {timeout_s:.0f} s, poll every {poll_s:.0f} s)")
+    # a poll line when the outcome changes, else at most one a minute (a boot printed a ReadTimeout every 40 s)
+    last_outcome, last_said = None, t0
     with httpx.Client(headers=headers, follow_redirects=False, timeout=request_timeout_s) as client:
         while True:
             try:
@@ -245,7 +250,9 @@ def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 90
             except httpx.HTTPError as e:  # booting: refused or reset, or still queued past this poll's timeout
                 outcome = type(e).__name__
             seen = f", container log lines {log_lines()}" if log_lines is not None else ""
-            say(f"+{time.time() - t0:4.0f} s  /health -> {outcome}{seen}")
+            if outcome != last_outcome or time.time() - last_said >= HEALTH_SAY_EVERY_S:
+                say(f"+{time.time() - t0:4.0f} s  /health -> {outcome}{seen}")
+                last_outcome, last_said = outcome, time.time()
             if failed is not None and (reason := failed()):
                 say(f"FAILED: {reason}")
                 raise RuntimeError(f"{url} failed to start: {reason}")
@@ -256,11 +263,12 @@ def wait_ready(url: str, token_id: str, token_secret: str, timeout_s: float = 90
 
 
 FAILURE_MARKERS = ("Engine core initialization failed", "Runner failed with exception")
-# vLLM boot stages and trouble, echoed live as they appear in the container log
+# vLLM trouble, echoed every time it appears in the container log
+TROUBLE_MARKERS = FAILURE_MARKERS + ("ERROR", "Error:", "Traceback", "Killed", "OutOfMemory", "out of memory")
+# vLLM boot stages, echoed once per container (about 34 echoed lines per boot before 2026-10-29, most of them repeats)
 STAGE_MARKERS = ("version ", "Resolved architecture", "Loading model", "Loading weights took", "Model loading took",
                  "torch.compile", "Compiling", "compile range", "Capturing CUDA graph", "Graph capturing finished",
-                 "KV cache", "Maximum concurrency", "init engine", "Starting vLLM", "Application startup complete",
-                 "ERROR", "Error:", "Traceback", "Killed", "OutOfMemory", "out of memory")
+                 "KV cache", "Maximum concurrency", "init engine", "Starting vLLM", "Application startup complete")
 # vLLM's periodic stats line (every 10 s while it serves: "Engine 000: Avg prompt throughput: ... GPU KV cache usage"),
 # which "KV cache" above would echo: it is counted and kept in `lines`, not echoed, and summarized when the watch ends
 PERIODIC_MARKERS = ("Avg prompt throughput", "Avg generation throughput", "SpecDecoding metrics")
@@ -283,6 +291,9 @@ class LogWatch:
         self.lines: list[str] = []
         self.restarts = 0
         self.suppressed, self.last_periodic = 0, None  # periodic stats lines not echoed (see PERIODIC_MARKERS)
+        # boot stage lines echo once per (container, stage); repeats (vLLM's workers log each stage again) are counted
+        self._echoed: set[tuple[str, str]] = set()
+        self.stage_repeats = 0
         self._seen: set[str] = set()
         self._buf = self.lines
         self._cmd = [modal_cli, "app", "logs", app_name, "-f", "--timestamps", "--show-container-id"]
@@ -329,8 +340,20 @@ class LogWatch:
             self.suppressed += 1
             self.last_periodic = line.strip()
             return
-        if any(m in line for m in STAGE_MARKERS + FAILURE_MARKERS):
+        if any(m in line for m in TROUBLE_MARKERS):  # every error, crash and out-of-memory line, every time
             say(f"[vllm] {line.strip()[:240]}")
+            return
+        stage = next((m for m in STAGE_MARKERS if m in line), None)
+        if stage is None:
+            return
+        # once per container and stage: a restarted container (a new id) shows its boot again (a mid-run restart
+        # was only visible as a second KV cache line, banking-p2-gated); vLLM's workers repeating a stage do not
+        container = (re.search(r"\bta-\w+", line) or re.search(r"$", line)).group(0)
+        if (container, stage) in self._echoed:
+            self.stage_repeats += 1
+            return
+        self._echoed.add((container, stage))
+        say(f"[vllm] {line.strip()[:240]}")
 
     @staticmethod
     def _periodic(line: str) -> bool:
@@ -362,7 +385,8 @@ class LogWatch:
         return self
 
     def __exit__(self, *exc):
-        say(f"[vllm] {self.suppressed} periodic stats lines not echoed; last: {self.last_periodic or 'none'}")
+        say(f"[vllm] {self.suppressed} periodic stats lines and {self.stage_repeats} repeated boot stage lines not "
+            f"echoed; last stats: {self.last_periodic or 'none'}")
         with self._lock:
             self._closed = True
             proc = self._proc
