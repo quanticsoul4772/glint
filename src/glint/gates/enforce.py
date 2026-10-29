@@ -37,7 +37,7 @@ from tau2.environment.toolkit import ToolType
 
 from glint.assist.banking import PLAN_TOOL
 from glint.assist.tau2_tools import add_plan_tool
-from glint.gates.core import CANNOT_DECIDE, GateResult, assert_required, deny, run_gate
+from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import GATED_GENERIC, REQUIRED_GATES, build_registry, manifest, parse_hidden_arguments
 
@@ -52,11 +52,14 @@ def write_tools(toolkit) -> set[str]:
 
 
 class Enforcer:
-    def __init__(self, domain: str, events: EventLog, context: Callable[[], dict] | None = None):
-        self.domain, self.events, self.context = domain, events, context or (dict)
+    def __init__(self, domain: str, events: EventLog, context: Callable[[], dict] | None = None,
+                 wording: str = "plain"):
+        if wording not in WORDINGS:
+            raise ValueError(f"unknown deny wording {wording!r}; one of {WORDINGS}")
+        self.domain, self.events, self.context, self.wording = domain, events, context or (dict), wording
         self.registry = build_registry(domain)
         assert_required(self.registry, REQUIRED_GATES[domain], f"gates for {domain}")
-        self.events.emit("gates.manifest", manifest(domain, self.registry))
+        self.events.emit("gates.manifest", manifest(domain, self.registry) | {"wording": wording})
 
     def write_call(self, env, call: ToolCall) -> tuple[str, dict | None] | None:
         """(write tool, its arguments) when `call` is an assistant write, else None. Arguments are None when a hidden
@@ -166,7 +169,7 @@ class Enforcer:
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
                 return original_response(message)
-            return ToolMessage(id=message.id, content=result.message(), requestor=message.requestor,
+            return ToolMessage(id=message.id, content=result.message(self.wording), requestor=message.requestor,
                                role="tool", error=True)
 
         def set_state(*args, **kwargs):  # τ²'s evaluator replays the trajectory here: those events say replay=true
