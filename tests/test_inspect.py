@@ -226,7 +226,7 @@ def test_run_events_put_a_failed_runs_diff_in_its_record_and_line_and_print_diff
     assert "diff" not in records[1]  # a passed run is not diffed
     assert records[2]["diff_error"].startswith("KeyError") and "diff" not in records[2]
     err = capsys.readouterr().err
-    assert "task_041 trial 0: FAIL (user_stop, 1 s, " in err and "diff: 1 field (dispute_reason x1)" in err
+    assert "task_041 trial 0: FAIL (τ²: user_stop, 1 s, " in err and "diff: 1 field (dispute_reason x1)" in err
     assert "WARNING: no diff (KeyError" in err
     assert "DIFFS: 1 failed runs diffed against τ²'s expected writes; top fields {'dispute_reason': 1}; top tools " \
            f"{{'{DISPUTE}': 3}}" in err

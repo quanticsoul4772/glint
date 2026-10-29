@@ -2,6 +2,7 @@
 Nothing here calls a model or Modal."""
 import json
 import types
+from pathlib import Path
 
 import pytest
 from loguru import logger
@@ -64,6 +65,7 @@ def test_generate_writes_both_arms_and_warns_about_what_is_not_a_clean_result(st
     assert (cfg["data"] / "commit.txt").read_text(encoding="utf-8") == "abc123"
     out = capsys.readouterr().out
     assert "base retail: 1 of 2 runs ended in an infrastructure error" in out
+    assert "--rerun-infrastructure-errors (and --allow-mixed-code if the code changed)" in out
     assert "tools retail: 1 simulations, expected 2" in out
     assert "tools retail: 1 of 1 runs failed in Glint's own code" in out
 
@@ -527,9 +529,19 @@ def test_the_run_log_leaves_out_taus_resume_skips_and_repeated_errors_but_keeps_
                        "more of the same error", style="bold red"))
     console.print(Text("Status: 73/80 complete. Avg reward: 0.16 (N=64). 7 running: task_022.1(1068s)", style="cyan"))
     console.print(Text("  Retry 1/2 for task task_022: boom", style="yellow"))
+    console.print(Text("3/12 (trial 2/4). Running task task_039, trial 2", style="bold green"))
     out = capsys.readouterr().out
-    assert "Skipping" not in out and "failed permanently" not in out
+    assert "Skipping" not in out and "failed permanently" not in out and "Running task" not in out
     assert "Status: 73/80 complete" in out and "Retry 1/2 for task task_022" in out
+    # one Status line every STATUS_EVERY_S; the first is kept
+    clock = [1000.0]
+    console._clock = lambda: clock[0]
+    console._last_status = None
+    for t, n in ((1000.0, 74), (1000.0 + tools_ab.STATUS_EVERY_S - 1, 75), (1000.0 + tools_ab.STATUS_EVERY_S, 76)):
+        clock[0] = t
+        console.print(Text(f"Status: {n}/80 complete. Avg reward: 0.16 (N=64). 6 running: task_022.1(1068s)"))
+    out = capsys.readouterr().out
+    assert "Status: 74/80" in out and "Status: 75/80" not in out and "Status: 76/80" in out
     # the evaluation table after each simulation is not printed; the run itself is untouched
     task = types.SimpleNamespace(id="t1")
     assert batch.run_with_retry(lambda: "sim", task=task, trial=2, console_display=True) == "sim"
@@ -572,3 +584,13 @@ def test_only_taus_two_failed_run_errors_leave_the_run_log_and_the_simulation_lo
     # a file handler gets both records: the filter is on the run log only. In a real run the simulation's task.log
     # keeps generate:417; run_with_retry logs after τ² removes that handler, and its cause is in info.error
     assert "generate:417" in kept and "run_with_retry:101" in kept
+
+
+def test_the_run_log_drops_taus_cause_free_simulation_loop_warning():
+    # the vendored τ² line the filter names: a τ² upgrade that moves it fails here instead of letting it back in
+    source = (Path(tools_ab.__file__).resolve().parents[2] / "vendor" / "tau2-bench" / "src" / "tau2" /
+              "orchestrator" / "orchestrator.py").read_text(encoding="utf-8").splitlines()
+    assert source[286].strip() == "logger.warning(" and "emergency cleanup" in source[288]
+    record = {"name": "tau2.orchestrator.orchestrator", "function": "run", "line": 287}
+    assert ("tau2.orchestrator.orchestrator", "run", 287) in tools_ab.RUN_LOG_DROPPED
+    assert not tools_ab.run_log_filter(record | {"level": types.SimpleNamespace(name="WARNING")})

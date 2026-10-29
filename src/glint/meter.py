@@ -40,8 +40,12 @@ DEFAULT_LEDGER = paths.LEDGER
 def register_litellm_prices() -> None:
     """Give LiteLLM the per-token prices of the models in META_PRICES. Without them every call logs "This model isn't
     mapped yet" at ERROR level (one line per call in a run log) and τ²'s cost fields read 0. The meter does not use
-    LiteLLM's cost; this is for clean logs and τ²'s own bookkeeping."""
+    LiteLLM's cost; this is for clean logs and τ²'s own bookkeeping. LiteLLM's debug boilerplate is turned off first:
+    register_model prints a "Provider List" block for every entry it cannot map (18 at the start of every run log
+    until 2026-10-29)."""
     import litellm
+
+    litellm.suppress_debug_info = True
 
     entries = {}
     for name, p in META_PRICES.items():

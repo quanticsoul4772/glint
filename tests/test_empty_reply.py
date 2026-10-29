@@ -106,7 +106,7 @@ def test_the_run_line_is_loud_and_empty_replies_alert_on_their_share(tmp_path, c
                        encoding="utf-8")
     RunEvents(results, tmp_path / "e.jsonl", label="tools banking", poll_s=60).poll()
     err = capsys.readouterr().err
-    assert "t0 trial 0: EMPTY_REPLY (infrastructure_error" in err and "<-- AssistantMessage must have" in err
+    assert "t0 trial 0: EMPTY_REPLY (τ²: infrastructure_error" in err and "<-- AssistantMessage must have" in err
     assert "ALERT: 2 empty_reply runs of 10 finished (20%)" in err
 
 

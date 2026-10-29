@@ -293,6 +293,16 @@ def test_every_model_price_is_the_published_one():
     assert meta_cost("openai/meta-models/Muse-Glimmer-30B-modal", 10**6, 10**5, 10**6) == 0.0
 
 
+def test_registering_the_prices_prints_no_litellm_boilerplate(monkeypatch, capsys):
+    import litellm
+
+    from glint.meter import register_litellm_prices
+
+    monkeypatch.setattr(litellm, "suppress_debug_info", False)
+    register_litellm_prices()
+    assert "Provider List" not in capsys.readouterr().out and litellm.suppress_debug_info is True
+
+
 def test_litellm_gets_the_cached_price_per_token():
     import litellm
 
