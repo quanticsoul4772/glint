@@ -595,10 +595,18 @@ def generate(cfg: dict) -> None:
 
     halt = threading.Event()  # set by glimmer_serve.session() when the GPU cap trips or its watcher fails
     stopped: dict[str, str | None] = {"reason": None}  # set by fail_fast (runlog: a pattern that cannot be noise)
+    modal_env: dict[str, dict | None] = {"env": None}  # the Modal CLI environment once the app is deployed
 
     def fail_fast(reason: str) -> None:
         stopped["reason"] = reason
-        halt.set()  # the Modal session's event once a session is open: it stops at the session's exit as for a cap
+        halt.set()  # Glimmer calls are refused from here on
+        # Stop the app now, as a cap trip does: the session's own stop waits for τ²'s batch, and a hung server's
+        # in-flight calls would keep the GPU billing until they returned (2026-10-29 review). The session's exit
+        # stops it again; a second stop of a stopped app is harmless.
+        if modal_env["env"] is not None:
+            print("FAIL FAST: stopping the Modal app now", flush=True)
+            threading.Thread(target=glimmer_serve.stop_until_stopped, args=(MODAL_CLI, modal_env["env"]),
+                             daemon=True, name="glint-fail-fast-stop").start()
     truncated, truncated_lock = [0], threading.Lock()  # Glimmer responses cut at max_tokens in the current arm
 
     def route(*args, **kwargs):
@@ -630,6 +638,7 @@ def generate(cfg: dict) -> None:
             env = os.environ | {"MODAL_CONFIG_PATH": str(paths.MODAL_CONFIG), "MODAL_PROFILE": "quanticsoul4772",
                                 "PYTHONIOENCODING": "utf-8"}
             endpoint = glimmer_serve.deploy(MODAL_CLI, env)
+            modal_env["env"] = env
             halt = stack.enter_context(glimmer_serve.session(gpu, MODAL_CLI, env, tag=cfg["save"]))
             log = stack.enter_context(glimmer_serve.LogWatch(MODAL_CLI, env))
             glimmer_serve.wait_ready(endpoint, os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"],

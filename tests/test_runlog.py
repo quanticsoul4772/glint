@@ -259,7 +259,7 @@ def test_fail_fast_after_runs_in_a_row_with_the_same_cause(tmp_path, capsys):
     sims.append(infra("g"))
     _write(results, sims)
     watch.poll()
-    assert reasons == [f"{n} runs in a row ended infrastructure_error with the same cause: HTTP 303 to /x"]
+    assert reasons == [f"{n} runs in a row ended infrastructure_error with the same cause: HTTP # to /x"]
     assert f"FAIL FAST: {reasons[0]}; stopping the arm" in capsys.readouterr().err
     _write(results, sims + [infra("h")])
     watch.poll()
@@ -297,3 +297,42 @@ def test_fail_fast_after_two_stall_windows_in_a_row(tmp_path, capsys):
     watch._last_new = time.time() - 1300
     watch.poll()
     assert reasons == ["no run finished in 40 min"]
+
+
+def test_the_cause_key_ignores_quoted_model_text_and_numbers():
+    from glint.runlog import cause_key
+
+    a = "AtemParseError: invoke without a name: '<invoke>get_user 123</invoke>'"
+    b = "AtemParseError: invoke without a name: '<invoke>find_order #W9</invoke>'"
+    assert cause_key(a) == cause_key(b) == "AtemParseError: invoke without a name: '…'"
+    assert cause_key("HTTP 303 to port 8000") == cause_key("HTTP 303 to port 8443") != cause_key("HTTP 503")
+    assert cause_key(None) == ""
+
+
+def test_a_resumed_arm_reports_the_reruns_of_runs_already_in_the_checkpoint(tmp_path):
+    # τ²'s resume reruns infrastructure_error and budget_stop runs under the same (task, trial) and a new id
+    results, reasons = tmp_path / "results.json", []
+    stopped = [_sim(f"t{i}", 0, term="infrastructure_error", error="BudgetExceeded: stopped early (fail fast): x")
+               | {"id": f"old-{i}"} for i in range(6)]
+    _write(results, stopped)
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x", on_halt=reasons.append)
+    with watch:
+        reruns = [_sim(f"t{i}", 0, term="infrastructure_error", error="HTTP 303 to /x") | {"id": f"new-{i}"}
+                  for i in range(6)]
+        _write(results, reruns)
+        watch.poll()
+    assert watch.counts == {"infrastructure_error": 6} and len(reasons) == 1
+    assert len((tmp_path / "e.jsonl").read_text(encoding="utf-8").splitlines()) == 6
+
+
+def test_a_pattern_seen_only_after_the_arm_finished_warns_and_keeps_the_arm(tmp_path, capsys):
+    from glint import runlog
+
+    results, reasons = tmp_path / "results.json", []
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="x", on_halt=reasons.append)
+    with watch:
+        tail = [_sim(f"t{i}", 0, term="infrastructure_error", error="HTTP 503")
+                for i in range(runlog.HALT_SAME_CAUSE["infrastructure_error"])]
+        _write(results, [_sim(f"p{i}", 0, 1.0) for i in range(20)] + tail)
+    assert reasons == [] and watch.halted is None
+    assert "fail-fast pattern at the arm's end" in capsys.readouterr().err
