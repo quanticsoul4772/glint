@@ -119,7 +119,11 @@ class RunEvents:
             self.diff = lambda sim: inspect.compact(inspect.diff_run(domain, sim))
             # every run's facts (plan calls, filings, history read first, searches, peak prompt tokens, step-order
             # flags) in its event record and line, so a regression shows on its first run, not after the arm
-            self.facts = lambda sim: (lambda f: (f, inspect.facts_brief(f)))(inspect.run_facts(sim))
+            def facts(sim: dict) -> tuple[dict, str]:
+                f = inspect.run_facts(sim)
+                return f, inspect.facts_brief(f)
+
+            self.facts = facts
         self.diffs: dict[tuple[str, int], dict] = {}  # (task_id, trial) -> compact diff of each failed run
         self.poll_s, self.stall_s = poll_s, stall_s
         self.seen: set[tuple] = set()

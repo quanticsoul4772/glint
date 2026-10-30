@@ -243,8 +243,8 @@ def run_facts(sim: dict) -> dict:
     first_filing = filed[0] if filed else None
     history = [c["index"] for c in calls if c["tool"] == HISTORY and not c["error"]]
     searches = [len(c["content"]) for c in calls if c["tool"] in SEARCH_TOOLS]
-    ran = lambda tools: [c["index"] for c in calls if c["tool"] in tools and not c["error"]]  # noqa: E731
-    order, submit, decision = ran((ORDER,)), ran((SUBMIT,)), ran((APPROVE, DENY_CLI))
+    order, submit, decision = ([c["index"] for c in calls if c["tool"] in tools and not c["error"]]
+                               for tools in ((ORDER,), (SUBMIT,), (APPROVE, DENY_CLI)))
     # the step orders the v6 regressions came from: in 054 the replacement was ordered, and the dispute filed, before
     # the credit limit increase (a pending replacement or dispute makes the increase fail)
     order_before_submit = bool(order and submit and order[0] < submit[0])
