@@ -106,6 +106,55 @@ def run_writes(sim: dict, domain: str) -> dict:
     return out
 
 
+# Rules that hold a write until a step comes first (verification, a lookup, the plan, the increase decision, the
+# expedite question, the card-digits tool): gold takes those steps before its writes, so refusing a write identical to
+# gold's on one of them holds it for the step and is not a false refusal. Every other rule judges the write's values.
+PRECONDITION_RULES = ("procedure.verified", "procedure.lookups", "procedure.dispute_plan.none",
+                      "procedure.dispute_plan.ask", "procedure.dispute_plan.order", "procedure.dispute_plan.not_planned",
+                      "procedure.increase_first", "procedure.increase_undecided", "procedure.transfer.increase_undecided",
+                      "procedure.card_digits.give", "banking.replacement.increase_first",
+                      "banking.replacement.expedite_ask")
+# Rules that judge the write against the database at that moment (a policy check, a card's status): the gold
+# replays show each allows gold's write in gold's state, so refusing the same arguments in another state (051's
+# approve before the payment, 081's close of a still-frozen card) is the state differing, not a false refusal.
+STATE_RULES = ("banking.cli.", "debit.", "banking.replacement", "banking.dispute", "banking.update_rewards",
+               "banking.checking_credit", "banking.close", "banking.account_flag", "banking.statement_credit",
+               "banking.log_closure", "procedure.transfer.reason")
+# The plan gate holds a filing to the plan's values: a gold-identical filing refused there means the plan itself
+# differed from gold (v6 041 t1: the disputes were planned in batches), a refusal the plan caused.
+PLAN_RULES = ("procedure.dispute_plan.values",)
+KINDS = ("live_false_refusals", "plan_differs_from_gold", "state_differs", "held_for_precondition",
+         "differs_from_gold")
+
+
+def live_refusals(domain: str, sim: dict) -> dict:
+    """Each gate refusal in a live run, classified against τ²'s gold for the task. A write different from every gold
+    write: differs_from_gold. A write identical to a gold write refused on: an order rule, held_for_precondition (gold
+    takes that step first); a state rule, state_differs (the same arguments are wrong in this state); the plan's
+    values, plan_differs_from_gold (the plan was wrong); any other rule, which judges the write's values against the
+    record, live_false_refusals. Train tasks only (gold is read)."""
+    gold = gold_writes(domain, str(sim["task_id"]))
+    out = {"refused": 0} | {kind: [] for kind in KINDS}
+    for w in run_writes(sim, domain)["rejected"]:
+        if w["by"] != "gate" or w["args"] is None:
+            continue
+        out["refused"] += 1
+        row = {"rule_id": w["rule_id"], "tool": w["tool"], "index": w["index"]}
+        rule = str(w["rule_id"])
+        if not any(g["tool"] == w["tool"] and not _differing(g["args"], w["args"]) for g in gold):
+            kind = "differs_from_gold"
+        elif rule.startswith(PRECONDITION_RULES):
+            kind = "held_for_precondition"
+        elif rule.startswith(PLAN_RULES):
+            kind = "plan_differs_from_gold"
+        elif rule.startswith(STATE_RULES):
+            kind = "state_differs"
+        else:
+            kind = "live_false_refusals"
+        out[kind].append(row)
+    return out
+
+
 def _differing(gold: dict, run: dict) -> list[str]:
     """The argument names whose values differ; an absent argument counts as None (τ² fills defaults the same way)."""
     return sorted(k for k in gold.keys() | run.keys() if gate_summary.norm(gold.get(k)) != gate_summary.norm(run.get(k)))

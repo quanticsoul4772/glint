@@ -102,8 +102,13 @@ def main(argv: list[str]) -> int:
         p.add_argument("--trial", type=int)
         p.add_argument("--arm", default="tools")
     msgs.add_argument("--grep", required=True, help="a regex, case-insensitive")
+    ref = sub.add_parser("refusals", help="each gate refusal against gold: false, held for a precondition, or differs")
+    ref.add_argument("data", type=Path)
+    ref.add_argument("--arm", default="tools")
     args = parser.parse_args(argv)
-    if args.command == "diff":
+    if args.command == "refusals":
+        lines = refusal_lines(args.data, args.arm)
+    elif args.command == "diff":
         lines = folder_lines(args.data, args.arm, args.task)
     else:
         lines = run_lines_of(args.data, args.arm, args.task, args.trial,
@@ -112,6 +117,40 @@ def main(argv: list[str]) -> int:
     for line in lines:
         print(line, flush=True)
     return 0
+
+
+def refusal_lines(data: Path, arm: str = "tools") -> list[str]:
+    """Every gate refusal of the folder's arm, classified against gold (inspect.live_refusals), per rule, with each
+    live false refusal and plan-caused refusal named; the live counterpart of the gold replays' false-refusal
+    count."""
+    files = sorted(data.glob(f"{arm}-*.json"))
+    if not files:
+        raise FileNotFoundError(f"no {arm} arm file ({arm}-<domain>.json) in {data}")
+    lines = []
+    for f in files:
+        domain = f.stem.removeprefix(f"{arm}-")
+        per_rule: dict[str, dict[str, int]] = {}
+        named, total, runs = [], dict.fromkeys(("refused", *inspect.KINDS), 0), 0
+        for s in json.loads(f.read_text(encoding="utf-8"))["simulations"]:
+            if outcome(s) in NOT_RESULTS:
+                continue
+            runs += 1
+            r = inspect.live_refusals(domain, s)
+            total["refused"] += r["refused"]
+            for kind in inspect.KINDS:
+                total[kind] += len(r[kind])
+                for row in r[kind]:
+                    per_rule.setdefault(row["rule_id"], {}).setdefault(kind, 0)
+                    per_rule[row["rule_id"]][kind] += 1
+                    if kind in ("live_false_refusals", "plan_differs_from_gold"):
+                        named.append(f"{kind.replace('_', ' ').upper()}: {s['task_id']} trial {s.get('trial')}: "
+                                     f"{row['tool']} refused by {row['rule_id']} (message {row['index']})")
+        lines.append(f"== {arm} {domain}: {runs} runs; {total['refused']} gate refusals: "
+                     + ", ".join(f"{total[k]} {k.replace('_', ' ')}" for k in inspect.KINDS))
+        for rule, kinds in sorted(per_rule.items(), key=lambda kv: -sum(kv[1].values())):
+            lines.append(f"  {rule}: " + ", ".join(f"{k.replace('_', ' ')} {n}" for k, n in sorted(kinds.items())))
+        lines += [f"  {n}" for n in named]
+    return lines
 
 
 def run_lines_of(data: Path, arm: str, task: str, trial: int | None, per_run) -> list[str]:
