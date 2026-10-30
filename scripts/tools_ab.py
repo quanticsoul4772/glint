@@ -61,6 +61,9 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 - `banking-plan-v8-gated`: the v7 tools arm plus the ask-first gate on expedited shipping (a fraud or theft
   replacement without it is refused once with credit_card_replacements_001's recommendation; the repeat is allowed),
   from v7's largest remaining cause (research/5-measurements/v7-diagnosis-2026-10-30.md).
+- `banking-unseen-gated`: the 59 banking train tasks outside banking12 whose gold makes a gated write, k=2, Glimmer
+  alone (base, ungated) against the gated tools arm, Modal only. No live run of these tasks drove a fix, so this is
+  the evidence on tasks the loop did not tune (their gold is in the gold replays and some gate tests).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -80,7 +83,8 @@ it.
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
                            banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|banking-plan-v2-gated|
                            banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|
-                           banking-plan-v6-gated|banking-plan-v7-gated|banking-plan-v8-gated|heldout2-gated|
+                           banking-plan-v6-gated|banking-plan-v7-gated|banking-plan-v8-gated|banking-unseen-gated|
+                           heldout2-gated|
                            banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
@@ -119,6 +123,7 @@ from glint.atem import reparsing
 from glint.calllog import recording
 from glint.gates import Enforcer, EventLog
 from glint.gates import summary as gate_summary
+from glint.gates.rules import REQUIRED_GATES
 from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
 from glint.runlog import RunEvents, outcome
@@ -169,6 +174,21 @@ def banking_tasks() -> dict[str, list[str]]:
                                                and a["arguments"].get("agent_tool_name") in BANKING_WRITES
                                                for a in t["evaluation_criteria"].get("actions") or [])]
     return {"banking_knowledge": sorted(ids)}
+
+
+def banking_unseen_tasks() -> dict[str, list[str]]:
+    """The banking train tasks outside banking12 whose gold makes a gated write (59): no live run of these drove a
+    tool, gate or plan change. Their gold is in the gold replays, and some write-gate tests use it (decision
+    2026-10-30). The test split stays unread."""
+    untouched = set(json.loads(BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
+    seen, gated = set(banking_tasks()["banking_knowledge"]), set(REQUIRED_GATES["banking_knowledge"])
+
+    def writes(task: dict) -> set[str]:
+        return {a["arguments"].get("agent_tool_name") if a["name"] == "call_discoverable_agent_tool" else a["name"]
+                for a in task["evaluation_criteria"].get("actions") or []}
+
+    return {"banking_knowledge": sorted(t["id"] for t in json.loads(BANKING_TASKS.read_text(encoding="utf-8"))
+                                        if t["id"] not in untouched | seen and gated & writes(t))}
 
 
 SETS = {
@@ -279,6 +299,13 @@ SETS = {
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v8_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v8.json",
                               "save": "tools-ab-banking12-gated-plan-v8"},
+    # the broad run on tasks no fix came from: Glimmer alone (ungated) vs the gated tools arm, k=2 (decision
+    # 2026-10-30, v9 plan step 7)
+    "banking-unseen-gated": {"tasks": banking_unseen_tasks, "trials": 2, "concurrency": 12, "glimmer_usd": 3.0,
+                             "meta_usd": 1.5, "gpu_usd": 24.0, "gates": True, "requires_modal": True,
+                             "data": MEASURE / "tools_ab_banking_unseen_gated",
+                             "out": RESULTS / "tools-ab-banking-unseen-gated.json",
+                             "save": "tools-ab-banking-unseen-gated"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
