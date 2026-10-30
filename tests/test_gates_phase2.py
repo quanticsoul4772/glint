@@ -368,6 +368,23 @@ def test_transfer_waits_for_the_increase_decision():
     assert _ran(_call(env, "transfer_to_human_agents", summary="s", reason="customer_requests_human_no_specific_reason"))
 
 
+def test_other_changes_wait_for_the_submitted_increase():
+    # task_051: gold denies the increase for high utilization, then pays the card from checking; a payment before the
+    # decision changes the utilization the denial reads
+    env, task, events = _bank("task_051")
+    deny_args = _play(env, task, rules.DENY)
+    pay = json.loads(next(a.arguments["arguments"] for a in task.evaluation_criteria.actions
+                          if _name(a) == "pay_credit_card_from_checking_9182"))
+    reply = _hidden(env, "pay_credit_card_from_checking_9182", **pay)
+    assert _denied(reply, "approve or deny") and _rule(events) == "procedure.increase_undecided"
+    assert "blocked until the increase is approved or denied" in reply.content
+    approve = _hidden(env, rules.APPROVE, credit_card_account_id=deny_args["credit_card_account_id"],
+                      user_id=deny_args["user_id"], new_credit_limit=5000)
+    assert _denied(approve, "blocked until it is denied")
+    assert _ran(_hidden(env, rules.DENY, **deny_args))
+    assert _ran(_hidden(env, "pay_credit_card_from_checking_9182", **pay))
+
+
 def test_transfer_reason_after_fraud_is_the_fraud_code():
     env, task, _ = _bank("task_081")
     _play(env, task, "transfer_to_human_agents")  # the stolen cards are closed and the fraud disputes filed

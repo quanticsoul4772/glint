@@ -14,7 +14,8 @@
   own filings, in its order (glint.gates.replayplan), before its first dispute; a plan-gate deny then means the run
   left that plan. Each run's writes are sent in order through the server on a fresh
   scenario until the first deny, which must carry the task's expected rule, or a gates-phase-2 procedure rule
-  (verification, required lookups, transfer) on a step the run's full call list shows it skipped, or on a write the
+  (verification, required lookups, transfer, an undecided increase) on a step the run's full call list or its writes
+  show it skipped, or on a write the
   review marked wrong or extra. The failure review judged writes against
   gold, and gold's provisional-credit flag depends on gold's filing order: a dispute a run filed in another order can
   be right on the live database (the gate allows it), and one whose flag matches gold can be wrong there (the gate
@@ -158,6 +159,10 @@ def skipped_in_recording(rec: dict, i: int, rule_id: str, reason: str) -> bool |
         return not (set(LOOKUP.findall(reason.split(";")[0])) & before)
     if rule_id == "procedure.verified":
         return "log_verification" not in before
+    if rule_id == "procedure.increase_undecided":  # the run's writes show a submit with no decision after it
+        names = [w["name"] for w in rec["writes"][:i]]
+        last = max((k for k, n in enumerate(names) if n == rules.SUBMIT), default=None)
+        return last is not None and not {rules.APPROVE, rules.DENY} & set(names[last + 1:])
     return None
 
 
