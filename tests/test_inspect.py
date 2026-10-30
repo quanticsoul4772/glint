@@ -117,7 +117,10 @@ def test_diff_run_names_missing_extra_and_changed_writes_with_taus_breakdown():
                            "note": "graded"}
     c = inspect.compact(d)
     assert c["text"] == (f"diff: 1 field (dispute_reason x1); missing 1 ({DISPUTE} x1), extra 1 ({DISPUTE} x1); "
-                         "rejected 2")
+                         "rejected 2; first: dispute_reason gold \"unauthorized_fraudulent_charge\" run "
+                         "\"duplicate_charge\"")
+    assert c["values"] == [{"tool": "file_credit_card_transaction_dispute_4829", "field": "dispute_reason",
+                            "gold": "unauthorized_fraudulent_charge", "run": "duplicate_charge"}]
     assert (c["fields"], c["missing"], c["extra"], c["rejected"]) == ({"dispute_reason": 1}, 1, 1, 2)
 
 
@@ -231,6 +234,9 @@ def test_run_events_put_a_failed_runs_diff_in_its_record_and_line_and_print_diff
     assert "DIFFS: 1 failed runs diffed against τ²'s expected writes; top fields {'dispute_reason': 1}; top tools " \
            f"{{'{DISPUTE}': 3}}" in err
     assert list(watch.diffs) == [(TASK, 0)]
+    # every run, passed ones too, carries its facts in its record and line; the failed one its first wrong value
+    assert all("facts" in r for r in records) and records[0]["facts"]["filings"] >= 1
+    assert "first: dispute_reason gold" in err and err.count("  facts: plans ") == 3
 
 
 def test_cli_prints_each_run_and_the_arms_diffs_line(tmp_path, capsys):
@@ -336,6 +342,21 @@ def _run_with_steps() -> dict:
             {"role": "tool", "id": "c3", "content": "submitted"},
             _hidden_call("get_payment_history_6183", {}, 4), {"role": "tool", "id": "c4", "content": "[]"}]
     return {"messages": msgs, "task_id": "task_x", "trial": 0}
+
+
+def test_run_facts_flag_the_v6_step_orders_and_the_peak_prompt():
+    # the order came before the submit (054 in v6); the only filing was refused, so no filing ran before the decision
+    sim = _run_with_steps()
+    sim["messages"][3]["usage"] = {"prompt_tokens": 41234, "completion_tokens": 50}
+    f = inspect.run_facts(sim)
+    assert (f["order_before_submit"], f["filing_before_decision"], f["peak_prompt_tokens"]) == (True, False, 41234)
+    brief = inspect.facts_brief(f)
+    assert brief.startswith("facts: plans 1, filings 0 (+1 refused), history first -")
+    assert "peak prompt 41k tokens" in brief and "ORDER BEFORE INCREASE SUBMIT" in brief
+    assert "FILED BEFORE INCREASE DECIDED" not in brief
+    # a filing that ran before the submit, with no decision after it, raises the second flag
+    sim["messages"][6] = {"role": "tool", "id": "c2", "content": "filed"}
+    assert "FILED BEFORE INCREASE DECIDED" in inspect.facts_brief(inspect.run_facts(sim))
 
 
 def test_run_sequence_lists_the_steps_in_order_and_marks_refusals():

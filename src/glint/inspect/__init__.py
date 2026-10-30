@@ -201,8 +201,15 @@ def compact(diff: dict) -> dict:
             text += f" ({', '.join(f'{k} x{n}' for k, n in names.most_common())})"
     if diff["rejected"]:
         text += f"; rejected {len(diff['rejected'])}"
+    # the first wrong values, gold against filed: the run log named only the field, so v6's wrong noticed dates
+    # (gold 11/14/2025, filed 10/30/2026) were visible only after the arm ended (2026-10-30)
+    values = [{"tool": w["tool"], "field": f["field"], "gold": f["gold"], "run": f["run"]}
+              for w in diff["changed"] for f in w["fields"]][:2]
+    if values:
+        text += "; first: " + "; ".join(f"{v['field']} gold {json.dumps(v['gold'], default=str)[:40]} run "
+                                       f"{json.dumps(v['run'], default=str)[:40]}" for v in values)
     return {"fields": dict(fields), "tools": dict(tools), "missing": len(diff["missing"]), "extra": len(diff["extra"]),
-            "rejected": len(diff["rejected"]), "text": text}
+            "rejected": len(diff["rejected"]), "values": values, "text": text}
 
 
 def diffs_line(compacts: list[dict], top: int = 5) -> str:
@@ -218,6 +225,8 @@ def diffs_line(compacts: list[dict], top: int = 5) -> str:
 HIDDEN_READ = re.compile(r"get_[a-z_0-9]+_\d{4}$")  # banking's hidden lookups (get_user_dispute_history_7291, ...)
 SEARCH_TOOLS = ("KB_search", "grep", "KB_read")
 DISPUTE, HISTORY = "file_credit_card_transaction_dispute_4829", "get_user_dispute_history_7291"
+ORDER, SUBMIT = "order_replacement_credit_card_7291", "submit_credit_limit_increase_request_7392"
+APPROVE, DENY_CLI = "approve_credit_limit_increase_5847", "deny_credit_limit_increase_5848"
 
 
 def run_facts(sim: dict) -> dict:
@@ -234,16 +243,33 @@ def run_facts(sim: dict) -> dict:
     first_filing = filed[0] if filed else None
     history = [c["index"] for c in calls if c["tool"] == HISTORY and not c["error"]]
     searches = [len(c["content"]) for c in calls if c["tool"] in SEARCH_TOOLS]
+    order, submit, decision = ([c["index"] for c in calls if c["tool"] in tools and not c["error"]]
+                               for tools in ((ORDER,), (SUBMIT,), (APPROVE, DENY_CLI)))
+    # the step orders the v6 regressions came from: in 054 the replacement was ordered, and the dispute filed, before
+    # the credit limit increase (a pending replacement or dispute makes the increase fail)
+    order_before_submit = bool(order and submit and order[0] < submit[0])
+    filing_before_decision = bool(filed and submit and filed[0] < (decision[0] if decision else float("inf")))
+    prompts = [int((m.get("usage") or {}).get("prompt_tokens") or 0) for m in sim.get("messages") or []]
     return {"reads": reads, "plans": sum(c["tool"] == "plan_disputes" for c in calls), "filings": len(filed),
             "filings_refused": sum(c["tool"] == DISPUTE and c["error"] for c in calls),
             "history_before_first_filing": None if first_filing is None else any(i < first_filing for i in history),
             "searches": len(searches), "search_chars": sum(searches), "largest_search": max(searches, default=0),
+            "order_before_submit": order_before_submit, "filing_before_decision": filing_before_decision,
+            "peak_prompt_tokens": max(prompts, default=0),
             "termination": sim.get("termination_reason"), "error": str((sim.get("info") or {}).get("error") or "")}
 
 
-SEQUENCE_TOOLS = ("plan_disputes", DISPUTE, "order_replacement_credit_card_7291",
-                  "submit_credit_limit_increase_request_7392", "approve_credit_limit_increase_5847",
-                  "deny_credit_limit_increase_5848", HISTORY)
+def facts_brief(f: dict) -> str:
+    """run_facts in one short clause for the run log's per-run line; the step-order flags in capitals."""
+    history = {None: "-", True: "yes", False: "NO"}[f["history_before_first_filing"]]
+    flags = [name for name, on in (("ORDER BEFORE INCREASE SUBMIT", f["order_before_submit"]),
+                                   ("FILED BEFORE INCREASE DECIDED", f["filing_before_decision"])) if on]
+    return (f"facts: plans {f['plans']}, filings {f['filings']} (+{f['filings_refused']} refused), history first "
+            f"{history}, searches {f['searches']} ({f['search_chars'] // 1000}k chars), peak prompt "
+            f"{f['peak_prompt_tokens'] // 1000}k tokens" + "".join(f", {x}" for x in flags))
+
+
+SEQUENCE_TOOLS = ("plan_disputes", DISPUTE, ORDER, SUBMIT, APPROVE, DENY_CLI, HISTORY)
 
 
 def run_sequence(sim: dict) -> list[str]:

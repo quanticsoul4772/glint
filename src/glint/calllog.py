@@ -1,22 +1,29 @@
-"""Record every Glimmer call exactly as the server saw and produced it, for activation capture.
+"""Record every Glimmer call's size and timing, tied to the run it belongs to.
 
-τ²'s saved runs keep neither token ids nor logprobs nor usage for the agent's messages (2026-10-27: `raw_data` empty
-in every recorded run), so a write turn's prompt could only be re-rendered, and only 34 of 119 banking prompts
-re-rendered to the server's token count. `recording(fn, path)` wraps the completion function and appends one line per
-Glimmer call: the prompt token ids and completion token ids vLLM returned (`return_token_ids`), the logprob tokens,
-and `request_key` of the messages sent. A recorded call is matched to its turn in a saved run by recomputing
-`request_key` from the run's messages with τ²'s own `to_litellm_messages`. Token ids are zlib-compressed int32.
+`recording(fn, path, context=...)` wraps the completion function and appends one line per Glimmer call: the time, the
+model, `request_key` of the messages sent, the number of messages, the prompt and completion token counts, and the
+task and trial of the simulation that made it (`context`, the run context the gate log uses). A recorded call is
+matched to its turn in a saved run by recomputing `request_key` from the run's messages with τ²'s own
+`to_litellm_messages`. The peak prompt size per run shows how close a run came to Glimmer's context limit.
+
+Until 2026-10-30 each line also held the prompt and completion token ids and the logprob tokens, for activation
+capture (about 61 MB per 48-run set); that idea was cut on Oct 27 and nothing read them, so they are no longer kept
+(decision 2026-10-30). Older calls.jsonl files still carry them.
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import threading
 import time
-import zlib
-from array import array
+from collections.abc import Callable
 from pathlib import Path
+
+
+class CallLogError(RuntimeError):
+    # the class name goes first (τ² keeps only str(exception)); runlog.outcome counts it as Glint's failure
+    def __str__(self) -> str:
+        return f"CallLogError: {super().__str__()}"
 
 
 def request_key(litellm_messages: list[dict]) -> str:
@@ -36,16 +43,6 @@ def key_for_turn(messages) -> str:
     return request_key(to_litellm_messages(messages))
 
 
-def pack(ids: list[int]) -> str:
-    return base64.b64encode(zlib.compress(array("i", ids).tobytes(), 6)).decode("ascii")
-
-
-def unpack(blob: str) -> list[int]:
-    out = array("i")
-    out.frombytes(zlib.decompress(base64.b64decode(blob)))
-    return out.tolist()
-
-
 def _get(obj, *path):
     for key in path:
         if obj is None:
@@ -54,31 +51,23 @@ def _get(obj, *path):
     return obj
 
 
-class CallLogError(RuntimeError):
-    # the class name goes first (τ² keeps only str(exception)); runlog.outcome counts it as Glint's failure
-    def __str__(self) -> str:
-        return f"CallLogError: {super().__str__()}"
-
-
-def call_record(response, messages: list[dict], model: str, require_ids: bool = False) -> dict:
-    """One recorded call. With `require_ids` (a vLLM endpoint asked for `return_token_ids`), a response without
-    token ids raises: activation capture would otherwise get silently empty records."""
+def call_record(response, messages: list[dict], model: str, context: Callable[[], tuple] | None = None) -> dict:
+    """One recorded call. Token counts come from the response's usage, else from the token ids a vLLM endpoint
+    returns; the task and trial from `context()` ("unknown" without one)."""
     dump = response.model_dump() if hasattr(response, "model_dump") else dict(response)
     choice = (dump.get("choices") or [{}])[0]
-    prompt_ids = dump.get("prompt_token_ids") or []
-    completion_ids = _get(choice, "provider_specific_fields", "token_ids") or choice.get("token_ids") or []
-    if require_ids and not (prompt_ids and completion_ids):
-        raise CallLogError(f"{model}: the response has no token ids (prompt {len(prompt_ids)}, completion "
-                           f"{len(completion_ids)}); the endpoint must be asked for return_token_ids")
-    logprobs = [t.get("token") for t in (_get(choice, "logprobs", "content") or [])]
-    return {"ts": time.time(), "model": model, "request_key": request_key(messages), "n_messages": len(messages),
-            "prompt_tokens": len(prompt_ids), "completion_tokens": len(completion_ids),
-            "prompt_ids": pack(prompt_ids), "completion_ids": pack(completion_ids), "logprob_tokens": logprobs}
+    usage = dump.get("usage") or {}
+    prompt = usage.get("prompt_tokens") or len(dump.get("prompt_token_ids") or [])
+    completion = usage.get("completion_tokens") or len(
+        _get(choice, "provider_specific_fields", "token_ids") or choice.get("token_ids") or [])
+    task, trial = context() if context is not None else ("unknown", "unknown")
+    return {"ts": time.time(), "model": model, "task_id": task, "trial": trial, "request_key": request_key(messages),
+            "n_messages": len(messages), "prompt_tokens": int(prompt), "completion_tokens": int(completion)}
 
 
-def recording(completion_fn, path: Path, only: str = "Muse-Glimmer", require_ids: bool = False):
-    """Wrap a completion function so every call to a model whose name contains `only` is appended to `path`.
-    `require_ids`: see `call_record` (set it for the vLLM endpoint, which returns token ids; hosted APIs do not)."""
+def recording(completion_fn, path: Path, only: str = "Muse-Glimmer", context: Callable[[], tuple] | None = None):
+    """Wrap a completion function so every call to a model whose name contains `only` is appended to `path`, with the
+    task and trial `context()` names (tools_ab's current_run)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     lock = threading.Lock()
@@ -88,9 +77,7 @@ def recording(completion_fn, path: Path, only: str = "Muse-Glimmer", require_ids
         model = kwargs.get("model", "")
         if only in model:
             try:
-                row = call_record(response, kwargs.get("messages") or [], model, require_ids)
-            except CallLogError:
-                raise
+                row = call_record(response, kwargs.get("messages") or [], model, context)
             except Exception as e:  # any recording bug after a paid call is Glint's failure, named as such
                 raise CallLogError(f"recording a {model} call failed: {type(e).__name__}: {e}") from e
             with lock, path.open("a", encoding="utf-8") as fh:

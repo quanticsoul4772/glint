@@ -112,11 +112,18 @@ class RunEvents:
         # With the run's τ² domain, each failed run is diffed against τ²'s expected actions (glint.inspect): a compact
         # summary goes into its event record and its line, and the arm's end prints a DIFFS line. Imported here, not
         # at the top: glint.inspect loads τ²'s tasks and environments, which most users of this module never need.
-        self.diff = None
+        self.diff = self.facts = None
         if domain is not None:
             from glint import inspect
 
             self.diff = lambda sim: inspect.compact(inspect.diff_run(domain, sim))
+            # every run's facts (plan calls, filings, history read first, searches, peak prompt tokens, step-order
+            # flags) in its event record and line, so a regression shows on its first run, not after the arm
+            def facts(sim: dict) -> tuple[dict, str]:
+                f = inspect.run_facts(sim)
+                return f, inspect.facts_brief(f)
+
+            self.facts = facts
         self.diffs: dict[tuple[str, int], dict] = {}  # (task_id, trial) -> compact diff of each failed run
         self.poll_s, self.stall_s = poll_s, stall_s
         self.seen: set[tuple] = set()
@@ -231,6 +238,13 @@ class RunEvents:
                         except Exception as exc:  # noqa: BLE001  (recorded in the event and printed below)
                             e["diff_error"] = f"{type(exc).__name__}: {exc}"[:300]
                             loud += f"  WARNING: no diff ({e['diff_error'][:160]})"
+                    if self.facts is not None:
+                        try:  # like the diff: a facts error is recorded and printed, and the event still lands
+                            e["facts"], brief = self.facts(s)
+                            loud += "  " + brief
+                        except Exception as exc:  # noqa: BLE001  (recorded in the event and printed below)
+                            e["facts_error"] = f"{type(exc).__name__}: {exc}"[:300]
+                            loud += f"  WARNING: no facts ({e['facts_error'][:160]})"
                     self.counts[e["outcome"]] = self.counts.get(e["outcome"], 0) + 1
                     self._track_streak(e)
                     by_task = self.tasks_by_outcome.setdefault(e["outcome"], {})
