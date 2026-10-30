@@ -588,7 +588,7 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
     assert "banking-test-gated" not in tools_ab.SETS  # the banking test split is read once (decision 2026-10-28)
     for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "banking-plan-terse-gated",
                  "banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
-                 "heldout2-gated"):
+                 "banking-plan-v5-gated", "heldout2-gated"):
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
@@ -730,7 +730,8 @@ def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_a
                         assert "{{" not in part.value and "}}" not in part.value, (path.name, node.lineno, part.value)
 
 
-@pytest.mark.parametrize("name", ["banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated"])
+@pytest.mark.parametrize("name", ["banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
+                                  "banking-plan-v5-gated"])
 def test_the_v2_and_v3_sets_are_the_plan_gated_tools_arm_again_in_their_own_folders(name):
     import tools_ab
 

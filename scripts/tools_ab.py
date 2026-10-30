@@ -48,6 +48,8 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   runs: #109 checked the customer-side digits with a copy of τ²'s tool code and printed them in its block.
 - `banking-plan-v4-gated`: the same tools arm on #111: the card-digits gate checks only what the agent can see (the
   customer was given the tool; the digits on the account record), and no block names a digit.
+- `banking-plan-v5-gated`: the same tools arm on #117: plan_disputes tells the agent to look up the dispute history
+  before filing (τ² scores that read where its gold makes it; 12 failed v4 runs skipped only it).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -66,7 +68,7 @@ it.
 
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
                            banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|banking-plan-v2-gated|
-                           banking-plan-v3-gated|banking-plan-v4-gated|heldout2-gated|
+                           banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|heldout2-gated|
                            banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
@@ -241,6 +243,12 @@ SETS = {
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v4_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v4.json",
                               "save": "tools-ab-banking12-gated-plan-v4"},
+    # The plan's dispute-history hint (#117; decision 2026-10-29)
+    "banking-plan-v5-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
+                              "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
+                              "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v5_gated",
+                              "out": RESULTS / "tools-ab-banking12-gated-plan-v5.json",
+                              "save": "tools-ab-banking12-gated-plan-v5"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
