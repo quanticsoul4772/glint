@@ -241,6 +241,50 @@ def run_facts(sim: dict) -> dict:
             "termination": sim.get("termination_reason"), "error": str((sim.get("info") or {}).get("error") or "")}
 
 
+SEQUENCE_TOOLS = ("plan_disputes", DISPUTE, "order_replacement_credit_card_7291",
+                  "submit_credit_limit_increase_request_7392", "approve_credit_limit_increase_5847",
+                  "deny_credit_limit_increase_5848", HISTORY)
+
+
+def run_sequence(sim: dict) -> list[str]:
+    """The order of a run's dispute, replacement and credit limit increase steps, one line each with the message index
+    of its reply: plan_disputes (the transactions planned), filings (transaction and credit flag), the replacement
+    order, the increase submit and decision, the dispute-history read; a refused call (gate or τ²) is marked. The
+    questions of the v6 diagnosis (what came first; were disputes planned in batches) read off these lines."""
+    out = []
+    for c in gate_summary.run_calls(sim):
+        if c["tool"] not in SEQUENCE_TOOLS:
+            continue
+        args = c["args"] or {}
+        if c["tool"] == "plan_disputes":
+            what = f"{len(args.get('transactions') or [])} txns: " + ", ".join(
+                str(t.get("transaction_id")) for t in args.get("transactions") or [] if isinstance(t, dict))
+        elif c["tool"] == DISPUTE:
+            what = f"{args.get('transaction_id')} credit={args.get('eligible_for_provisional_credit')}"
+        else:
+            what = ", ".join(f"{k}={args[k]}" for k in ("credit_card_account_id", "user_id", "denial_reason")
+                             if args.get(k))
+        refused = (" REFUSED " + (f"({c['deny']['rule_id']})" if c["deny"] else f"({c['content'][:80]})")
+                   if c["error"] else "")
+        out.append(f"[{c['index']}] {c['tool']} {what}{refused}")
+    return out
+
+
+def run_messages(sim: dict, pattern: str, width: int = 240) -> list[str]:
+    """Each message of a run matching a regex (case-insensitive) in its text or its tool calls, as
+    "[index role] ...text around the first match..."; tool results included. Conversation text only: never the run's
+    metadata."""
+    rx, out = re.compile(pattern, re.IGNORECASE), []
+    for i, m in enumerate(sim.get("messages") or []):
+        calls = " ".join(f"{c.get('name')}({json.dumps(c.get('arguments'), ensure_ascii=False)})"
+                         for c in m.get("tool_calls") or [])
+        text = f"{m.get('content') or ''} {calls}".strip()
+        hit = rx.search(text)
+        if hit:
+            out.append(f"[{i} {m.get('role')}] ...{text[max(0, hit.start() - width):hit.end() + width]!r}")
+    return out
+
+
 def facts_line(f: dict) -> str:
     history = ("" if f["history_before_first_filing"] is None else
                f" (dispute history before the first filing: {'yes' if f['history_before_first_filing'] else 'NO'})")
