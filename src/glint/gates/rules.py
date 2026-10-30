@@ -221,9 +221,11 @@ def _dispute(db, a: dict) -> GateResult:
                     "wishes; file with them and tell the customer what they mean.",
                     facts=[*reasons, f"provisional credit criteria failed: {', '.join(failed) or 'none'}"])
     if a.get("card_action") == "cancel_and_reissue" and v["card_action"] == "keep_active":
-        # a replacement may still be ordered later in the conversation; the database cannot show that yet
-        return allow("banking.dispute.card_action_unseen", source, v,
-                     reason="cancel_and_reissue with no replacement ordered yet: allowed, a replacement may follow")
+        # the customer's choice, held to the dispute plan by procedure.dispute_plan; the replacement order may follow
+        # (task_039's gold files every dispute before ordering it)
+        return allow("banking.dispute.card_action_planned", source, v,
+                     reason="cancel_and_reissue with no replacement ordered yet: the customer's choice in the dispute "
+                     "plan; the plan names the replacement order as the next step")
     return allow("banking.dispute", source, v)
 
 

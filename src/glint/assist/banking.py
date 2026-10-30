@@ -261,6 +261,35 @@ def noticed_date(value) -> tuple[str | None, str]:
     return None, f"issue_noticed_date {text!r} is not a date (MM/DD/YYYY)"
 
 
+CARD_ACTIONS = ("keep_active", "cancel_and_reissue")
+ORDER_TOOL = "order_replacement_credit_card_7291"
+
+
+def card_actions(db, given: dict[str, set[str]]) -> tuple[dict[str, dict], dict[str, str]]:
+    """(card -> its planned card_action, card -> rejection) for the cards of a dispute plan, from the customer's
+    answers on each card (credit_cards_(general)_014 card_action: keep the card active, or cancel it and get a
+    replacement). One answer per card: the card is cancelled or it is not. A replacement already ordered today for a
+    card wins (its disputes use cancel_and_reissue). A card the customer chose to cancel with no replacement ordered
+    yet gets the order as the next step."""
+    plans, rejected = {}, {}
+    for card, answers in given.items():
+        ordered = [r["order_id"] for r in _rows(db.credit_card_orders, credit_card_account_id=card)
+                   if _date(r.get("order_date")) == TODAY]
+        if ordered:
+            plans[card] = {"credit_card_account_id": card, "card_action": "cancel_and_reissue",
+                           "replacement_ordered_today": ordered}
+        elif len(answers) > 1:
+            rejected[card] = (f"card {card}: the customer gave both {' and '.join(sorted(answers))}; one answer per "
+                              "card (the card is cancelled or it is not)")
+        else:
+            action = next(iter(answers), None)
+            plans[card] = {"credit_card_account_id": card, "card_action": action, "replacement_ordered_today": []}
+            if action == "cancel_and_reissue":
+                plans[card]["next_step"] = (f"Call {ORDER_TOOL} for {card} first (the customer chose to cancel the "
+                                            "card and get a new one), then file its disputes.")
+    return plans, rejected
+
+
 def card_of_transaction(db, user_id: str, txn: dict) -> str:
     """The credit card account a transaction was charged to (by its account id, else by the user's card type)."""
     return txn.get("credit_card_account_id") or next(
@@ -295,7 +324,8 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     'full_refund' (the customer asked for the whole charge back) is planned as a full refund with no amount.
 
     `transactions`: the disputes the customer wants, each {transaction_id, dispute_reason, contacted_merchant,
-    issue_noticed_date} (the last two None when not asked yet; the date is filed as MM/DD/YYYY), and for incorrect_amount `expected_amount` or `partial_refund_amount`. Criterion 4
+    issue_noticed_date, card_action} (the last three None when not asked yet; the date is filed as MM/DD/YYYY; one
+    card_action per card, see card_actions), and for incorrect_amount `expected_amount` or `partial_refund_amount`. Criterion 4
     counts the disputes on record in the past 12 months plus the planned ones ahead. A transaction already disputed is listed under `already_filed`; an unknown transaction, a reason
     outside τ²'s list or a repeated transaction under `rejected`. Reads the live database only; deterministic."""
     user_id = str(user_id or "")
@@ -319,13 +349,22 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
             refund, why = overcharge(_money(txn.get("transaction_amount")), item)
         if not why:
             noticed, why = noticed_date(item.get("issue_noticed_date"))
+        action = item.get("card_action") or None
+        if not why and action is not None and action not in CARD_ACTIONS:
+            why = f"card_action {action!r} is not one of {list(CARD_ACTIONS)}"
         seen.add(tid)
         if why:
             rejected.append({"transaction_id": tid, "reason": why})
         elif tid in disputed:
             already.append(tid)
         else:
-            wanted.append((tid, reason, contacted, card_of_transaction(db, user_id, txn), refund, noticed))
+            wanted.append((tid, reason, contacted, card_of_transaction(db, user_id, txn), refund, noticed, action))
+    given: dict[str, set[str]] = {}
+    for w in wanted:
+        given.setdefault(w[3], set()).update({w[6]} - {None})
+    cards, mixed = card_actions(db, given)
+    rejected += [{"transaction_id": w[0], "reason": mixed[w[3]]} for w in wanted if w[3] in mixed]
+    wanted = [w for w in wanted if w[3] not in mixed]
     first = [check_dispute(db, user_id, card, tid, reason, contacted) for tid, reason, contacted, card, *_ in wanted]
     qualifies = [all(ok for name, ok in v.get("provisional_credit_criteria", {"none": False}).items()
                      if name != COUNT_CRITERION) for v in first]
@@ -334,13 +373,14 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     credit_group = sorted((w for w, q in zip(wanted, qualifies) if q), key=lambda w: -amount[w[0]])  # stable
     ordered = credit_group + [w for w, q in zip(wanted, qualifies) if not q]
     order, ask = [], []
-    for tid, reason, contacted, card, refund, noticed in ordered:
+    for tid, reason, contacted, card, refund, noticed, _ in ordered:
         v = check_dispute(db, user_id, card, tid, reason, contacted, planned_before=len(order))
         if "provisional_credit_criteria" not in v:
             rejected.append({"transaction_id": tid, "reason": "; ".join(v["reasons"])})
             continue
         entry = {"position": len(order) + 1, "transaction_id": tid, "dispute_reason": reason,
                  "contacted_merchant": contacted, "issue_noticed_date": noticed,
+                 "card_action": cards[card]["card_action"],
                  "eligible_for_provisional_credit": v["eligible_for_provisional_credit"],
                  "can_get_credit": all(ok for name, ok in v["provisional_credit_criteria"].items()
                                        if name != COUNT_CRITERION),
@@ -360,6 +400,11 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
             # credit_cards_(general)_014 field 11 is the customer's answer; a task_054 run filed another date than
             # the customer's (banking-plan-v5-gated trial 2, 2026-10-30)
             questions.append(f"When did you first notice the {tid} charge?")
+        if entry["card_action"] is None:
+            # credit_cards_(general)_014 card_action is the customer's choice; in banking-plan-v5-gated task_039
+            # trials 2-3 filed all 8 disputes with the wrong card_action and trials 0-1 never ordered the replacement
+            # (the plan's next_step). One question per card.
+            questions.append(f"For the {card} card: keep the card active, or cancel it and get a new one?")
         if reason == OVERCHARGE:
             # for the agent, not the customer: Glimmer's "full refund for all?" was agreed to and filed as the
             # customer's choice (039-041, 2026-10-29); a suggested full refund is not the customer asking for one
@@ -371,9 +416,10 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
                 entry |= refund
         if questions:
             entry["ask_user"] = " ".join(questions)
-            ask.extend(questions)
+            ask.extend(q for q in questions if q not in ask)
         order.append(entry)
     return {"user_id": user_id, "rule": PLAN_RULE, "before_filing": BEFORE_FILING,
             "disputes_on_record_past_12_months": len(on_record),
-            "order": order, "already_filed": already, "rejected": rejected, "ask_user": ask,
+            "order": order, "card_actions": [cards[c] for c in dict.fromkeys(w[3] for w in ordered)],
+            "already_filed": already, "rejected": rejected, "ask_user": ask,
             "ready": bool(order) and not ask and not rejected}

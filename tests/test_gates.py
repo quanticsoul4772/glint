@@ -240,7 +240,7 @@ def _banking(task_id: str):
 
 
 def _plan(env, disputes: list[dict]):
-    items = [{k: d[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date")} for d in disputes]
+    items = [{k: d[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")} for d in disputes]
     reply = _call(env, "plan_disputes", user_id=disputes[0]["user_id"], transactions=items)
     assert not reply.error, reply.content
     return json.loads(reply.content)

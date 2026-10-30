@@ -335,7 +335,7 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     if plan is None:
         return deny("procedure.dispute_plan.none", PLAN_SOURCE, "no dispute plan was made for this customer in this "
                     "conversation", f"Call {PLAN_TOOL}(user_id, transactions=[{{transaction_id, dispute_reason, "
-                    "contacted_merchant, issue_noticed_date} for EVERY transaction the customer wants disputed]), then "
+                    "contacted_merchant, issue_noticed_date, card_action} for EVERY transaction the customer wants disputed]), then "
                     "file the "
                     "disputes in its order with its eligible_for_provisional_credit values.",
                     {"user_id": user, "transaction_id": tid},
@@ -360,6 +360,8 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
         refund += f", partial_refund_amount {nxt['partial_refund_amount']}"
     if nxt.get("issue_noticed_date"):
         refund += f", issue_noticed_date {nxt['issue_noticed_date']!r}"
+    if nxt.get("card_action"):
+        refund += f", card_action {nxt['card_action']!r}"
     fix_next = (f"File {nxt['transaction_id']} next (dispute_reason {nxt['dispute_reason']!r}, "
                 f"eligible_for_provisional_credit {nxt['eligible_for_provisional_credit']}{refund}). {REPLAN}")
     if tid != nxt["transaction_id"]:
@@ -405,6 +407,17 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
                     "11); today's date is right only when the customer says they noticed it today. Ask about every "
                     "planned dispute missing it at once.",
                     facts=[f"{tid}: issue_noticed_date not given in the plan"])
+    if nxt.get("card_action") is None:
+        return deny("procedure.dispute_plan.ask", PLAN_SOURCE, "the plan was made without the customer's answer on "
+                    f"whether to keep the card of {tid} active or cancel it and get a new one", "Ask the customer "
+                    f"whether to keep the card active or cancel it and get a new one, then call {PLAN_TOOL} again "
+                    "with card_action ('keep_active' or 'cancel_and_reissue') on every dispute for that card.",
+                    details | {"next": nxt},
+                    consequence="The dispute records the customer's choice for the card (credit_cards_(general)_014 "
+                    "card_action), and cancel_and_reissue comes with a replacement order. One answer covers every "
+                    "dispute on the card.", facts=[f"{tid}: card_action not given in the plan"])
+    if a.get("card_action") != nxt["card_action"]:
+        reasons.append(f"card_action {a.get('card_action')!r} != the plan's {nxt['card_action']!r}")
     if a.get("issue_noticed_date") != nxt["issue_noticed_date"]:
         reasons.append(f"issue_noticed_date {a.get('issue_noticed_date')!r} != the plan's "
                        f"{nxt['issue_noticed_date']!r}")

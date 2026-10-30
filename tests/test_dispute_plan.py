@@ -255,6 +255,50 @@ def test_the_noticed_date_is_the_customers_answer_filed_as_planned():
     assert bad["order"] == [] and "is not a date" in bad["rejected"][0]["reason"]
 
 
+def test_the_card_action_is_the_customers_answer_one_per_card():
+    # task_039: the customer wants the card cancelled and reissued; gold files all 8 disputes with cancel_and_reissue
+    # and orders the replacement after them (credit_cards_(general)_014 card_action)
+    env, _, gold = _gated("task_039")
+    user, items = gold[0]["user_id"], _items(gold)
+    assert {i["card_action"] for i in items} == {"cancel_and_reissue"}
+    unasked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[
+        {k: v for k, v in i.items() if k != "card_action"} for i in items]).content)
+    card = unasked["card_actions"][0]["credit_card_account_id"]
+    question = f"For the {card} card: keep the card active, or cancel it and get a new one?"
+    assert unasked["ask_user"].count(question) == 1 and len(unasked["card_actions"]) == 1
+    verdict = _plan_gate(env, gold[0])
+    assert verdict.rule_id == "procedure.dispute_plan.ask" and "cancel it and get a new one" in verdict.reason
+    # two answers for one card: those disputes are rejected, nothing is planned for the card
+    mixed = banking.plan_disputes(env.tools.db, user, [items[0] | {"card_action": "keep_active"}] + items[1:])
+    assert mixed["order"] == [] and len(mixed["rejected"]) == len(items)
+    assert "one answer per card" in mixed["rejected"][0]["reason"]
+    assert "not one of" in banking.plan_disputes(env.tools.db, user, [items[0] | {"card_action": "cancel"}])[
+        "rejected"][0]["reason"]
+    # cancel with no replacement ordered yet: the plan names the order as the next step; filings follow the plan
+    plan = json.loads(_call(env, "plan_disputes", user_id=user, transactions=items).content)
+    assert plan["card_actions"][0]["card_action"] == "cancel_and_reissue"
+    assert plan["card_actions"][0]["next_step"].startswith(f"Call {banking.ORDER_TOOL} for {card} first")
+    verdict = _plan_gate(env, gold[0] | {"card_action": "keep_active"})
+    assert verdict.rule_id == "procedure.dispute_plan.values"
+    assert "card_action 'keep_active' != the plan's 'cancel_and_reissue'" in verdict.facts
+    assert _ran(_file(env, gold[0]))  # gold's filing before the order: allowed
+
+
+def test_a_replacement_ordered_today_sets_the_card_action():
+    # task_037: gold orders the replacement before the disputes; the order wins over a keep_active answer
+    task = _task("task_037")
+    env, _, gold = _gated("task_037")
+    order = next(json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
+                 if a.name == WRAPPER and a.arguments.get("agent_tool_name") == banking.ORDER_TOOL)
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=banking.ORDER_TOOL)
+    assert _ran(_call(env, WRAPPER, agent_tool_name=banking.ORDER_TOOL, arguments=json.dumps(order)))
+    items = [i | {"card_action": "keep_active"} for i in _items(gold)]
+    plan = banking.plan_disputes(env.tools.db, gold[0]["user_id"], items)
+    entry = plan["card_actions"][0]
+    assert entry["card_action"] == "cancel_and_reissue" and entry["replacement_ordered_today"]
+    assert "next_step" not in entry and {e["card_action"] for e in plan["order"]} == {"cancel_and_reissue"}
+
+
 def test_a_new_plan_replaces_the_old_one():
     env, _, gold = _gated("task_037")
     user = gold[0]["user_id"]
@@ -387,7 +431,7 @@ def test_an_incorrect_amount_dispute_is_planned_as_a_partial_refund_of_the_overc
     env, _, gold = _gated("task_039")
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
-    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date")}
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")}
     asked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[base]).content)
     entry = asked["order"][0]
     assert "resolution_requested" not in entry and "should you have been charged" in entry["ask_user"]
@@ -405,7 +449,7 @@ def test_the_plan_gate_holds_an_overcharge_filing_to_the_planned_partial_refund(
     env, _, gold = _gated("task_039")
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
-    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date")}
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")}
     _call(env, "plan_disputes", user_id=user, transactions=[base])
     reply = _file(env, over)
     assert _denied(reply, "procedure.dispute_plan.ask") and "should have been charged" in reply.content
@@ -422,7 +466,7 @@ def test_a_customer_who_asks_for_a_full_refund_gets_one():
     env, _, gold = _gated("task_039")
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
-    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date")}
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")}
     plan = json.loads(_call(env, "plan_disputes", user_id=user,
                             transactions=[base | {"resolution_requested": "full_refund"}]).content)
     entry = plan["order"][0]
