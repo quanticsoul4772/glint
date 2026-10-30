@@ -365,18 +365,22 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     # (replayplan), and one earlier, at a filing with wrong card digits and no card-digits tool given
     assert sorted(rules_by_task["task_040"]) == ["procedure.card_digits.give"] + ["procedure.dispute_plan.order"] * 7
     # gates phase 2 stops runs earlier, on steps the recording shows were skipped: the approve of task_051 base
-    # trials 0 and 1 came with no dispute-history or pending-order lookup in the whole run (they were not denied by
-    # the approve rule: the customer paid down before submitting, so the policy approves on the live database)
-    for trial in (0, 1):
+    # trial 0 came with no dispute-history or pending-order lookup in the whole run (it was not denied by the approve
+    # rule: the customer paid down before submitting, so the policy approves on the live database)
+    r = stopped["banking12 base task_051 trial 0"]
+    assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.lookups", True)
+    # base trials 1 and 2 paid the card from checking after the submit and before any decision
+    for trial, write in ((1, 62), (2, 72)):
         r = stopped[f"banking12 base task_051 trial {trial}"]
-        assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.lookups", True)
+        assert (r["write"], r["rule_id"], r["skipped_in_recording"]) == (write, "procedure.increase_undecided", True)
     r = stopped["banking12 base task_041 trial 1"]  # no log_verification anywhere before its disputes
     assert (r["rule_id"], r["skipped_in_recording"]) == ("procedure.verified", True)
     assert stopped["banking12 tools task_041 trial 1"]["rule_id"] == "banking.verification"  # wrong time_verified
     assert sorted(rules_by_task["task_041"]) == ["banking.dispute", "banking.verification",
                                                  "procedure.card_digits.give"] + [
         "procedure.dispute_plan.order"] * 4 + ["procedure.verified"]
-    assert sum(r.startswith("procedure.transfer.") for r in rules_by_task["task_051"] + rules_by_task["task_054"]) == 3
+    # base task_051 trial 2's transfer is not reached: its payment before the decision is denied first
+    assert sum(r.startswith("procedure.transfer.") for r in rules_by_task["task_051"] + rules_by_task["task_054"]) == 2
 
 
 def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_path):
