@@ -81,15 +81,24 @@ def decisions(events: list[dict]) -> tuple[int, Counter]:
     return writes, denies
 
 
+def denied_runs(events: list[dict]) -> set[tuple[str, str]]:
+    """(task_id, trial) of every run with a live deny in the gate log. A run that overflowed the context keeps no
+    messages in τ²'s save, so its denies are only here (banking-plan-v5-gated: 17 runs counted from the messages,
+    19 in the log, 2026-10-29)."""
+    return {(str(e["payload"].get("task_id")), str(e["payload"].get("trial"))) for e in events
+            if e["type"] == "gate.fired" and not e["payload"].get("replay") and e["payload"]["decision"] != "allow"}
+
+
 def summarize(events: list[dict], sims: list[dict]) -> dict:
     """The arm's gate summary from its gate log's events and its saved simulations."""
     writes, denies = decisions(events)
+    logged = denied_runs(events)
     s = {"writes": writes, "denies": sum(denies.values()), "denies_by_rule": dict(sorted(denies.items())),
          "runs": len(sims), "runs_with_deny": 0, "error_limit_runs": 0, "error_limit_runs_with_deny": 0,
          "error_limit_errors": 0, "error_limit_deny_errors": 0}
     for sim in sims:
         errors, denied = run_errors(sim)
-        s["runs_with_deny"] += denied > 0
+        s["runs_with_deny"] += denied > 0 or (str(sim.get("task_id")), str(sim.get("trial"))) in logged
         if ended_on_error_limit(sim):
             s["error_limit_runs"] += 1
             s["error_limit_runs_with_deny"] += denied > 0

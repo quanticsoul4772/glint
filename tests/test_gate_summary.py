@@ -75,6 +75,16 @@ def test_summary_counts_writes_denies_by_rule_and_error_limit_endings(tmp_path):
         "(too_many_errors), 1 of them with gate denies; 6 of their 20 errors were gate denies")
 
 
+def test_a_run_that_kept_no_messages_still_counts_its_logged_deny(tmp_path):
+    # banking-plan-v5-gated said 17 runs had a deny; the log had 19: task_081's overflowed runs keep no messages
+    log = gate_log(tmp_path / "g.sqlite", [
+        fired("cli_gate", "approve_cli", "deny", "banking.cli.approve", task="task_081", trial="1"),
+        fired("cli_gate", "approve_cli", "deny", "banking.cli.approve", task="task_081", trial="2", replay=True),
+        fired("cli_gate", "approve_cli", "deny", "banking.cli.approve", task="task_9", trial="0")])  # not in this arm
+    sims = [run("task_081", 1, []), run("task_081", 2, []), run("task_4", 0, [])]
+    assert summary.summarize(log.events(), sims)["runs_with_deny"] == 1
+
+
 def test_a_quiet_arm_says_zero_and_a_log_without_a_manifest_is_refused(tmp_path):
     s = summary.summarize(gate_log(tmp_path / "g.sqlite", []).events(), [run("t", 0, [])])
     assert summary.line("x", s) == ("GATES: x: 0 writes checked, 0 denied; 0 of 1 runs had at least one deny; 0 runs "
