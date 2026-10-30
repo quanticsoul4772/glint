@@ -56,6 +56,7 @@ with quiet_stdout():
     from tau2.data_model.message import ToolCall
     from tau2.domains.banking_knowledge.environment import get_environment, get_tasks
     from tau2.environment.toolkit import ToolType
+    from tau2.runner.build import _derive_read_log_allowlist
 
     from glint.assist.banking import PLAN_TOOL
     from glint.assist.tau2_tools import assist_environment
@@ -97,9 +98,11 @@ def tasks() -> dict:
 
 
 def build_environment(task=None):
-    """An ungated τ² banking environment at `task`'s initial state (the base database with no task)."""
+    """An ungated τ² banking environment at `task`'s initial state (the base database with no task), with the read log
+    τ²'s runner gives it: the hidden reads `task`'s gold makes are recorded in the scored database."""
     with quiet_stdout():
-        env = get_environment(retrieval_variant=RETRIEVAL, task=task)
+        allowlist = {"read_log_allowlist": _derive_read_log_allowlist(task)} if task is not None else {}
+        env = get_environment(retrieval_variant=RETRIEVAL, task=task, **allowlist)
         init = task.initial_state if task is not None else None
         if init is not None:
             env.set_state(init.initialization_data, init.initialization_actions, init.message_history or [])
