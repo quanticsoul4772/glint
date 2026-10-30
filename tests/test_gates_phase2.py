@@ -472,6 +472,58 @@ def test_increase_record_keeps_each_cards_request_until_its_card_is_decided():
     assert tools.glint_increases == {}
 
 
+def test_a_fraud_replacement_without_expedited_shipping_is_asked_once():
+    # credit_card_replacements_001: "strongly recommend expedited shipping" for fraud_suspected or stolen; v7's 054
+    # trials 1-3 never offered it. The first order without it is refused; the repeat is the customer's choice
+    env, task, events = _bank("task_054")
+    order = _play(env, task, rules.REPLACE)  # gold's increase is decided on the way
+    assert order["reason"] == "fraud_suspected" and order["expedited_shipping"] is True
+    standard = order | {"expedited_shipping": False}
+    reply = _hidden(env, rules.REPLACE, **standard)
+    assert _denied(reply, "strongly recommends expedited shipping") and _rule(events) == rules.EXPEDITE_ASK
+    assert env.tools.glint_expedite_asked == {order["credit_card_account_id"]}
+    assert _ran(_hidden(env, rules.REPLACE, **standard))  # the customer declined: allowed
+
+
+def test_an_expedited_or_non_fraud_replacement_is_not_asked():
+    env, task, _ = _bank("task_054")
+    order = _play(env, task, rules.REPLACE)
+    assert _ran(_hidden(env, rules.REPLACE, **order))  # gold's own order, expedited: allowed at once
+    env2, task2, _ = _bank("task_054")
+    order2 = _play(env2, task2, rules.REPLACE)
+    lost = order2 | {"reason": "lost"}
+    lost.pop("expedited_shipping")
+    assert "was NOT executed" not in _hidden(env2, rules.REPLACE, **lost).content  # not a fraud or theft reason
+
+
+def test_the_expedite_ask_and_its_repeat_replay_unchanged_in_taus_strict_replay():
+    """The refusal goes through the hidden-tool wrapper, which τ²'s evaluator replays, so the record of the card is
+    rebuilt and the refusal and the allowed repeat replay unchanged (strict=True)."""
+    enforcer = Enforcer("banking_knowledge", EventLog(":memory:"))
+    env, task, _ = _bank("task_054", enforcer)
+    history = []
+
+    def send(call: ToolCall):
+        reply = env.get_response(call)
+        history.extend([AssistantMessage(role="assistant", tool_calls=[call]), reply])
+        return reply
+
+    gold = task.evaluation_criteria.actions
+    upto = next(k for k, a in enumerate(gold) if _name(a) == rules.REPLACE)
+    for k, a in enumerate(gold[:upto]):
+        send(ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant"))
+    order = json.loads(gold[upto].arguments["arguments"]) | {"expedited_shipping": False}
+    wrapped = {"agent_tool_name": rules.REPLACE, "arguments": json.dumps(order)}
+    assert _denied(send(ToolCall(id="o1", name="call_discoverable_agent_tool", arguments=wrapped,
+                                 requestor="assistant")), "strongly recommends")
+    assert _ran(send(ToolCall(id="o2", name="call_discoverable_agent_tool", arguments=wrapped, requestor="assistant")))
+    replay, _, _ = _bank("task_054", enforcer)
+    init = task.initial_state
+    replay.set_state(init.initialization_data if init else None, init.initialization_actions if init else None,
+                     history, strict=True)
+    assert replay.tools.glint_expedite_asked == env.tools.glint_expedite_asked != set()
+
+
 def test_transfer_reason_after_fraud_is_the_fraud_code():
     env, task, _ = _bank("task_081")
     _play(env, task, "transfer_to_human_agents")  # the stolen cards are closed and the fraud disputes filed

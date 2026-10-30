@@ -56,6 +56,7 @@ from glint.gates.eventlog import EventLog
 from glint.gates.rules import (
     APPROVE,
     DENY,
+    EXPEDITE_ASK,
     GATED_GENERIC,
     REQUIRED_GATES,
     SUBMIT,
@@ -224,6 +225,7 @@ class Enforcer:
         if self.domain == "banking_knowledge":
             add_plan_tool(env)
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
+        env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
             if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name == PLAN_TOOL
@@ -245,6 +247,8 @@ class Enforcer:
                 reply = original_response(message)
                 self._record_increase(env, *write, reply, before)
                 return with_open_items(message, reply)
+            if result.rule_id == EXPEDITE_ASK:  # asked once per card: the repeat order is the customer's choice
+                env.tools.glint_expedite_asked.add(str((write[1] or {}).get("credit_card_account_id", "")))
             return ToolMessage(id=message.id, content=result.message(self.wording), requestor=message.requestor,
                                role="tool", error=True)
 

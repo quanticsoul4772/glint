@@ -287,6 +287,15 @@ def _decision(db, a: dict, approving: bool) -> GateResult:
     return allow(rule, CLI_SOURCE, v)
 
 
+# credit_card_replacements_001: "If the reason is fraud_suspected or stolen, strongly recommend expedited shipping to
+# minimize exposure". In banking-plan-v7-gated 054 trials 1-3 and 039 trial 3 never offered it and failed only on
+# expedited_shipping. An ask-first gate (decision 2026-10-30): the first such order without expedited shipping is
+# refused with the recommendation, and the enforcer records the card (env.tools.glint_expedite_asked), so the repeat
+# goes through and the customer decides. The refusal replays, so the record is rebuilt in τ²'s strict replay.
+EXPEDITE_REASONS, EXPEDITE_ASK = ("fraud_suspected", "stolen"), "banking.replacement.expedite_ask"
+EXPEDITE_SOURCE = "credit_card_replacements_001"
+
+
 def _replacement(toolkit, a: dict) -> GateResult:
     card = a.get("credit_card_account_id", "")
     pending = undecided_increases(toolkit, card=card)
@@ -296,6 +305,18 @@ def _replacement(toolkit, a: dict) -> GateResult:
                     "increase was submitted and not decided yet", "Approve or deny the submitted credit limit "
                     "increase first, then order the replacement.", details, consequence=procedure.INCREASE_FIRST,
                     facts=[f"undecided increase requests for {card}: {', '.join(map(str, pending))}"])
+    reason = a.get("reason")
+    if (reason in EXPEDITE_REASONS and not as_flag(a.get("expedited_shipping"))
+            and card not in getattr(toolkit, "glint_expedite_asked", set())):
+        return deny(EXPEDITE_ASK, EXPEDITE_SOURCE, f"the policy strongly recommends expedited shipping for a {reason} "
+                    "replacement, and this order has none", "Tell the customer the bank strongly recommends expedited "
+                    "shipping for this replacement and ask whether they want it. If they do, order with "
+                    "expedited_shipping true; if they decline, order again as it is (the repeat is allowed).",
+                    details | {"reason": reason}, consequence="Asked once per card: the customer decides, and a "
+                    "repeated order without expedited shipping goes through.",
+                    facts=[f"reason: {reason}", f"expedited_shipping given: {a.get('expedited_shipping')!r}",
+                           ("credit_card_replacements_001: \"If the reason is fraud_suspected or stolen, strongly "
+                            "recommend expedited shipping to minimize exposure\"")])
     return allow("banking.replacement", "glint.assist.banking.LIMIT_FIRST", details)
 
 
