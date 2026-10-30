@@ -198,6 +198,7 @@ class Enforcer:
         elif tool in (APPROVE, DENY):
             card, rows = args.get("credit_card_account_id"), env.tools.db.credit_limit_increase_requests.data
             env.tools.glint_verdicts.pop(str(card), None)
+            env.tools.glint_increase_decided.add(str(args.get("user_id", "")))
             for user in list(record):
                 record[user] = [r for r in record[user] if (rows.get(r) or {}).get("credit_card_account_id") != card]
                 if not record[user]:
@@ -252,6 +253,7 @@ class Enforcer:
             add_plan_tool(env)
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
         env.tools.glint_verdicts = {}  # card -> the increase verdict check_credit_limit_increase gave, not filed yet
+        env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:

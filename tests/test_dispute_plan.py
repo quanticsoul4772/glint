@@ -165,7 +165,7 @@ def test_plan_files_the_credit_group_largest_amount_first_as_gold_does(task_id):
 def test_plan_lists_rejected_and_already_filed_disputes_and_asks_the_merchant_question():
     env, _, gold = _gated("task_039")
     user = gold[0]["user_id"]
-    assert _ran(_call(env, "plan_disputes", user_id=user, transactions=_items(gold[:1])))
+    assert _ran(_call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold[:1])))
     assert _ran(_file(env, gold[0]))
     asked = gold[1] | {"contacted_merchant": None}
     plan = banking.plan_disputes(env.tools.db, user, [
@@ -186,7 +186,7 @@ def test_a_dispute_without_a_plan_is_denied_and_the_plan_is_the_enforcers_record
     env, _, gold = _gated("task_040")
     assert _denied(_file(env, gold[0]), "procedure.dispute_plan.none")
     assert env.tools.glint_plans == {}
-    plan = json.loads(_call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold)).content)
+    plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold)).content)
     assert env.tools.glint_plans[gold[0]["user_id"]] == plan
     assert _ran(_file(env, gold[0]))
 
@@ -194,7 +194,7 @@ def test_a_dispute_without_a_plan_is_denied_and_the_plan_is_the_enforcers_record
 def test_filings_out_of_the_plan_are_denied_and_the_plan_order_is_allowed():
     env, _, gold = _gated("task_039")
     user = gold[0]["user_id"]
-    _call(env, "plan_disputes", user_id=user, transactions=list(reversed(_items(gold))))
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=list(reversed(_items(gold))))
     plan = env.tools.glint_plans[user]["order"]
     by_id = {d["transaction_id"]: d for d in gold}
     first, second = by_id[plan[0]["transaction_id"]], by_id[plan[1]["transaction_id"]]
@@ -222,7 +222,7 @@ def test_filings_out_of_the_plan_are_denied_and_the_plan_order_is_allowed():
 def test_a_flag_off_the_plan_and_a_transaction_off_the_plan_are_denied():
     env, _, gold = _gated("task_037")
     user = gold[0]["user_id"]
-    _call(env, "plan_disputes", user_id=user, transactions=_items(gold[:1]))
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold[:1]))
     assert _denied(_file(env, gold[1]), "procedure.dispute_plan.not_planned")
     flipped = gold[0] | {"eligible_for_provisional_credit": not gold[0]["eligible_for_provisional_credit"]}
     verdict = _plan_gate(env, flipped)
@@ -233,9 +233,9 @@ def test_a_flag_off_the_plan_and_a_transaction_off_the_plan_are_denied():
 def test_a_plan_made_before_the_merchant_answer_holds_the_filing_until_replanned():
     env, _, gold = _gated("task_037")
     user, item = gold[0]["user_id"], _items(gold[:1])[0]
-    _call(env, "plan_disputes", user_id=user, transactions=[{k: v for k, v in item.items() if k != FIELDS[2]}])
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[{k: v for k, v in item.items() if k != FIELDS[2]}])
     assert _denied(_file(env, gold[0]), "procedure.dispute_plan.ask")
-    _call(env, "plan_disputes", user_id=user, transactions=[item])  # calling it again replaces the plan
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[item])  # calling it again replaces the plan
     assert _ran(_file(env, gold[0]))
 
 
@@ -245,14 +245,14 @@ def test_the_noticed_date_is_the_customers_answer_filed_as_planned():
     env, _, gold = _gated("task_054", digits=False)
     user, item = gold[0]["user_id"], _items(gold)[0]
     assert item["issue_noticed_date"] == "11/12/2025"
-    unasked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[
+    unasked = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[
         {k: v for k, v in item.items() if k != "issue_noticed_date"}]).content)
     question = f"When did you first notice the {item['transaction_id']} charge? (Today is 11/14/2025.)"
     assert unasked["order"][0]["ask_user"] == question and unasked["ready"] == "False"  # τ² stringifies bools
     verdict = _plan_gate(env, gold[0])
     assert verdict.rule_id == "procedure.dispute_plan.ask" and "first noticed" in verdict.reason
     # an ISO answer is planned in the record's MM/DD/YYYY; a filing with today's date is off the plan
-    plan = json.loads(_call(env, "plan_disputes", user_id=user,
+    plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user,
                             transactions=[item | {"issue_noticed_date": "2025-11-12"}]).content)
     assert plan["order"][0]["issue_noticed_date"] == "11/12/2025" and plan["ready"] == "True"
     verdict = _plan_gate(env, gold[0] | {"issue_noticed_date": "11/14/2025"})
@@ -273,7 +273,7 @@ def test_the_card_action_is_the_customers_answer_one_per_card():
     env, _, gold = _gated("task_039")
     user, items = gold[0]["user_id"], _items(gold)
     assert {i["card_action"] for i in items} == {"cancel_and_reissue"}
-    unasked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[
+    unasked = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[
         {k: v for k, v in i.items() if k != "card_action"} for i in items]).content)
     card = unasked["card_actions"][0]["credit_card_account_id"]
     question = f"For the {card} card: keep the card active, or cancel it and get a new one?"
@@ -287,7 +287,7 @@ def test_the_card_action_is_the_customers_answer_one_per_card():
     assert "not one of" in banking.plan_disputes(env.tools.db, user, [items[0] | {"card_action": "cancel"}])[
         "rejected"][0]["reason"]
     # cancel with no replacement ordered yet: the plan names the order as the next step; filings follow the plan
-    plan = json.loads(_call(env, "plan_disputes", user_id=user, transactions=items).content)
+    plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user, transactions=items).content)
     assert plan["card_actions"][0]["card_action"] == "cancel_and_reissue"
     step = plan["card_actions"][0]["next_step"]
     # not "first": that word made all 4 v6 runs of 054 order the replacement before the credit limit increase
@@ -305,7 +305,7 @@ def test_a_replacement_ordered_after_the_plan_sets_the_card_action():
     task = _task("task_039")
     env, _, gold = _gated("task_039")
     user, items = gold[0]["user_id"], [i | {"card_action": "keep_active"} for i in _items(gold)]
-    _call(env, "plan_disputes", user_id=user, transactions=items)
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=items)
     order = next(json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
                  if a.name == WRAPPER and a.arguments.get("agent_tool_name") == banking.ORDER_TOOL)
     _call(env, "unlock_discoverable_agent_tool", agent_tool_name=banking.ORDER_TOOL)
@@ -337,7 +337,7 @@ def test_a_filing_needs_the_dispute_history_read_first():
     gold = _gold_disputes(task)
     _verify(env, gold[0]["user_id"])
     _give_card_digits(env)
-    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    _call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold))
     reply = _file(env, gold[0])
     assert _denied(reply, "procedure.lookups") and banking.DISPUTE_HISTORY_TOOL in reply.content
     _read_history(env, gold[0]["user_id"])
@@ -370,7 +370,7 @@ def test_replies_carry_the_open_items_and_replay_them_unchanged():
     send("give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
     send("unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
     send(WRAPPER, agent_tool_name=banking.DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": user}))
-    plan = send("plan_disputes", user_id=user, transactions=_items(gold))
+    plan = send("plan_disputes", other_requests=[], user_id=user, transactions=_items(gold))
     assert "[open]" not in plan.content  # the plan lists them itself
     card = json.loads(plan.content)["card_actions"][0]["credit_card_account_id"]
     read = send("get_current_time").content
@@ -391,15 +391,15 @@ def test_replies_carry_the_open_items_and_replay_them_unchanged():
 def test_a_new_plan_replaces_the_old_one():
     env, _, gold = _gated("task_037")
     user = gold[0]["user_id"]
-    _call(env, "plan_disputes", user_id=user, transactions=_items(gold[:1]))
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold[:1]))
     assert _denied(_file(env, gold[1]), "procedure.dispute_plan.not_planned")
-    _call(env, "plan_disputes", user_id=user, transactions=_items(gold[1:2]))
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold[1:2]))
     assert _ran(_file(env, gold[1]))
 
 
 def test_a_failed_plan_call_records_nothing():
     env, _, gold = _gated("task_037")
-    assert _call(env, "plan_disputes", user_id=gold[0]["user_id"]).error  # transactions missing: τ² raises
+    assert _call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"]).error  # transactions missing: τ² raises
     assert env.tools.glint_plans == {}
 
 
@@ -409,7 +409,7 @@ def test_plan_disputes_is_replayed_by_tau2_and_never_changes_the_database():
     env, _, gold = _gated("task_037")
     assert env.tools.tool_mutates_state(banking.PLAN_TOOL) and not env.tools.has_tool("check_card_dispute")
     before = env.get_db_hash()
-    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    _call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold))
     assert env.get_db_hash() == before
 
 
@@ -441,7 +441,7 @@ def test_plan_gate_decisions_replay_unchanged_in_taus_strict_replay():
     send("unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
     assert _denied(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[0])),
                    "procedure.dispute_plan.none")
-    send("plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    send("plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold))
     for d in gold[:3]:
         assert _ran(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(d)))
     assert _denied(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[5])),
@@ -487,7 +487,7 @@ def test_glint_bank_always_publishes_plan_disputes_and_its_plan_gates_the_filing
             unplanned = await client.call_tool(WRAPPER, {"agent_tool_name": rules.DISPUTE,
                                                          "arguments": json.dumps(gold[0])})
             plan = await client.call_tool(banking.PLAN_TOOL, {"user_id": gold[0]["user_id"],
-                                                               "transactions": _items(gold)})
+                                                               "transactions": _items(gold), "other_requests": []})
             planned = await client.call_tool(WRAPPER, {"agent_tool_name": rules.DISPUTE,
                                                        "arguments": json.dumps(gold[0])})
             return names, unplanned, plan, planned
@@ -521,7 +521,7 @@ def test_with_plans_inserts_one_plan_per_user_before_the_first_filing():
                     arguments={"agent_tool_name": banking.DISPUTE_HISTORY_TOOL, "arguments": "{}"})
     assert [c.id for c in with_plans([read] + calls)] == ["r", "0", "1-plan", "1", "2", "3", "4", "5-plan", "5"]
     out = out[2:]
-    assert out[1].arguments == {"user_id": "u1", "transactions": [
+    assert out[1].arguments == {"user_id": "u1", "other_requests": [], "transactions": [
         _items([a])[0], {"transaction_id": "t2", "dispute_reason": "incorrect_amount"}]}
     assert filing(calls[0]) is None and filing(calls[3]) is None
     assert plan_arguments([c])["u2"]["transactions"] == [{"transaction_id": "t3", "dispute_reason": "duplicate_charge"}]
@@ -533,16 +533,16 @@ def test_an_incorrect_amount_dispute_is_planned_as_a_partial_refund_of_the_overc
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
     base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")}
-    asked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[base]).content)
+    asked = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[base]).content)
     entry = asked["order"][0]
     assert "resolution_requested" not in entry and "should you have been charged" in entry["ask_user"]
     assert str(asked["ready"]) == "False"
     for item in (base | {"expected_amount": 148.23}, base | {"partial_refund_amount": 50}):
-        plan = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[item]).content)
+        plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[item]).content)
         assert (plan["order"][0]["resolution_requested"], float(plan["order"][0]["partial_refund_amount"])) == (
             "partial_refund", 50.0)
     for bad in ({"expected_amount": 198.23}, {"partial_refund_amount": 250}):
-        plan = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[base | bad]).content)
+        plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[base | bad]).content)
         assert plan["order"] == [] and "overcharge must be more than $0" in plan["rejected"][0]["reason"]
 
 
@@ -551,10 +551,10 @@ def test_the_plan_gate_holds_an_overcharge_filing_to_the_planned_partial_refund(
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
     base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")}
-    _call(env, "plan_disputes", user_id=user, transactions=[base])
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[base])
     reply = _file(env, over)
     assert _denied(reply, "procedure.dispute_plan.ask") and "should have been charged" in reply.content
-    _call(env, "plan_disputes", user_id=user, transactions=[base | {"partial_refund_amount": 50}])
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=[base | {"partial_refund_amount": 50}])
     full = over | {"resolution_requested": "full_refund", "partial_refund_amount": None}
     reply = _file(env, full)
     assert _denied(reply, "procedure.dispute_plan.values") and "resolution_requested 'full_refund'" in reply.content
@@ -568,7 +568,7 @@ def test_a_customer_who_asks_for_a_full_refund_gets_one():
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
     base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")}
-    plan = json.loads(_call(env, "plan_disputes", user_id=user,
+    plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=user,
                             transactions=[base | {"resolution_requested": "full_refund"}]).content)
     entry = plan["order"][0]
     assert entry["resolution_requested"] == "full_refund" and "partial_refund_amount" not in entry
@@ -584,7 +584,7 @@ def test_every_overcharge_entry_tells_the_agent_not_to_suggest_a_full_refund():
 
     env, _, gold = _gated("task_039")
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
-    plan = json.loads(_call(env, "plan_disputes", user_id=over["user_id"], transactions=_items(gold)).content)
+    plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=over["user_id"], transactions=_items(gold)).content)
     notes = {e["transaction_id"]: e.get("note") for e in plan["order"]}
     assert notes[over["transaction_id"]] == banking.OVERCHARGE_NOTE and "do not offer or suggest" in notes[
         over["transaction_id"]]
@@ -596,7 +596,7 @@ def test_the_plan_says_to_look_up_the_dispute_history_before_filing():
     # Glimmer filed without get_user_dispute_history_7291 in 12 failed banking-plan-v4-gated runs (039-041, 081);
     # τ² logs that read in the database it scores when its gold makes it, so those runs failed on it alone (2026-10-29)
     env, _, gold = _gated("task_039")
-    plan = json.loads(_call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold)).content)
+    plan = json.loads(_call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold)).content)
     assert plan["before_filing"] == banking.BEFORE_FILING and banking.DISPUTE_HISTORY_TOOL in plan["before_filing"]
 
 
@@ -624,7 +624,7 @@ def test_a_dispute_needs_the_customer_given_the_digits_tool_and_no_block_names_a
     # (banking-plan-v2-gated, 2026-10-29); gold gives it where the card has no digits on file. The gate does not know
     # the customer-side digits (only τ²'s code does), so once the tool is given the filing goes through.
     env, _, gold = _gated("task_039", digits=False)
-    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    _call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold))
     first = env.tools.glint_plans[gold[0]["user_id"]]["order"][0]
     assert banking.CARD_DIGITS_TOOL in first["card_last_4_digits_from"] and "card_last_4_digits" not in first
     filing = next(d for d in gold if d["transaction_id"] == first["transaction_id"])
@@ -640,7 +640,7 @@ def test_a_card_with_digits_on_file_is_held_to_them_without_naming_them():
     # task_054's card account record carries card_last_4_digits 7823, which the agent's account lookups show
     env, _, gold = _gated("task_054", digits=False)
     filing = gold[0]
-    _call(env, "plan_disputes", user_id=filing["user_id"], transactions=_items(gold))
+    _call(env, "plan_disputes", other_requests=[], user_id=filing["user_id"], transactions=_items(gold))
     flag = {"eligible_for_provisional_credit": env.tools.glint_plans[filing["user_id"]]["order"][0][
         "eligible_for_provisional_credit"] == "True"}
     wrong = _file(env, filing | flag | {"card_last_4_digits": "0791"})
@@ -652,7 +652,7 @@ def test_a_card_with_digits_on_file_is_held_to_them_without_naming_them():
 def test_card_digits_must_be_4_numerals_even_after_the_tool_was_given():
     # Glimmer filed "XXXX" once the tool was given (banking-plan-v5-gated 041 t2, 2026-10-30)
     env, _, gold = _gated("task_039")
-    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    _call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold))
     first = env.tools.glint_plans[gold[0]["user_id"]]["order"][0]
     filing = next(d for d in gold if d["transaction_id"] == first["transaction_id"])
     flag = {"eligible_for_provisional_credit": first["eligible_for_provisional_credit"] == "True"}
@@ -666,7 +666,7 @@ def test_the_plan_lists_digits_on_file_and_the_digits_tool_is_not_given_for_that
     # tool record broke the database match (2026-10-30)
     env, _, gold = _gated("task_054", digits=False)
     user = gold[0]["user_id"]
-    _call(env, "plan_disputes", user_id=user, transactions=_items(gold))
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold))
     entry = env.tools.glint_plans[user]["order"][0]
     assert entry["card_last_4_digits"] == "7823" and "card_last_4_digits_from" not in entry
     before = env.get_db_hash()

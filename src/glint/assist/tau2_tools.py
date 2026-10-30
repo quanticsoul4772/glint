@@ -122,7 +122,7 @@ class DisputePlanTools(ToolKitBase):
     gate on credit card disputes needs it; BankingDecisionTools includes it."""
 
     @is_tool(ToolType.GENERIC, mutates_state=True)
-    def plan_disputes(self, user_id: str, transactions: list[dict]) -> dict:
+    def plan_disputes(self, user_id: str, transactions: list[dict], other_requests: list[str]) -> dict:
         """Credit card dispute planning tool: call this BEFORE filing any credit card transaction dispute, with EVERY
         transaction the customer wants disputed in this conversation (one transaction too). It returns the order to
         file them in and, for each, the eligible_for_provisional_credit value to file with and the policy criteria
@@ -158,12 +158,18 @@ class DisputePlanTools(ToolKitBase):
                 partial_refund_amount unless the customer asked for a full refund (the partial default is taken from
                 τ²-bench train tasks 039-041; the policy says to ask the customer).
 
+            other_requests: The customer's other requests in this conversation that are not done yet, such as
+                ['credit limit increase', 'replacement card']; [] if none. When it names a credit limit increase,
+                the increase comes first (submit, the required lookups, approve or deny) and no dispute is filed
+                before it is decided.
+
         Returns:
             dict: order (position, transaction_id, dispute_reason, contacted_merchant, issue_noticed_date,
             card_action, eligible_for_provisional_credit, provisional_credit_criteria, and resolution_requested with
-            partial_refund_amount for incorrect_amount), already_filed, rejected, ask_user, ready.
+            partial_refund_amount for incorrect_amount), already_filed, rejected, ask_user, ready, and
+            increase_first with sequencing when the increase must come first.
         """
-        return banking.plan_disputes(self.db, user_id, transactions)
+        return banking.plan_disputes(self.db, user_id, transactions, other_requests)
 
 
 class BankingDecisionTools(DisputePlanTools):

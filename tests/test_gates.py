@@ -246,7 +246,7 @@ def _plan(env, disputes: list[dict]):
     _call(env, "call_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL,
           arguments=json.dumps({"user_id": disputes[0]["user_id"]}))
     items =[{k: d[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")} for d in disputes]
-    reply = _call(env, "plan_disputes", user_id=disputes[0]["user_id"], transactions=items)
+    reply = _call(env, "plan_disputes", other_requests=[], user_id=disputes[0]["user_id"], transactions=items)
     assert not reply.error, reply.content
     return json.loads(reply.content)
 
