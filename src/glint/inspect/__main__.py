@@ -74,9 +74,11 @@ def folder_lines(data: Path, arm: str = "tools", task: str | None = None) -> lis
             kind = outcome(s)
             if kind in NOT_RESULTS:
                 lines.append(f"{s['task_id']} trial {s.get('trial')}: not a result ({kind})")
+                lines.append(inspect.facts_line(inspect.run_facts(s)))
                 continue
             diff = inspect.diff_run(domain, s)
             lines += run_lines(diff)
+            lines.append(inspect.facts_line(inspect.run_facts(s)))
             if kind in FAILED_RUNS:
                 failed.append(inspect.compact(diff))
         lines.append(inspect.diffs_line(failed))

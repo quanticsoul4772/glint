@@ -282,3 +282,29 @@ def test_generate_prints_gate_outcomes_and_watches_with_the_domain(stand_in, mak
     tools_ab.generate(cfg)
     assert "GATE OUTCOMES: tools retail: no denies in the saved runs" in capsys.readouterr().out.splitlines()
     assert domains == ["retail", "retail"]
+
+
+def _hidden_call(tool: str, args: dict, i: int) -> dict:
+    return {"role": "assistant", "tool_calls": [{"id": f"c{i}", "name": "call_discoverable_agent_tool", "arguments": {
+        "agent_tool_name": tool, "arguments": json.dumps(args)}}]}
+
+
+def test_run_facts_name_the_lookups_the_plan_the_searches_and_how_the_run_ended():
+    msgs = [{"role": "assistant", "tool_calls": [{"id": "s", "name": "KB_search", "arguments": {"query": "dispute"}}]},
+            {"role": "tool", "id": "s", "content": "x" * 900},
+            {"role": "assistant", "tool_calls": [{"id": "p", "name": "plan_disputes", "arguments": {}}]},
+            {"role": "tool", "id": "p", "content": "{}"},
+            _hidden_call(inspect.DISPUTE, {"transaction_id": "t1"}, 1), {"role": "tool", "id": "c1", "content": "ok"},
+            _hidden_call(inspect.HISTORY, {"user_id": "u"}, 2), {"role": "tool", "id": "c2", "content": "[]"},
+            _hidden_call("get_payment_history_6183", {}, 3), {"role": "tool", "id": "c3", "content": "Error: bad"}]
+    sim = {"messages": msgs, "termination_reason": "user_stop", "info": {"error": None}}
+    f = inspect.run_facts(sim)
+    # the history read came after the first filing; a lookup that errored is not counted as made
+    assert f["reads"] == [inspect.HISTORY] and f["history_before_first_filing"] is False
+    assert (f["plans"], f["filings"], f["searches"], f["search_chars"]) == (1, 1, 1, 900)
+    line = inspect.facts_line(f)
+    assert "dispute history before the first filing: NO" in line and "ended: user_stop" in line
+    overflow = inspect.run_facts({"messages": [], "termination_reason": "infrastructure_error",
+                                  "info": {"error": "ContextWindowExceededError: 131072 tokens"}})
+    assert overflow["history_before_first_filing"] is None
+    assert "ended: infrastructure_error (ContextWindowExceededError" in inspect.facts_line(overflow)
