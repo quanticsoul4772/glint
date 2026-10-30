@@ -55,6 +55,9 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   increase; the plan asks the noticed date and keep-or-replace per card; the dispute-history read is required;
   replies list the open items; and KB_search/grep return excerpts within a context budget, with KB_read. The
   shorter search results reach this arm only (the compared base arm keeps τ²'s whole documents).
+- `banking-plan-v7-gated`: the same tools arm on v6 plus the two fixes for v6's regressions (#134): the plan refuses
+  a noticed date after τ²'s today and names today in its question, and its replacement step no longer says "first"
+  (research/5-measurements/v6-diagnosis-2026-10-30.md).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -74,7 +77,7 @@ it.
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
                            banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|banking-plan-v2-gated|
                            banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|
-                           banking-plan-v6-gated|heldout2-gated|banking-high-alone]
+                           banking-plan-v6-gated|banking-plan-v7-gated|heldout2-gated|banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
 `--rerun-infrastructure-errors` (needs `--allow-mixed-code` when the code changed): the runs that ended in an
@@ -260,6 +263,12 @@ SETS = {
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v6_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v6.json",
                               "save": "tools-ab-banking12-gated-plan-v6"},
+    # v6 plus the fixes for its two regressions (#134; decision 2026-10-30)
+    "banking-plan-v7-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
+                              "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
+                              "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v7_gated",
+                              "out": RESULTS / "tools-ab-banking12-gated-plan-v7.json",
+                              "save": "tools-ab-banking12-gated-plan-v7"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
