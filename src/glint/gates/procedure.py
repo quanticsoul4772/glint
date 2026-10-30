@@ -134,14 +134,6 @@ def card_digits(db, a: dict) -> GateResult:
     card = card_of_transaction(db, user, txn)
     on_file = (db.credit_card_accounts.data.get(card) or {}).get("card_last_4_digits")
     filed = str(a.get("card_last_4_digits") or "").strip()
-    # a card's last 4 digits are 4 numerals: Glimmer filed "XXXX" once the tool was given (banking-plan-v5-gated
-    # 041 t2, 2026-10-30), which the given-tool check below let through
-    if not re.fullmatch(r"\d{4}", filed):
-        return deny("procedure.card_digits.format", CARD_SOURCE, "the card digits are not 4 numerals",
-                    "File with the card's last 4 digits: from the card's account record when it shows them, else "
-                    f"the digits the customer's {CARD_DIGITS_TOOL} reports.", {"credit_card_account_id": card},
-                    consequence="A dispute filed without the card's digits is a dispute on no card.",
-                    facts=[f"card_last_4_digits given: {filed!r}"])
     if on_file:
         details = {"credit_card_account_id": card, "on_file": True}
         if filed != str(on_file):
@@ -162,6 +154,14 @@ def card_digits(db, a: dict) -> GateResult:
                     "card. One tool covers every dispute on this card.",
                     facts=[f"{CARD_DIGITS_TOOL}: not given in this conversation", f"card: {card}",
                            "the card's account record carries no digits"])
+    # a card's last 4 digits are 4 numerals: Glimmer filed "XXXX" once the tool was given (banking-plan-v5-gated
+    # 041 t2, 2026-10-30), which the given-tool check let through (digits on file are held to their value above)
+    if not re.fullmatch(r"\d{4}", filed):
+        return deny("procedure.card_digits.format", CARD_SOURCE, "the card digits are not 4 numerals",
+                    f"File with the 4 digits the customer's {CARD_DIGITS_TOOL} reports; ask the customer to run it "
+                    "if they have not.", details,
+                    consequence="A dispute filed without the card's digits is a dispute on no card.",
+                    facts=[f"card_last_4_digits given: {filed!r}", f"{CARD_DIGITS_TOOL}: given"])
     return allow("procedure.card_digits", CARD_SOURCE, details)
 
 
