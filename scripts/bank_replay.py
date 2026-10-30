@@ -90,7 +90,7 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                 users = twin.tools.db.users.data
                 calls = with_address_asks(with_plans([ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments,
                                                                requestor=a.requestor) for k, a in enumerate(actions)]),
-                                          lambda u: (users.get(u) or {}).get("address"))
+                                          lambda u, users=users: (users.get(u) or {}).get("address"))
                 for call in calls:
                     k, action = call.id.removeprefix("gold-"), call
                     if call.name == PLAN_TOOL:  # Glint's tool: the ungated twin has none

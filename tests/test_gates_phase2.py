@@ -560,7 +560,7 @@ def test_replays_insert_the_refused_order_before_gold_orders_to_the_address_on_f
         users = env.tools.db.users.data
         gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
                 for k, a in enumerate(task.evaluation_criteria.actions)]
-        calls = with_address_asks(gold, lambda u: (users.get(u) or {}).get("address"))
+        calls = with_address_asks(gold, lambda u, users=users: (users.get(u) or {}).get("address"))
         asks = [k for k, c in enumerate(calls) if c.id.endswith(ADDRESS_ASK_SUFFIX)]
         assert len(asks) == inserted and len(calls) == len(gold) + inserted
         for k in asks:  # the copy sits just before gold's own order, with the same call

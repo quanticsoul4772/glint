@@ -73,7 +73,7 @@ def replay(domain: str, tasks: list, events: EventLog) -> dict:
         gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
                 for k, a in enumerate(task.evaluation_criteria.actions or [] if task.evaluation_criteria else [])]
         users = env.tools.db.users.data if domain == "banking_knowledge" else {}
-        calls = (with_address_asks(with_plans(gold), lambda u: (users.get(u) or {}).get("address"))
+        calls = (with_address_asks(with_plans(gold), lambda u, users=users: (users.get(u) or {}).get("address"))
                  if domain == "banking_knowledge" else gold)
         for call in calls:
             k = call.id.removeprefix("gold-")
