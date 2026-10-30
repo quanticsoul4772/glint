@@ -271,7 +271,7 @@ def _decision(db, a: dict, approving: bool) -> GateResult:
             return deny(rule, CLI_SOURCE, "a policy check fails, so the increase is denied, not approved",
                         f"Deny it with denial_reason {v['denial_reason']!r}.", v,
                         consequence="The request is decided by the checks; tell the customer the reason for the "
-                        "denial.", facts=[f"first failing check: {v['denial_reason']}", *v["reasons"]])
+                        "denial. Every other change for this customer is blocked until it is denied.", facts=[f"first failing check: {v['denial_reason']}", *v["reasons"]])
         wanted = round(banking._money(acc.get("credit_limit")) + amount)
         new = banking._money(a.get("new_credit_limit"))
         if round(new) != wanted:
@@ -368,6 +368,10 @@ def _register_banking(reg: GateRegistry) -> None:
                           "database before this write.", procedure.lookups(tool), toolkit=True))
     reg.register(Gate("procedure_increase_first_gate", (DISPUTE,), "credit_card_account_logistics_007: a submitted "
                       "credit limit increase is decided before a dispute.", procedure.increase_first))
+    reg.register(Gate("procedure_increase_undecided_gate", tuple(t for t in procedure.VERIFIED_WRITES if t not in
+                      (SUBMIT, APPROVE, DENY, DISPUTE, REPLACE)), "credit_card_account_logistics_005-007: no other "
+                      "change for a customer while their submitted credit limit increase is undecided.",
+                      procedure.increase_undecided))
     reg.register(Gate("procedure_card_digits_gate", (DISPUTE,), "A dispute carries the card's last 4 digits as the "
                       "customer's get_card_last_4_digits tool reports them, after the customer was given it.",
                       procedure.card_digits))

@@ -230,6 +230,26 @@ def increase_first(db, a: dict) -> GateResult:
     return allow("procedure.increase_first", source, {"undecided_increase_requests": []})
 
 
+INCREASE_UNDECIDED = ("credit_card_account_logistics_005 (utilization at the request), _006 (payment history), _007 "
+                      "(submit, the checks, then the decision, in that order)")
+
+
+def increase_undecided(db, a: dict) -> GateResult:
+    """Any other change for a customer whose submitted credit limit increase is undecided: the checks read the account
+    as submitted (task_051: a payment from checking before the decision lowered the utilization the denial reads)."""
+    user = owner(db, a)
+    pending = undecided_increases(db, user) if user else []
+    if pending:
+        return deny("procedure.increase_undecided", INCREASE_UNDECIDED, "a credit limit increase was submitted for "
+                    "this customer and not decided yet", "Finish the increase first (the required lookups, then "
+                    "approve or deny), then retry this write.", {"undecided_increase_requests": pending},
+                    consequence="The increase is decided on the account as it was submitted; a payment, transfer or "
+                    "other change before the decision changes what the checks read. Every other change for this "
+                    "customer is blocked until the increase is approved or denied.",
+                    facts=[f"undecided increase requests for {user}: {', '.join(map(str, pending))}"])
+    return allow("procedure.increase_undecided", INCREASE_UNDECIDED, {"undecided_increase_requests": []})
+
+
 DISPOSITION = ("customer_frustrated_demands_human", "supervisor_request_service_complaint",
                "customer_requests_human_no_specific_reason", "request_completed_customer_wants_human_followup")
 FRAUD_DISPUTE = ("unauthorized_fraudulent_charge",)
