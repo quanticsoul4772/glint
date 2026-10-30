@@ -294,6 +294,23 @@ def _decision(db, a: dict, approving: bool) -> GateResult:
 # goes through and the customer decides. The refusal replays, so the record is rebuilt in τ²'s strict replay.
 EXPEDITE_REASONS, EXPEDITE_ASK = ("fraud_suspected", "stolen"), "banking.replacement.expedite_ask"
 EXPEDITE_SOURCE = "credit_card_replacements_001"
+# credit_card_replacements_002 "Expedited shipping fees by card tier", by the exact card names it lists. In
+# banking-plan-v8-gated 039 trial 2 the agent told a Gold cardholder expedited shipping costs "an additional fee", the
+# customer declined, and the run failed on expedited_shipping; 054 trial 1 said "complimentary for Gold" and passed.
+EXPEDITE_FEES = {**dict.fromkeys(("Bronze Rewards Card", "EcoCard", "Business Bronze Rewards Card"), 15.0),
+                 **dict.fromkeys(("Silver Rewards Card", "Business Silver Rewards Card", "Green Rewards Card",
+                                  "Silver Zoom Card"), 10.0),
+                 **dict.fromkeys(("Gold Rewards Card", "Business Gold Rewards Card", "Platinum Rewards Card",
+                                  "Business Platinum Rewards Card", "Diamond Elite Card"), 0.0)}
+
+
+def expedite_fee_text(card_type: str | None) -> str:
+    """What expedited shipping costs for this card, in the words of credit_card_replacements_002."""
+    fee = EXPEDITE_FEES.get(str(card_type))
+    if fee is None:
+        return f"credit_card_replacements_002 lists no expedited shipping fee for the {card_type}"
+    return (f"expedited shipping for the {card_type} is complimentary ($0.00)" if fee == 0
+            else f"expedited shipping for the {card_type} costs ${fee:.2f}")
 
 
 # credit_card_replacements_001: "Confirm the shipping address with the customer (primary or alternate, including any
@@ -333,13 +350,16 @@ def _replacement(toolkit, a: dict) -> GateResult:
     reason = a.get("reason")
     if (reason in EXPEDITE_REASONS and not as_flag(a.get("expedited_shipping"))
             and card not in getattr(toolkit, "glint_expedite_asked", set())):
+        fee = expedite_fee_text((toolkit.db.credit_card_accounts.data.get(card) or {}).get("card_type"))
         return deny(EXPEDITE_ASK, EXPEDITE_SOURCE, f"the policy strongly recommends expedited shipping for a {reason} "
                     "replacement, and this order has none", "Tell the customer the bank strongly recommends expedited "
-                    "shipping for this replacement and ask whether they want it. If they do, order with "
-                    "expedited_shipping true; if they decline, order again as it is (the repeat is allowed).",
-                    details | {"reason": reason}, consequence="Asked once per card: the customer decides, and a "
-                    "repeated order without expedited shipping goes through.",
+                    f"shipping for this replacement, tell them that {fee}, and ask whether they want it. If they do, "
+                    "order with expedited_shipping true; if they decline, order again as it is (the repeat is "
+                    "allowed).", details | {"reason": reason, "expedite_fee": fee},
+                    consequence="Asked once per card: the customer decides, and a repeated order without expedited "
+                    "shipping goes through.",
                     facts=[f"reason: {reason}", f"expedited_shipping given: {a.get('expedited_shipping')!r}",
+                           f"credit_card_replacements_002: {fee}",
                            ("credit_card_replacements_001: \"If the reason is fraud_suspected or stolen, strongly "
                             "recommend expedited shipping to minimize exposure\"")])
     return allow("banking.replacement", "glint.assist.banking.LIMIT_FIRST", details)
