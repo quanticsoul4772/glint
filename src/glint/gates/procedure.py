@@ -335,7 +335,8 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     if plan is None:
         return deny("procedure.dispute_plan.none", PLAN_SOURCE, "no dispute plan was made for this customer in this "
                     "conversation", f"Call {PLAN_TOOL}(user_id, transactions=[{{transaction_id, dispute_reason, "
-                    "contacted_merchant} for EVERY transaction the customer wants disputed]), then file the "
+                    "contacted_merchant, issue_noticed_date} for EVERY transaction the customer wants disputed]), then "
+                    "file the "
                     "disputes in its order with its eligible_for_provisional_credit values.",
                     {"user_id": user, "transaction_id": tid},
                     consequence=f"{CREDIT_ORDER} Plan every dispute the customer asked for in one call.",
@@ -357,6 +358,8 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     refund = (f", resolution_requested {nxt['resolution_requested']!r}" if nxt.get("resolution_requested") else "")
     if nxt.get("partial_refund_amount") is not None:
         refund += f", partial_refund_amount {nxt['partial_refund_amount']}"
+    if nxt.get("issue_noticed_date"):
+        refund += f", issue_noticed_date {nxt['issue_noticed_date']!r}"
     fix_next = (f"File {nxt['transaction_id']} next (dispute_reason {nxt['dispute_reason']!r}, "
                 f"eligible_for_provisional_credit {nxt['eligible_for_provisional_credit']}{refund}). {REPLAN}")
     if tid != nxt["transaction_id"]:
@@ -394,6 +397,17 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
                     facts=[f"{tid}: contacted_merchant not given in the plan"])
     if as_flag(a.get("contacted_merchant")) != nxt["contacted_merchant"]:
         reasons.append(f"contacted_merchant {a.get('contacted_merchant')} != the plan's {nxt['contacted_merchant']}")
+    if nxt.get("issue_noticed_date") is None:
+        return deny("procedure.dispute_plan.ask", PLAN_SOURCE, "the plan was made without the date the customer "
+                    f"first noticed the {tid} charge", "Ask the customer when they first noticed the charge, then "
+                    f"call {PLAN_TOOL} again with issue_noticed_date (MM/DD/YYYY) for it.", details | {"next": nxt},
+                    consequence="The dispute records the date the customer gives (credit_cards_(general)_014 field "
+                    "11); today's date is right only when the customer says they noticed it today. Ask about every "
+                    "planned dispute missing it at once.",
+                    facts=[f"{tid}: issue_noticed_date not given in the plan"])
+    if a.get("issue_noticed_date") != nxt["issue_noticed_date"]:
+        reasons.append(f"issue_noticed_date {a.get('issue_noticed_date')!r} != the plan's "
+                       f"{nxt['issue_noticed_date']!r}")
     if as_flag(a.get("eligible_for_provisional_credit")) != nxt["eligible_for_provisional_credit"]:
         reasons.append(f"eligible_for_provisional_credit {a.get('eligible_for_provisional_credit')} != the plan's "
                        f"{nxt['eligible_for_provisional_credit']}")
