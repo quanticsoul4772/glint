@@ -26,10 +26,27 @@ def test_by_task_keeps_tuned_tasks_apart_and_counts_non_results_separately(tmp_p
     assert "1/1 (1 not results)" in out and "UNTUNED" in out and "TUNED" in out
     untuned = next(line for line in out.splitlines() if line.startswith("UNTUNED"))
     tuned = next(line for line in out.splitlines() if line.startswith("TUNED"))
-    assert untuned.split() == ["UNTUNED", "1/2", "1/1"] and tuned.split() == ["TUNED", "1/1", "0/0"]
+    # 031 is tuned by default since 2026-10-30
+    assert untuned.split() == ["UNTUNED", "0/0", "0/0"] and tuned.split() == ["TUNED", "2/3", "1/1"]
     assert by_task.main([str(a), "--tuned", "task_031"]) == 0
     assert next(x for x in capsys.readouterr().out.splitlines() if x.startswith("TUNED")).split() == ["TUNED", "1/2"]
     assert by_task.main([]) == 2 and by_task.main([str(tmp_path)]) == 1
+
+
+def test_by_task_prints_pass_k_wilson_intervals_and_the_sign_test_floor(tmp_path, capsys):
+    a = tmp_path / "tools_ab_banking12_a_modal"
+    a.mkdir()
+    sims = [_sim("task_031", 0, "pass"), _sim("task_031", 1, "pass"), _sim("task_039", 0, "pass"),
+            _sim("task_039", 1, "fail"), _sim("task_050", 0, "fail")]
+    (a / "tools-banking_knowledge.json").write_text(json.dumps({"simulations": sims}), encoding="utf-8")
+    assert by_task.main([str(a), "--tuned", "task_031,task_039"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert next(x for x in out if x.startswith("tuned pass^k")).split()[-2:] == ["1/2", "tasks"]
+    assert next(x for x in out if x.startswith("untuned pass^k")).split()[-2:] == ["0/1", "tasks"]
+    assert next(x for x in out if x.startswith("tuned 95% CI")).split()[-1] == "30%-95%"  # Wilson for 3/4
+    assert "no result on 1 tasks can reach p < 0.05 by sign test (best p = 0.500)" in "\n".join(out)
+    assert by_task.wilson(0, 0) == (0.0, 1.0)
+    assert by_task.sign_test_floor(9) == 5 and by_task.sign_test_floor(4) is None
 
 
 def test_log_review_reports_missed_error_lines_and_returned_noise(tmp_path, capsys):
