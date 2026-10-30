@@ -50,6 +50,11 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   customer was given the tool; the digits on the account record), and no block names a digit.
 - `banking-plan-v5-gated`: the same tools arm on #117: plan_disputes tells the agent to look up the dispute history
   before filing (τ² scores that read where its gold makes it; 12 failed v4 runs skipped only it).
+- `banking-plan-v6-gated`: the same tools arm on the v6 fixes from the 23 failed v5 runs (#121-#129, research/
+  v6-plan.md): card digits as 4 numerals and from the record when on file; other changes wait for an undecided
+  increase; the plan asks the noticed date and keep-or-replace per card; the dispute-history read is required;
+  replies list the open items; and KB_search/grep return excerpts within a context budget, with KB_read. The
+  shorter search results reach this arm only (the compared base arm keeps τ²'s whole documents).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -68,8 +73,8 @@ it.
 
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
                            banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|banking-plan-v2-gated|
-                           banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|heldout2-gated|
-                           banking-high-alone]
+                           banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|
+                           banking-plan-v6-gated|heldout2-gated|banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
 `--rerun-infrastructure-errors` (needs `--allow-mixed-code` when the code changed): the runs that ended in an
@@ -249,6 +254,12 @@ SETS = {
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v5_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v5.json",
                               "save": "tools-ab-banking12-gated-plan-v5"},
+    # The v6 fixes from the v5 failure diagnosis (#121-#129; decision 2026-10-30)
+    "banking-plan-v6-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
+                              "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
+                              "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v6_gated",
+                              "out": RESULTS / "tools-ab-banking12-gated-plan-v6.json",
+                              "save": "tools-ab-banking12-gated-plan-v6"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
