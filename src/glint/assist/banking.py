@@ -329,10 +329,14 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
                  "can_get_credit": all(ok for name, ok in v["provisional_credit_criteria"].items()
                                        if name != COUNT_CRITERION),
                  "disputes_counted_before": len(on_record) + len(order),
-                 "provisional_credit_criteria": v["provisional_credit_criteria"],
-                 # Glimmer filed card names or '0000' when it never gave the customer the digits tool (banking-plan-
-                 # v2-gated, the only difference in 6 runs, 2026-10-29); the digits are the customer's to look up
-                 "card_last_4_digits_from": CARD_DIGITS_HOW}
+                 "provisional_credit_criteria": v["provisional_credit_criteria"]}
+        if v.get("card_last_4_digits"):
+            # the account record shows them: file those, do not give the customer the tool (054, 2026-10-30)
+            entry["card_last_4_digits"] = v["card_last_4_digits"]
+        else:
+            # Glimmer filed card names or '0000' when it never gave the customer the digits tool (banking-plan-
+            # v2-gated, the only difference in 6 runs, 2026-10-29); the digits are the customer's to look up
+            entry["card_last_4_digits_from"] = CARD_DIGITS_HOW
         questions = []
         if contacted is None:
             questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")

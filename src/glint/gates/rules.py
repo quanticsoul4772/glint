@@ -59,8 +59,9 @@ NO_RULE_YET = {
     "airline": (),
     "banking_knowledge": tuple(NO_RULE_REASONS),
 }
-# GENERIC (not WRITE) tools gated like writes: they end or redirect the conversation
-GATED_GENERIC = {"banking_knowledge": ("transfer_to_human_agents",)}
+# GENERIC (not WRITE) tools gated like writes: they end or redirect the conversation, or record a step in the scored
+# database (a tool given to the customer)
+GATED_GENERIC = {"banking_knowledge": ("transfer_to_human_agents", "give_discoverable_user_tool")}
 PHASE2 = {
     "retail": ("modify_user_address",),
     "airline": ("book_reservation", "send_certificate"),
@@ -68,7 +69,7 @@ PHASE2 = {
         "log_verification", "change_user_email", "update_transaction_rewards_3847",
         "log_credit_card_closure_reason_4521", "apply_statement_credit_8472", "apply_credit_card_account_flag_6147",
         "close_credit_card_account_7834", "apply_checking_account_credit_5829", *debit.DEBIT_TOOLS,
-        "transfer_to_human_agents"),
+        "transfer_to_human_agents", "give_discoverable_user_tool"),
 }
 RULED = {"retail": tuple(RETAIL_ACTIONS) + PHASE2["retail"], "airline": AIRLINE_GATED + PHASE2["airline"],
          "banking_knowledge": BANKING_GATED + PHASE2["banking_knowledge"]}
@@ -373,6 +374,9 @@ def _register_banking(reg: GateRegistry) -> None:
     reg.register(Gate("procedure_dispute_plan_gate", (DISPUTE,), "credit_cards_(general)_015 criterion 4: the "
                       "disputes filed first take the provisional credit, so each filing follows the plan_disputes "
                       "plan (order from τ² train gold, tasks 037-041 and 081).", procedure.dispute_plan, toolkit=True))
+    reg.register(Gate("procedure_give_card_digits_gate", ("give_discoverable_user_tool",), "credit_cards_(general)"
+                      "_014: the customer looks up the card's digits only when its account record does not show "
+                      "them.", procedure.give_card_digits, toolkit=True))
 
 
 def build_registry(domain: str) -> GateRegistry:
