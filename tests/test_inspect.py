@@ -412,6 +412,46 @@ def test_an_increase_verdict_without_its_decision_and_the_documents_a_run_saw():
     assert "VERDICT NOT FILED: deny verdict, no decision filed" in brief and "key doc not seen: increase" in brief
 
 
+def _refused_run() -> dict:
+    """task_041's first gold dispute refused under five rules with gold's own values, once with a flipped flag, and
+    once by the environment."""
+    args = dict(gold()[1]["args"])
+    msgs = []
+    for i, rule in enumerate(("procedure.lookups", "banking.dispute", "procedure.dispute_plan.values",
+                              "banking.new_rule", "procedure.dispute_plan.ask")):
+        msgs += [hidden(DISPUTE, args, i), reply(i, deny(rule, "refused", "fix"), error=True)]
+    flipped = args | {"eligible_for_provisional_credit": not args["eligible_for_provisional_credit"]}
+    msgs += [hidden(DISPUTE, flipped, 5), reply(5, deny("banking.dispute", "differs", DISPUTE_FIX), error=True)]
+    msgs += [hidden(DISPUTE, args, 6), reply(6, "Error: no such transaction", error=True)]
+    return {"task_id": TASK, "trial": 0, "termination_reason": "user_stop", "info": {},
+            "reward_info": {"reward": 0.0}, "messages": msgs}
+
+
+def test_live_refusals_sort_each_gate_refusal_against_gold():
+    r = inspect.live_refusals(DOMAIN, _refused_run())
+    assert r["refused"] == 6  # the environment's rejection is not a gate refusal
+    assert [x["rule_id"] for x in r["held_for_precondition"]] == ["procedure.lookups", "procedure.dispute_plan.ask"]
+    assert [x["rule_id"] for x in r["state_differs"]] == ["banking.dispute"]
+    assert [x["rule_id"] for x in r["plan_differs_from_gold"]] == ["procedure.dispute_plan.values"]
+    assert [x["rule_id"] for x in r["live_false_refusals"]] == ["banking.new_rule"]
+    assert [(x["rule_id"], x["index"]) for x in r["differs_from_gold"]] == [("banking.dispute", 11)]
+
+
+def test_cli_refusals_counts_each_kind_and_names_the_false_and_plan_refusals(tmp_path, capsys):
+    (tmp_path / "tools-banking_knowledge.json").write_text(json.dumps({"simulations": [_refused_run()]}),
+                                                           encoding="utf-8")
+    assert cli.main(["refusals", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("== tools banking_knowledge: 1 runs; 6 gate refusals, 5 judged (the refused write matches gold): "
+                          "1 live false refusals, "
+                          "1 plan differs from gold, 1 state differs, 2 held for precondition, 1 differs from gold")
+    assert "  banking.dispute: differs from gold 1, state differs 1" in out
+    assert f"LIVE FALSE REFUSALS: {TASK} trial 0: {DISPUTE} refused by banking.new_rule (message 7)" in out
+    assert "PLAN DIFFERS FROM GOLD" in out
+    with pytest.raises(FileNotFoundError):
+        cli.main(["refusals", str(tmp_path), "--arm", "base"])
+
+
 def test_run_events_warn_on_a_repeated_wrong_field_and_audit_the_passes(tmp_path, capsys):
     results, events = tmp_path / "results.json", tmp_path / "events.jsonl"
     with RunEvents(results, events, label="tools banking", poll_s=60, domain=DOMAIN):
