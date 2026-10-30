@@ -486,7 +486,7 @@ def test_a_fraud_replacement_without_expedited_shipping_is_asked_once():
 
 
 def test_an_expedited_or_non_fraud_replacement_is_not_asked():
-    env, task, events = _bank("task_054")
+    env, task, _ = _bank("task_054")
     order = _play(env, task, rules.REPLACE)
     assert _ran(_hidden(env, rules.REPLACE, **order))  # gold's own order, expedited: allowed at once
     env2, task2, _ = _bank("task_054")
