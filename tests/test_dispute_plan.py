@@ -423,6 +423,33 @@ def test_every_overcharge_entry_tells_the_agent_not_to_suggest_a_full_refund():
     assert "full refund" not in str(plan["ask_user"]).lower()  # the question for the customer stays neutral
 
 
+def test_the_plan_says_to_look_up_the_dispute_history_before_filing():
+    # Glimmer filed without get_user_dispute_history_7291 in 12 failed banking-plan-v4-gated runs (039-041, 081);
+    # τ² logs that read in the database it scores when its gold makes it, so those runs failed on it alone (2026-10-29)
+    env, _, gold = _gated("task_039")
+    plan = json.loads(_call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold)).content)
+    assert plan["before_filing"] == banking.BEFORE_FILING and banking.DISPUTE_HISTORY_TOOL in plan["before_filing"]
+
+
+@pytest.mark.parametrize("task_id, scored", [("task_039", True), ("task_031", False)])
+def test_the_dispute_history_read_is_scored_only_where_gold_makes_it(task_id, scored):
+    # why the plan hints instead of a gate requiring the lookup: τ²'s read log allowlist logs the read in 039 (gold
+    # makes it), not in 031 (gold files without it), so the hint cannot cost 031 its database match
+    from tau2.runner.build import _derive_read_log_allowlist
+
+    task = _task(task_id)
+    env = registry.get_env_constructor("banking_knowledge")(retrieval_variant="bm25_grep", task=task,
+                                                             read_log_allowlist=_derive_read_log_allowlist(task))
+    init = task.initial_state
+    env.set_state(init.initialization_data if init else None, init.initialization_actions if init else None, [])
+    before = env.get_db_hash()
+    user_id = _gold_disputes(task)[0]["user_id"]
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
+    reply = _call(env, WRAPPER, agent_tool_name=banking.DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": user_id}))
+    assert not str(reply.content).startswith("Error")
+    assert (env.get_db_hash() != before) is scored
+
+
 def test_a_dispute_needs_the_customer_given_the_digits_tool_and_no_block_names_a_digit():
     # Glimmer filed 'Gold Rewards Card', 'bgold' or '0000' when it never gave the customer get_card_last_4_digits
     # (banking-plan-v2-gated, 2026-10-29); gold gives it where the card has no digits on file. The gate does not know

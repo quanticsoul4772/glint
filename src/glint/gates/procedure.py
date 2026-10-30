@@ -40,7 +40,9 @@ BANK_CREDIT_LOOKUPS = ((ACCOUNTS, "bank_accounts_(general)_043/_044"),
 # write -> the hidden lookups its procedure requires before it, each with its source document. Lookups the
 # knowledge base mentions without making them a precondition are not required (credit card disputes: the dispute
 # history feeds the provisional credit count, which plan_disputes reads from the database; τ²'s train gold files some
-# disputes without that lookup, and τ² scores these tasks on the database, which a read cannot change).
+# disputes without that lookup (031, 037, 038), so requiring it would deny gold's own writes. τ² does log the read in
+# the database it scores where its gold makes it (039-041, 053, 054, 080, 081: the read log allowlist), so
+# plan_disputes tells the agent to make it (banking.BEFORE_FILING)).
 REQUIRED_LOOKUPS = {
     "approve_credit_limit_increase_5847": CLI_LOOKUPS,
     "deny_credit_limit_increase_5848": CLI_LOOKUPS,
