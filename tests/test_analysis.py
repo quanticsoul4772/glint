@@ -103,6 +103,41 @@ def test_export_results_tallies_by_task_and_totals_only_compared_tasks(run_set, 
     assert s["runs"] == {"alone": [1, 4], "tools": [2, 5]}
 
 
+def _seeded(make_sim, kinds: dict, seed=lambda task, trial: 7 * trial):
+    """Saved runs {(task, trial): kind}, each with a seed (tools_ab seeds every run from its task and trial)."""
+    return [make_sim(task, trial, kind) | {"seed": seed(task, trial)} for (task, trial), kind in kinds.items()]
+
+
+def test_export_results_takes_a_tools_only_sets_base_arm_from_the_named_set(run_set, make_sim, monkeypatch, tmp_path):
+    # banking-plan-v5-gated runs the tools arm only; its "alone" column is banking-plan-gated's base arm
+    import export_results
+
+    tools = run_set({("tools", "banking_knowledge"): _seeded(make_sim, {("a", 0): "pass", ("a", 1): "pass"})}, k=2,
+                    name="v5")
+    base = run_set({("base", "banking_knowledge"): _seeded(make_sim, {("a", 0): "fail", ("a", 1): "pass"}),
+                    ("tools", "banking_knowledge"): _seeded(make_sim, {("a", 0): "fail", ("a", 1): "fail"})}, k=2,
+                   name="plan")
+    monkeypatch.setattr(tools_ab, "SETS", {"v5": {"which": "v5"}, "plan": {"which": "plan"}})
+    monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: {"v5": tools, "plan": base}[c["which"]])
+    monkeypatch.setattr(export_results, "SETS", [("v5", True, "V5", "tuned", "note")])
+    monkeypatch.setattr(export_results, "BASE_FROM", {"v5": "plan"})
+    monkeypatch.setattr(export_results, "OUT", tmp_path / "results.json")
+    export_results.main()
+    (s,) = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    assert [(r["alone"], r["tools"], r["change"]) for r in s["tasks"]] == [("1/2", "2/2", "improved")]
+    assert s["runs"] == {"alone": [1, 2], "tools": [2, 2]}
+
+
+def test_export_results_refuses_a_base_arm_with_other_seeds(run_set, make_sim):
+    import export_results
+
+    tools = run_set({("tools", "banking_knowledge"): _seeded(make_sim, {("a", 0): "pass"})}, k=1, name="v5")
+    base = run_set({("base", "banking_knowledge"): _seeded(make_sim, {("a", 0): "pass"}, seed=lambda t, n: 99)}, k=1,
+                   name="plan")
+    with pytest.raises(SystemExit, match="differ in tasks, trials or seeds"):
+        export_results.with_base({}, tools, base)
+
+
 def test_export_results_says_when_a_set_has_no_data(monkeypatch, tmp_path, capsys):
     import export_results
 
