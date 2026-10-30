@@ -43,18 +43,19 @@ The same 12 banking tasks with Glint's decision tools, a dispute plan (`plan_dis
   - v5: the plan tells the agent to look up the dispute history before filing (#117).
 - **v5 on the untuned tasks:** 3 improved (050, 051, 052), 2 tied, 0 worse against alone; sign test p = 0.25; runs 5/20 → 14/20.
   - Across versions, the untuned totals ranged from 7/20 to 14/20 on code changes that do not touch those tasks; 051 and 052 are credit-limit tasks. The differences between gated versions are not established at k=4.
-  - v5 is reported because it is the latest version, not because it scored best.
+  - v5 is reported because it is the latest version; it is also the best of the five on the untuned tasks, so its 14/20 is the top of five noisy draws. Every version is compared with one baseline draw (5/20, run beside plain), so a low draw there would flatter all of them.
+  - "Tuned" here means the gates' design tasks; 037 counts as untuned for the tools-only results above.
 - **v5 on the tuned tasks:** 3 improved, 3 tied and 1 worse (037: 4/4 → 3/4).
-  - 040 and 041 went from 0/4 in every earlier arm to 4/4 and 3/4. The change behind it came from their own failures: in 12 failed v4 runs the agent skipped the dispute-history lookup, and τ² scores that read where its correct answer makes it. In v5, 2 failed runs skipped it.
+  - 040 and 041 went from 0/4 in every earlier arm to 4/4 and 3/4. The change behind it came from their own failures: in 12 failed v4 runs the dispute-history lookup was the only read τ² requires that the agent did not make (18 failed runs lacked it in all), and τ² scores that read where its correct answer makes it. In v5, 2 failed runs lacked it.
   - 081 overflowed the context in 3 of its 4 runs.
 - **Gates, v5:**
-  - 323 writes checked, 27 denied; 17 of 48 runs had at least one deny, and none ended on τ²'s error limit.
+  - 323 writes checked, 27 denied; 19 of 48 runs had at least one deny (from the gate log; the run's own summary said 17 because it reads the saved messages, which overflowed runs do not keep), and none ended on τ²'s error limit.
   - Replaying τ²'s expected actions for all 77 banking training tasks through the gates: 272 expected writes, 0 false refusals, and the database matches the ungated replay. The 2 denied writes are task_005's: its expected actions change the email of a user verified with placeholder data.
 - **Scoring checked:** re-scoring every gated arm with τ²'s own evaluator, offline and with the same read log, gives the live result for every run.
 
 ## Banking test split: no gain (read once, Oct 28)
-τ²'s untouched banking test split: all 20 tasks, k=4, both arms on Modal. The tools arm had the decision tools without gates. The run's 12 infrastructure errors were rerun with their own seeds.
-- 10/80 without the tools vs 10/80 with. By task: 1 improved (047: 0/4 → 1/4), 1 worse (036: 4/4 → 3/4), 18 tied; 16 tasks fail every run in both arms.
+τ²'s untouched banking test split: all 20 tasks, k=4, both arms on Modal. The tools arm had the decision tools without gates. The run's 12 infrastructure errors were rerun with their own seeds, on a later commit (70af7d7; the main run was a2e9da7).
+- 10/80 without the tools vs 10/80 with. By task: 1 improved (047: 0/4 → 1/4), 1 worse (036: 4/4 → 3/4), 18 tied; 15 tasks fail every run in both arms.
 - Only task_080 has a dispute or credit-limit step, and a decision tool was called in 1 of the 80 runs (036, trial 2). The split shows the tools neither helped nor hurt tasks they were not built for. It does not measure the tools on their own kind of task.
 - Context overflows: 16 runs alone, 12 with the tools; they count as failures.
 - There is no gated run on this split (decision 2026-10-28): the phase-2 debit rules were motivated by its failures, so a gated run there would be circular.

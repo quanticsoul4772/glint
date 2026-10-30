@@ -3,7 +3,7 @@
   "set": "banking-plan-v5-gated",
   "title": "Banking, untuned tasks, write gates enforced",
   "role": "untuned",
-  "note": "Tasks 031 and 050-053, which no gate or plan change came from. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Five earlier gated versions are in docs/results.md; this is the latest, not the best-chosen. k=4. Glimmer on Modal.",
+  "note": "Tasks 031 and 050-053, which no gate or plan change came from. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated versions are in docs/results.md; this is the latest, and also the best of the five on the untuned tasks, all against one baseline draw. k=4. Glimmer on Modal.",
   "tasks": [
    {
     "task": "banking_knowledge-task_031",
@@ -82,7 +82,7 @@
   "set": "banking-plan-v5-gated",
   "title": "Banking, tuned tasks, write gates enforced",
   "role": "tuned",
-  "note": "Tasks 037-041, 054 and 081: the gates and the dispute plan were shaped by their runs and correct answers (040 and 041 went from 0/4 to 4/4 and 3/4 after #117, which came from their failures). Do not read as general evidence. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Five earlier gated versions are in docs/results.md; this is the latest, not the best-chosen. k=4. Glimmer on Modal.",
+  "note": "Tasks 037-041, 054 and 081: the gates and the dispute plan were shaped by their runs and correct answers (040 and 041 went from 0/4 to 4/4 and 3/4 after #117, which came from their failures). Do not read as general evidence. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated versions are in docs/results.md; this is the latest, and also the best of the five on the untuned tasks, all against one baseline draw. k=4. Glimmer on Modal.",
   "tasks": [
    {
     "task": "banking_knowledge-task_037",

@@ -22,8 +22,9 @@ TUNED_GATES = {"task_037", "task_038", "task_039", "task_040", "task_041", "task
 # a tools-only set -> the set whose base arm it is compared with (same tasks, trials and seeds; checked in main)
 BASE_FROM = {"banking-plan-v5-gated": "banking-plan-gated"}
 GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on #117, against the "
-              "ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Five earlier gated "
-              "versions are in docs/results.md; this is the latest, not the best-chosen. k=4. Glimmer on Modal.")
+              "ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated "
+              "versions are in docs/results.md; this is the latest, and also the best of the five on the untuned "
+              "tasks, all against one baseline draw. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
     ("banking-plan-v5-gated", True, "Banking, untuned tasks, write gates enforced", "untuned",
      ("Tasks 031 and 050-053, which no gate or plan change came from. " + GATED_NOTE),
