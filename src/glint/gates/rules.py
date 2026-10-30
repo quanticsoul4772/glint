@@ -19,6 +19,7 @@ import json
 from glint.assist import airline, as_flag, banking, retail
 from glint.gates import banking as bank_rules
 from glint.gates import debit, procedure, travel
+from glint.gates.bankdb import undecided_increases
 from glint.gates.core import NO_RULE, Gate, GateRegistry, GateResult, allow, deny
 
 RETAIL_ACTIONS = {
@@ -182,17 +183,6 @@ def _airline_passengers(db, a: dict) -> GateResult:
 
 # ---- banking ------------------------------------------------------------------------------------------------------
 
-def _pending_increase(db, card: str) -> list[str]:
-    """Credit limit increase requests on `card` submitted but not yet decided. τ²'s approve record reuses the submit
-    request's id, so its insert is dropped and the request stays PENDING after a decision; a decision is visible only
-    as the approve or deny call recorded in agent_discoverable_tools."""
-    called = {str(r.get("tool_name")) for r in db.agent_discoverable_tools.data.values()}
-    if APPROVE in called or DENY in called:
-        return []
-    return [rid for rid, r in db.credit_limit_increase_requests.data.items()
-            if r.get("credit_card_account_id") == card and str(r.get("status", "")).upper() == "PENDING"]
-
-
 def _dispute(db, a: dict) -> GateResult:
     source = "glint.assist.banking.check_dispute"
     uid, tid = a.get("user_id", ""), a.get("transaction_id", "")
@@ -297,9 +287,9 @@ def _decision(db, a: dict, approving: bool) -> GateResult:
     return allow(rule, CLI_SOURCE, v)
 
 
-def _replacement(db, a: dict) -> GateResult:
+def _replacement(toolkit, a: dict) -> GateResult:
     card = a.get("credit_card_account_id", "")
-    pending = _pending_increase(db, card)
+    pending = undecided_increases(toolkit, card=card)
     details = {"credit_card_account_id": card, "undecided_increase_requests": pending}
     if pending:
         return deny("banking.replacement.increase_first", "glint.assist.banking.LIMIT_FIRST", "a credit limit "
@@ -330,7 +320,7 @@ def _register_banking(reg: GateRegistry) -> None:
                       "a check fails, with the first failing reason.", lambda db, a: _decision(db, a, False)))
     reg.register(Gate("banking_replacement_gate", (REPLACE,), "credit_card_account_logistics_007: a pending "
                       "replacement makes a credit limit increase fail, so the increase is decided first.",
-                      _replacement))
+                      _replacement, toolkit=True))
     debit_gates = ((debit.FREEZE, debit.freeze, "_026: only an ACTIVE card is frozen."),
                    (debit.UNFREEZE, debit.unfreeze, "_026: only a FROZEN card on an OPEN account is unfrozen."),
                    (debit.CLOSE, debit.close, ("_025: no pending transactions, the 14-day card age, a "
@@ -361,7 +351,7 @@ def _register_banking(reg: GateRegistry) -> None:
               ("transfer_to_human_agents", procedure.transfer, ("bank_accounts_(general)_042: the transfer reason "
                "tier; a submitted credit limit increase is decided before a transfer.")))
     for tool, fn, purpose in others:
-        reg.register(Gate(f"banking_{tool}_gate", (tool,), purpose, fn))
+        reg.register(Gate(f"banking_{tool}_gate", (tool,), purpose, fn, toolkit=fn is procedure.transfer))
     # procedure gates: every banking write acting for a user, and every write whose procedure names lookups
     reg.register(Gate("procedure_verified_gate", procedure.VERIFIED_WRITES, "Every procedure starts with a verified "
                       "customer: the user's log_verification record from this conversation.", procedure.verified))
@@ -369,11 +359,11 @@ def _register_banking(reg: GateRegistry) -> None:
         reg.register(Gate(f"procedure_lookups_{tool}", (tool,), "The lookups the procedure names, recorded in the "
                           "database before this write.", procedure.lookups(tool), toolkit=True))
     reg.register(Gate("procedure_increase_first_gate", (DISPUTE,), "credit_card_account_logistics_007: a submitted "
-                      "credit limit increase is decided before a dispute.", procedure.increase_first))
+                      "credit limit increase is decided before a dispute.", procedure.increase_first, toolkit=True))
     reg.register(Gate("procedure_increase_undecided_gate", tuple(t for t in procedure.VERIFIED_WRITES if t not in
                       (SUBMIT, APPROVE, DENY, DISPUTE, REPLACE)), "credit_card_account_logistics_005-007: no other "
                       "change for a customer while their submitted credit limit increase is undecided.",
-                      procedure.increase_undecided))
+                      procedure.increase_undecided, toolkit=True))
     reg.register(Gate("procedure_card_digits_gate", (DISPUTE,), "A dispute carries the card's last 4 digits as the "
                       "customer's get_card_last_4_digits tool reports them, after the customer was given it.",
                       procedure.card_digits))

@@ -11,7 +11,6 @@ from datetime import date, timedelta
 from glint.assist.banking import TODAY, _date, _money
 
 NOW_TEXT = "2025-11-14 03:40:00 EST"  # what get_current_time returns; log_verification's time_verified
-APPROVE, DENY_CLI = "approve_credit_limit_increase_5847", "deny_credit_limit_increase_5848"
 # bank_accounts_(general)_005 (personal checking) and _007 (business checking): the tier of each account level
 CHECKING_TIERS = {
     "light blue account": "entry", "light green account": "entry", "green fee-free account": "entry",
@@ -57,21 +56,21 @@ def verified_today(db, user_id: str) -> bool:
                for r in db.verification_history.data.values())
 
 
-def recorded_tools(db) -> set[str]:
-    """Hidden tools this conversation has called that the database recorded (every write; a read only when the
-    environment records it)."""
-    return {str(r.get("tool_name")) for r in db.agent_discoverable_tools.data.values()}
+def increase_request_ids(db) -> set[str]:
+    return set(db.credit_limit_increase_requests.data)
 
 
-def undecided_increases(db, user_id: str | None = None) -> list[str]:
-    """Credit limit increase requests submitted today (of this user, or of anyone when user_id is None) and not yet
-    approved or denied. τ²'s approve record reuses the submit request's id, so the request stays PENDING after a
-    decision; the decision shows only as the approve or deny call recorded in agent_discoverable_tools."""
-    if {APPROVE, DENY_CLI} & recorded_tools(db):
-        return []
-    return [rid for rid, r in db.credit_limit_increase_requests.data.items()
-            if (user_id is None or r.get("user_id") == user_id) and str(r.get("status", "")).upper() == "PENDING"
-            and as_date(r.get("submitted_at")) == TODAY]
+def undecided_increases(toolkit, user_id: str | None = None, card: str | None = None) -> list[str]:
+    """Credit limit increase requests submitted in this conversation and not yet approved or denied (of this user, on
+    this card; of anyone when both are None), from the enforcer's record (`env.tools.glint_increases`: user -> the
+    request ids their last submit created; an approve or deny that ran for the user clears it; glint.gates.enforce).
+    The database cannot show it: τ²'s approve record reuses the submit request's id, so a request stays PENDING after
+    a decision, and τ² records each decision tool once, under its name alone, so a second decision in the conversation
+    leaves no trace there."""
+    waiting = getattr(toolkit, "glint_increases", {})
+    rows = toolkit.db.credit_limit_increase_requests.data
+    return [rid for user, ids in waiting.items() if user_id is None or user == user_id for rid in ids
+            if card is None or (rows.get(rid) or {}).get("credit_card_account_id") == card]
 
 
 def money(value) -> float:
