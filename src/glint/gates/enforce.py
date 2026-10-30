@@ -14,6 +14,11 @@ The wrapper also keeps the environment's own record of the hidden READ tools the
 call_discoverable_agent_tool, a WRITE that τ²'s evaluator replays, so the replay rebuilds the same record and every
 gate decision replays unchanged. In replay a gate runs without a wall-clock timeout (core.run_gate).
 
+It also keeps who has a credit limit increase submitted and not decided (`env.tools.glint_increases`: user ->
+the request ids their last submit created; an approve or deny that ran for the user clears it), which the increase
+gates judge on (glint.gates.bankdb.undecided_increases): the database cannot show a second decision. Submits and
+decisions go through call_discoverable_agent_tool, so the replay rebuilds the same record.
+
 On banking it also keeps the dispute plans (`env.tools.glint_plans`: user id -> the latest plan_disputes result the
 agent got), which the plan gate judges each dispute on. τ²'s evaluator replays only mutating calls and skips READ
 tools, so a plan recorded from a READ call would be missing in replay and the gate would decide differently there.
@@ -37,9 +42,11 @@ from tau2.environment.toolkit import ToolType
 
 from glint.assist.banking import PLAN_TOOL
 from glint.assist.tau2_tools import add_plan_tool
+from glint.gates.bankdb import increase_request_ids
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
-from glint.gates.rules import GATED_GENERIC, REQUIRED_GATES, build_registry, manifest, parse_hidden_arguments
+from glint.gates.rules import (APPROVE, DENY, GATED_GENERIC, REQUIRED_GATES, SUBMIT, build_registry, manifest,
+                               parse_hidden_arguments)
 
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
@@ -128,6 +135,18 @@ class Enforcer:
         if env.tools.tool_type(name) == ToolType.READ:
             env.tools.glint_reads.add(name)
 
+    @staticmethod
+    def _record_increase(env, tool: str, args: dict, reply: ToolMessage, before: set[str] | None) -> None:
+        """Note the request ids a credit limit increase submit that ran created, under its user; an approve or deny
+        that ran for that user clears them."""
+        if reply.error or str(reply.content).startswith("Error"):
+            return
+        user = str(args.get("user_id", ""))
+        if tool == SUBMIT and before is not None:
+            env.tools.glint_increases[user] = sorted(increase_request_ids(env.tools.db) - before)
+        elif tool in (APPROVE, DENY):
+            env.tools.glint_increases.pop(user, None)
+
     def _record_plan(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """Keep the dispute plan the agent got from plan_disputes; a later plan for the same user replaces it."""
         if call.requestor != "assistant" or call.name != PLAN_TOOL or reply.error:
@@ -159,7 +178,7 @@ class Enforcer:
 
         if self.domain == "banking_knowledge":
             add_plan_tool(env)
-        env.tools.glint_reads, env.tools.glint_plans = set(), {}
+        env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
 
         def get_response(message: ToolCall) -> ToolMessage:
             write = self.write_call(env, message)
@@ -170,7 +189,10 @@ class Enforcer:
                 return reply
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
-                return original_response(message)
+                before = increase_request_ids(env.tools.db) if write[0] == SUBMIT else None
+                reply = original_response(message)
+                self._record_increase(env, *write, reply, before)
+                return reply
             return ToolMessage(id=message.id, content=result.message(self.wording), requestor=message.requestor,
                                role="tool", error=True)
 

@@ -385,6 +385,60 @@ def test_other_changes_wait_for_the_submitted_increase():
     assert _ran(_hidden(env, "pay_credit_card_from_checking_9182", **pay))
 
 
+def test_a_resubmitted_increase_blocks_again_after_the_first_decision():
+    # task_051's gold: submit, deny, pay, resubmit, approve. τ² records each decision tool once, under its name, so
+    # only the enforcer's own record shows a second request undecided. (Gold's resubmit repeats the first request's
+    # arguments; τ² derives the request id from them and answers "A similar request may already exist", so nothing
+    # new is submitted there. A resubmit for another amount is a new request.)
+    env, task, events = _bank("task_051")
+    second = _play(env, task, rules.SUBMIT, 1)  # gold's first submit, deny and payment ran on the way
+    assert env.tools.glint_increases == {}
+    assert str(_hidden(env, rules.SUBMIT, **second).content).startswith("Error: A similar request")
+    assert env.tools.glint_increases == {}  # a submit τ² refused records nothing
+    assert _ran(_hidden(env, rules.SUBMIT, **second | {"requested_increase_amount": 500}))
+    assert len(env.tools.glint_increases[second["user_id"]]) == 1
+    pay = json.loads(next(a.arguments["arguments"] for a in task.evaluation_criteria.actions
+                          if _name(a) == "pay_credit_card_from_checking_9182")) | {"amount": 100}  # gold paid 3000
+    assert _denied(_hidden(env, "pay_credit_card_from_checking_9182", **pay), "approve or deny")
+    assert _rule(events) == "procedure.increase_undecided"
+    card = second["credit_card_account_id"]
+    limit = round(proc.money(env.tools.db.credit_card_accounts.data[card]["credit_limit"])) + 500
+    assert _ran(_hidden(env, rules.APPROVE, credit_card_account_id=card, user_id=second["user_id"],
+                        new_credit_limit=limit))
+    assert env.tools.glint_increases == {}
+    # the gates let it through (τ²'s own tool then refuses it: gold's payment left a $0 balance)
+    assert "was NOT executed" not in _hidden(env, "pay_credit_card_from_checking_9182", **pay).content
+
+
+def test_increase_record_and_its_decisions_replay_unchanged_in_taus_strict_replay():
+    """Submits and decisions go through the hidden-tool wrapper, which τ²'s evaluator replays, so the enforcer's
+    increase record is rebuilt there and an undecided-increase deny replays unchanged (strict=True)."""
+    enforcer = Enforcer("banking_knowledge", EventLog(":memory:"))
+    env, task, _ = _bank("task_051", enforcer)
+    history = []
+
+    def send(call: ToolCall):
+        reply = env.get_response(call)
+        history.extend([AssistantMessage(role="assistant", tool_calls=[call]), reply])
+        return reply
+
+    gold = task.evaluation_criteria.actions
+    upto = next(k for k, a in enumerate(gold) if _name(a) == "pay_credit_card_from_checking_9182")
+    for k, a in enumerate(gold[:upto]):  # verification, submit, the lookups, deny, accounts read
+        assert _ran(send(ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant")))
+    submit = json.loads(next(a.arguments["arguments"] for a in gold if _name(a) == rules.SUBMIT))
+    send(ToolCall(id="s2", name="call_discoverable_agent_tool", requestor="assistant", arguments={
+        "agent_tool_name": rules.SUBMIT, "arguments": json.dumps(submit | {"requested_increase_amount": 500})}))
+    pay = gold[upto].arguments
+    assert _denied(send(ToolCall(id="p", name=gold[upto].name, arguments=pay, requestor="assistant")),
+                   "approve or deny")
+    replay, _, _ = _bank("task_051", enforcer)
+    init = task.initial_state
+    replay.set_state(init.initialization_data if init else None, init.initialization_actions if init else None,
+                     history, strict=True)
+    assert replay.tools.glint_increases == env.tools.glint_increases != {}
+
+
 def test_transfer_reason_after_fraud_is_the_fraud_code():
     env, task, _ = _bank("task_081")
     _play(env, task, "transfer_to_human_agents")  # the stolen cards are closed and the fraud disputes filed

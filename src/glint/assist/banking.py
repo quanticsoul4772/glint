@@ -150,6 +150,13 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
     return out
 
 
+def replacements_today(db, credit_card_account_id: str) -> list[str]:
+    """Replacement orders for this card placed today (in this conversation): its disputes use cancel_and_reissue
+    (credit_cards_(general)_014 card_action)."""
+    return [r["order_id"] for r in _rows(db.credit_card_orders, credit_card_account_id=credit_card_account_id)
+            if _date(r.get("order_date")) == TODAY]
+
+
 def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
                   contacted_merchant: bool | None = None, replacement_requested: bool = False,
                   other_requests: list[str] | None = None, planned_before: int = 0) -> dict:
@@ -164,8 +171,7 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
     txn = db.credit_card_transaction_history.data.get(transaction_id)
     if txn is None or txn.get("user_id") != user_id:
         return {"ready": False, "reasons": [f"transaction {transaction_id} does not exist for user {user_id}"]}
-    replaced_today = [r["order_id"] for r in _rows(db.credit_card_orders, credit_card_account_id=credit_card_account_id)
-                      if _date(r.get("order_date")) == TODAY]
+    replaced_today = replacements_today(db, credit_card_account_id)
     replacement_requested = as_flag(replacement_requested)
     if contacted_merchant is not None:
         contacted_merchant = as_flag(contacted_merchant)
@@ -273,8 +279,7 @@ def card_actions(db, given: dict[str, set[str]]) -> tuple[dict[str, dict], dict[
     yet gets the order as the next step."""
     plans, rejected = {}, {}
     for card, answers in given.items():
-        ordered = [r["order_id"] for r in _rows(db.credit_card_orders, credit_card_account_id=card)
-                   if _date(r.get("order_date")) == TODAY]
+        ordered = replacements_today(db, card)
         if ordered:
             plans[card] = {"credit_card_account_id": card, "card_action": "cancel_and_reissue",
                            "replacement_ordered_today": ordered}
@@ -397,8 +402,8 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
         if contacted is None:
             questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")
         if noticed is None:
-            # credit_cards_(general)_014 field 11 is the customer's answer; a task_054 run filed another date than
-            # the customer's (banking-plan-v5-gated trial 2, 2026-10-30)
+            # credit_cards_(general)_014 field 11 is the customer's answer; banking-plan-v5-gated task_054 trial 2
+            # filed today's 11/14/2025 for a charge the customer noticed on 11/12/2025 (its simulations file)
             questions.append(f"When did you first notice the {tid} charge?")
         if entry["card_action"] is None:
             # credit_cards_(general)_014 card_action is the customer's choice; in banking-plan-v5-gated task_039

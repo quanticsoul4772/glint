@@ -292,6 +292,22 @@ def test_the_card_action_is_the_customers_answer_one_per_card():
     assert _ran(_file(env, gold[0]))  # gold's filing before the order: allowed
 
 
+def test_a_replacement_ordered_after_the_plan_sets_the_card_action():
+    # the customer first says keep the card, then asks for a new one: the plan's keep_active answer gives way to the
+    # order, as banking.dispute requires, instead of two gates demanding opposite values
+    task = _task("task_039")
+    env, _, gold = _gated("task_039")
+    user, items = gold[0]["user_id"], [i | {"card_action": "keep_active"} for i in _items(gold)]
+    _call(env, "plan_disputes", user_id=user, transactions=items)
+    order = next(json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
+                 if a.name == WRAPPER and a.arguments.get("agent_tool_name") == banking.ORDER_TOOL)
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=banking.ORDER_TOOL)
+    assert _ran(_call(env, WRAPPER, agent_tool_name=banking.ORDER_TOOL, arguments=json.dumps(order)))
+    verdict = _plan_gate(env, gold[0] | {"card_action": "keep_active"})
+    assert verdict.rule_id == "procedure.dispute_plan.values" and "'cancel_and_reissue'" in verdict.fix
+    assert _ran(_file(env, gold[0]))  # gold's cancel_and_reissue filing
+
+
 def test_a_replacement_ordered_today_sets_the_card_action():
     # task_037: gold orders the replacement before the disputes; the order wins over a keep_active answer
     task = _task("task_037")

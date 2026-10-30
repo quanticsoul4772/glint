@@ -23,7 +23,8 @@ import json
 import re
 
 from glint.assist import as_flag
-from glint.assist.banking import CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, TODAY, card_of_transaction
+from glint.assist.banking import (CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, TODAY, card_of_transaction,
+                                  replacements_today)
 from glint.gates.bankdb import as_date, money, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 
@@ -44,7 +45,8 @@ BANK_CREDIT_LOOKUPS = ((ACCOUNTS, "bank_accounts_(general)_043/_044"),
 # knowledge base mentions without making them a precondition are not required. The credit card dispute requires the
 # dispute history: it is criterion 4's count of disputes on record, and τ² logs the read in the database it scores
 # where its gold makes it (the read log allowlist), so a filing without it fails those tasks (12 of 35 failed
-# banking-plan-v4-gated runs, banking.BEFORE_FILING). τ² logs a read under an id made from the tool name alone and keeps the first record, so a repeated
+# banking-plan-v4-gated runs, banking.BEFORE_FILING; in banking-plan-v5-gated, with the hint, 081 trial 0 and 041 trial
+# 2 still filed before any history read). τ² logs a read under an id made from the tool name alone and keeps the first record, so a repeated
 # read changes nothing, and a read gold does not make is not logged. τ²'s train gold files without it in 031, 037 and
 # 038; replays insert it there with the plan call (glint.gates.replayplan).
 REQUIRED_LOOKUPS = {
@@ -220,10 +222,10 @@ def give_card_digits(toolkit, a: dict) -> GateResult:
     return allow("banking.give_card_digits", GIVE_SOURCE, details)
 
 
-def increase_first(db, a: dict) -> GateResult:
+def increase_first(toolkit, a: dict) -> GateResult:
     source = "credit_card_account_logistics_007"
-    user = owner(db, a)
-    pending = undecided_increases(db, user) if user else []
+    user = owner(toolkit.db, a)
+    pending = undecided_increases(toolkit, user) if user else []
     if pending:
         return deny("procedure.increase_first", source, "a credit limit increase was submitted and not decided yet",
                     "Approve or deny the submitted credit limit increase first, then file the dispute.",
@@ -236,11 +238,11 @@ INCREASE_UNDECIDED = ("credit_card_account_logistics_005 (utilization at the req
                       "(submit, the checks, then the decision, in that order)")
 
 
-def increase_undecided(db, a: dict) -> GateResult:
+def increase_undecided(toolkit, a: dict) -> GateResult:
     """Any other change for a customer whose submitted credit limit increase is undecided: the checks read the account
     as submitted (task_051: a payment from checking before the decision lowered the utilization the denial reads)."""
-    user = owner(db, a)
-    pending = undecided_increases(db, user) if user else []
+    user = owner(toolkit.db, a)
+    pending = undecided_increases(toolkit, user) if user else []
     if pending:
         return deny("procedure.increase_undecided", INCREASE_UNDECIDED, "a credit limit increase was submitted for "
                     "this customer and not decided yet", "Finish the increase first (the required lookups, then "
@@ -274,10 +276,10 @@ def fraud_today(db) -> list[str]:
     return seen
 
 
-def transfer(db, a: dict) -> GateResult:
+def transfer(toolkit, a: dict) -> GateResult:
     source = "bank_accounts_(general)_042 (transfer reason tiers); credit_card_account_logistics_007"
     reason = a.get("reason", "other")
-    pending = undecided_increases(db)
+    db, pending = toolkit.db, undecided_increases(toolkit)
     if pending:
         return deny("procedure.transfer.increase_undecided", source, "a submitted credit limit increase is not "
                     "decided yet, and a transfer would leave it open", "Finish the increase first (the required "
@@ -357,6 +359,12 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     nxt = remaining[0] | {"eligible_for_provisional_credit": as_flag(remaining[0]["eligible_for_provisional_credit"])}
     if remaining[0]["contacted_merchant"] is not None:
         nxt["contacted_merchant"] = as_flag(remaining[0]["contacted_merchant"])
+    # a replacement ordered today for the card after the plan was made sets cancel_and_reissue, as the plan does when
+    # the order comes first (glint.assist.banking.card_actions); the plan's older answer would contradict
+    # banking.dispute, which requires cancel_and_reissue once the card is being replaced
+    txn = db.credit_card_transaction_history.data.get(tid) or {}
+    if replacements_today(db, card_of_transaction(db, user, txn)):
+        nxt["card_action"] = "cancel_and_reissue"
     refund = (f", resolution_requested {nxt['resolution_requested']!r}" if nxt.get("resolution_requested") else "")
     if nxt.get("partial_refund_amount") is not None:
         refund += f", partial_refund_amount {nxt['partial_refund_amount']}"
