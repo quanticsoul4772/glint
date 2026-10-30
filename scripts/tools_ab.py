@@ -61,6 +61,11 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 - `banking-plan-v8-gated`: the v7 tools arm plus the ask-first gate on expedited shipping (a fraud or theft
   replacement without it is refused once with credit_card_replacements_001's recommendation; the repeat is allowed),
   from v7's largest remaining cause (research/5-measurements/v7-diagnosis-2026-10-30.md).
+- `banking-plan-v9-gated`: the v8 tools arm plus four fixes from v8's failures
+  (research/5-measurements/v8-diagnosis-2026-10-30.md): an open item for an increase verdict with no decision filed
+  (#142), the card tier's fee in the expedite refusal (#143), an ask-once confirmation before an order to the address
+  on file (#144), and plan_disputes' other_requests holding disputes until a named increase is decided (#145). 052 is
+  tuned from here on (the open item came from its runs), leaving 050 and 053 untuned.
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -80,7 +85,8 @@ it.
 Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|banking-other|gate-banking|banking-gated|
                            banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|banking-plan-v2-gated|
                            banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|
-                           banking-plan-v6-gated|banking-plan-v7-gated|banking-plan-v8-gated|heldout2-gated|
+                           banking-plan-v6-gated|banking-plan-v7-gated|banking-plan-v8-gated|banking-plan-v9-gated|
+                           heldout2-gated|
                            banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
 
@@ -279,6 +285,12 @@ SETS = {
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v8_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v8.json",
                               "save": "tools-ab-banking12-gated-plan-v8"},
+    # v8 plus the four fixes from its failures (#142-#145; decision 2026-10-30)
+    "banking-plan-v9-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
+                              "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
+                              "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v9_gated",
+                              "out": RESULTS / "tools-ab-banking12-gated-plan-v9.json",
+                              "save": "tools-ab-banking12-gated-plan-v9"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",

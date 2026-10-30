@@ -17,8 +17,9 @@ from pathlib import Path
 from glint.runlog import NOT_RESULTS, outcome
 
 # banking12 tasks that are design data (research/00-decisions.md): 038, 054 (the banking-failures set), 039-041
-# (dispute planning), 037 and 081 (the filing order), 031 and 051 (since 2026-10-30)
-TUNED = ("task_031", "task_037", "task_038", "task_039", "task_040", "task_041", "task_051", "task_054", "task_081")
+# (dispute planning), 037 and 081 (the filing order), 031 and 051 (since 2026-10-30), 052 (the v9 open item, 2026-10-30)
+TUNED = ("task_031", "task_037", "task_038", "task_039", "task_040", "task_041", "task_051", "task_052", "task_054",
+         "task_081")
 Z95 = 1.959964
 
 
