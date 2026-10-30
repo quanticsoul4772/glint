@@ -478,3 +478,46 @@ def test_a_card_with_digits_on_file_is_held_to_them_without_naming_them():
     assert _denied(wrong, "procedure.card_digits.value") and "record shows" in wrong.content
     assert "7823" not in wrong.content
     assert _ran(_file(env, filing | flag))
+
+
+def test_card_digits_must_be_4_numerals_even_after_the_tool_was_given():
+    # Glimmer filed "XXXX" once the tool was given (banking-plan-v5-gated 041 t2, 2026-10-30)
+    env, _, gold = _gated("task_039")
+    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    first = env.tools.glint_plans[gold[0]["user_id"]]["order"][0]
+    filing = next(d for d in gold if d["transaction_id"] == first["transaction_id"])
+    flag = {"eligible_for_provisional_credit": first["eligible_for_provisional_credit"] == "True"}
+    for bad in ("XXXX", "165", "1652a", ""):
+        assert _denied(_file(env, filing | flag | {"card_last_4_digits": bad}), "procedure.card_digits.format")
+    assert _ran(_file(env, filing | flag))
+
+
+def test_the_plan_lists_digits_on_file_and_the_digits_tool_is_not_given_for_that_card():
+    # 054: the card's record shows 7823; Glimmer gave the customer the tool anyway in 2 of 4 v5 runs, and the extra
+    # tool record broke the database match (2026-10-30)
+    env, _, gold = _gated("task_054", digits=False)
+    user = gold[0]["user_id"]
+    _call(env, "plan_disputes", user_id=user, transactions=_items(gold))
+    entry = env.tools.glint_plans[user]["order"][0]
+    assert entry["card_last_4_digits"] == "7823" and "card_last_4_digits_from" not in entry
+    before = env.get_db_hash()
+    reply = _call(env, "give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
+    assert _denied(reply, "banking.give_card_digits.on_file") and "7823" not in reply.content
+    assert env.get_db_hash() == before
+
+
+def test_the_digits_tool_is_given_where_the_record_shows_no_digits_and_other_tools_pass():
+    env, _, gold = _gated("task_039", digits=False)
+    assert _ran(_call(env, "give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL))
+    assert _ran(_call(env, "give_discoverable_user_tool", discoverable_tool_name="submit_cash_back_dispute_0589",
+                      arguments=json.dumps({"user_id": gold[0]["user_id"], "transaction_id": "t"})))
+
+
+def test_the_digits_tool_for_no_known_card_is_denied():
+    # nobody verified, no plan, no card named: the gate cannot tell which card the tool is for (fail closed)
+    env = _env(_task("task_039"), Enforcer("banking_knowledge", EventLog(":memory:")))
+    reply = _call(env, "give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
+    assert _denied(reply, "banking.give_card_digits.unknown_card")
+    named = _call(env, "give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL,
+                  arguments="not json")
+    assert _denied(named, "banking.give_card_digits.unknown_card")

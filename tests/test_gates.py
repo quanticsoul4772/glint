@@ -628,7 +628,9 @@ def test_no_gold_write_is_refused():
     # task_005's gold verifies a placeholder user and changes an unverified user's email: denied by policy, listed
     assert sorted((f["task_id"], f["tool"]) for r in reports for f in r["placeholder_gold"]) == [
         ("task_005", "change_user_email"), ("task_005", "log_verification")]
-    assert sum(r["gold_writes"] for r in reports) == 418 and events.verify() > 418
+    # 435 = 120 retail + 26 airline + 289 banking; banking counts gold's 17 give_discoverable_user_tool calls since
+    # giving a tool is gated (procedure.give_card_digits, 2026-10-30; 418 before)
+    assert sum(r["gold_writes"] for r in reports) == 435 and events.verify() > 435
 
 
 def test_gate_replay_main_reports_and_exits_by_the_count(tmp_path, monkeypatch, capsys):

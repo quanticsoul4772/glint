@@ -19,6 +19,9 @@ agent says or seems to have done them.
 """
 from __future__ import annotations
 
+import json
+import re
+
 from glint.assist import as_flag
 from glint.assist.banking import CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, TODAY, card_of_transaction
 from glint.gates.bankdb import as_date, money, owner, undecided_increases, verified_today
@@ -151,7 +154,68 @@ def card_digits(db, a: dict) -> GateResult:
                     "card. One tool covers every dispute on this card.",
                     facts=[f"{CARD_DIGITS_TOOL}: not given in this conversation", f"card: {card}",
                            "the card's account record carries no digits"])
+    # a card's last 4 digits are 4 numerals: Glimmer filed "XXXX" once the tool was given (banking-plan-v5-gated
+    # 041 t2, 2026-10-30), which the given-tool check let through (digits on file are held to their value above)
+    if not re.fullmatch(r"\d{4}", filed):
+        return deny("procedure.card_digits.format", CARD_SOURCE, "the card digits are not 4 numerals",
+                    f"File with the 4 digits the customer's {CARD_DIGITS_TOOL} reports; ask the customer to run it "
+                    "if they have not.", details,
+                    consequence="A dispute filed without the card's digits is a dispute on no card.",
+                    facts=[f"card_last_4_digits given: {filed!r}", f"{CARD_DIGITS_TOOL}: given"])
     return allow("procedure.card_digits", CARD_SOURCE, details)
+
+
+def _meant_cards(toolkit, a: dict) -> set[str]:
+    """The credit cards a give of the digits tool is for: the card its arguments name; else the cards of the
+    transactions in this conversation's dispute plans; else the cards of the users verified today. Gold gives the
+    tool with no arguments (031, 037-041, 053), so the arguments alone cannot say."""
+    db = toolkit.db
+    try:
+        named = json.loads(a.get("arguments") or "{}").get("credit_card_account_id")
+    except (ValueError, AttributeError):
+        named = None
+    if named:
+        return {str(named)}
+    planned = set()
+    for user, plan in getattr(toolkit, "glint_plans", {}).items():
+        for entry in plan.get("order", []):
+            txn = db.credit_card_transaction_history.data.get(entry["transaction_id"])
+            if txn is not None:
+                planned.add(card_of_transaction(db, user, txn))
+    if planned:
+        return planned
+    return {cid for cid, acc in db.credit_card_accounts.data.items() if verified_today(db, str(acc.get("user_id")))}
+
+
+GIVE_SOURCE = "credit_cards_(general)_014 card_last_4_digits; the account record"
+
+
+def give_card_digits(toolkit, a: dict) -> GateResult:
+    """The customer gets the card-digits tool only for a card whose account record does not show the digits. When
+    the record shows them (054, 2026-10-30: Glimmer gave the tool anyway in 2 of 4 runs), the agent files those, and
+    the extra tool record in the database is a step the procedure does not have. Other user tools are allowed."""
+    tool = str(a.get("discoverable_tool_name", ""))
+    if tool != CARD_DIGITS_TOOL:
+        return allow("banking.give_tool", GIVE_SOURCE, {"discoverable_tool_name": tool},
+                     reason="no rule covers giving this tool")
+    db, cards = toolkit.db, _meant_cards(toolkit, a)
+    if not cards:
+        return deny("banking.give_card_digits.unknown_card", GIVE_SOURCE, "no card this tool could be for: no card "
+                    "named, no dispute plan, no customer verified today", "Verify the customer, plan the disputes "
+                    f"({PLAN_TOOL}), then give {CARD_DIGITS_TOOL} for a card whose record shows no digits.",
+                    {"discoverable_tool_name": tool},
+                    consequence="The tool reports one card's digits; without a card it reports nothing usable.",
+                    facts=["no credit_card_account_id in the arguments", "no dispute plan in this conversation",
+                           "no customer verified today"])
+    on_file = sorted(c for c in cards if (db.credit_card_accounts.data.get(c) or {}).get("card_last_4_digits"))
+    details = {"cards": sorted(cards), "on_file": on_file}
+    if len(on_file) == len(cards):
+        return deny("banking.give_card_digits.on_file", GIVE_SOURCE, "the card's digits are on its account record",
+                    "Do not give the tool: file the disputes with the card_last_4_digits the card's account record "
+                    "shows (the dispute plan lists them).", details,
+                    consequence="The customer would be asked for digits the bank already has on file.",
+                    facts=[f"{c}: its record carries the digits" for c in on_file])
+    return allow("banking.give_card_digits", GIVE_SOURCE, details)
 
 
 def increase_first(db, a: dict) -> GateResult:
