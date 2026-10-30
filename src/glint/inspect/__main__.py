@@ -1,6 +1,8 @@
 """Print each run's diff against τ²'s expected writes for a data folder (read-only; nothing is written).
 
 Usage: python -m glint.inspect diff DATA_FOLDER [--task T] [--arm tools]
+       python -m glint.inspect sequence DATA_FOLDER --task T [--trial N] [--arm tools]
+       python -m glint.inspect messages DATA_FOLDER --task T --grep REGEX [--trial N] [--arm tools]
 """
 from __future__ import annotations
 
@@ -92,10 +94,39 @@ def main(argv: list[str]) -> int:
     diff.add_argument("data", type=Path)
     diff.add_argument("--task")
     diff.add_argument("--arm", default="tools")
+    seq = sub.add_parser("sequence", help="each run's dispute, replacement and increase steps in order")
+    msgs = sub.add_parser("messages", help="the messages of runs matching a pattern")
+    for p in (seq, msgs):
+        p.add_argument("data", type=Path)
+        p.add_argument("--task", required=True)
+        p.add_argument("--trial", type=int)
+        p.add_argument("--arm", default="tools")
+    msgs.add_argument("--grep", required=True, help="a regex, case-insensitive")
     args = parser.parse_args(argv)
-    for line in folder_lines(args.data, args.arm, args.task):
+    if args.command == "diff":
+        lines = folder_lines(args.data, args.arm, args.task)
+    else:
+        lines = run_lines_of(args.data, args.arm, args.task, args.trial,
+                             inspect.run_sequence if args.command == "sequence"
+                             else (lambda s: inspect.run_messages(s, args.grep)))
+    for line in lines:
         print(line, flush=True)
     return 0
+
+
+def run_lines_of(data: Path, arm: str, task: str, trial: int | None, per_run) -> list[str]:
+    """`per_run(sim)`'s lines for each run of one task (or one trial) in the folder's arm files, under a header."""
+    files = sorted(data.glob(f"{arm}-*.json"))
+    if not files:
+        raise FileNotFoundError(f"no {arm} arm file ({arm}-<domain>.json) in {data}")
+    lines = []
+    for f in files:
+        sims = [s for s in json.loads(f.read_text(encoding="utf-8"))["simulations"]
+                if str(s["task_id"]) == task and (trial is None or int(s.get("trial") or 0) == trial)]
+        for s in sorted(sims, key=lambda s: int(s.get("trial") or 0)):
+            lines.append(f"== {s['task_id']} trial {s.get('trial')} ({outcome(s)})")
+            lines += per_run(s)
+    return lines
 
 
 if __name__ == "__main__":

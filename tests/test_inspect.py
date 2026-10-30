@@ -317,3 +317,48 @@ def test_run_facts_name_the_lookups_the_plan_the_searches_and_how_the_run_ended(
                                   "info": {"error": "ContextWindowExceededError: 131072 tokens"}})
     assert overflow["history_before_first_filing"] is None
     assert "ended: infrastructure_error (ContextWindowExceededError" in inspect.facts_line(overflow)
+
+
+ORDER, SUBMIT = "order_replacement_credit_card_7291", "submit_credit_limit_increase_request_7392"
+
+
+def _run_with_steps() -> dict:
+    msgs = [{"role": "user", "content": "I noticed it today, 10/30/2026."},
+            {"role": "assistant", "tool_calls": [{"id": "p", "name": "plan_disputes", "arguments": {
+                "user_id": "u", "transactions": [{"transaction_id": "t1"}, {"transaction_id": "t2"}]}}]},
+            {"role": "tool", "id": "p", "content": "{}"},
+            _hidden_call(ORDER, {"credit_card_account_id": "cc1", "user_id": "u"}, 1),
+            {"role": "tool", "id": "c1", "content": "ordered"},
+            _hidden_call(inspect.DISPUTE, {"transaction_id": "t1", "eligible_for_provisional_credit": True}, 2),
+            {"role": "tool", "id": "c2", "content": "Error: this write was blocked by a policy gate and was NOT "
+             "executed.", "error": True},
+            _hidden_call(SUBMIT, {"credit_card_account_id": "cc1", "user_id": "u"}, 3),
+            {"role": "tool", "id": "c3", "content": "submitted"},
+            _hidden_call("get_payment_history_6183", {}, 4), {"role": "tool", "id": "c4", "content": "[]"}]
+    return {"messages": msgs, "task_id": "task_x", "trial": 0}
+
+
+def test_run_sequence_lists_the_steps_in_order_and_marks_refusals():
+    lines = inspect.run_sequence(_run_with_steps())
+    assert [line.split()[1] for line in lines] == ["plan_disputes", ORDER, inspect.DISPUTE, SUBMIT]  # no other reads
+    assert lines[0].endswith("2 txns: t1, t2") and "credit_card_account_id=cc1" in lines[1]
+    assert "t1 credit=True REFUSED" in lines[2] and "REFUSED" not in lines[3]
+    assert [int(line[1:line.index("]")]) for line in lines] == [2, 4, 6, 8]  # each reply's message index
+
+
+def test_run_messages_shows_each_matching_message_with_its_index_and_role():
+    lines = inspect.run_messages(_run_with_steps(), r"10/30/20\d\d")
+    assert len(lines) == 1 and lines[0].startswith("[0 user] ...") and "10/30/2026" in lines[0]
+    assert len(inspect.run_messages(_run_with_steps(), "CC1")) == 2  # case-insensitive, tool calls included
+    assert inspect.run_messages(_run_with_steps(), "no such text") == []
+
+
+def test_cli_sequence_and_messages_read_one_task_from_the_arm_file(tmp_path, capsys):
+    (tmp_path / "tools-banking_knowledge.json").write_text(json.dumps({"simulations": [
+        _run_with_steps() | {"reward_info": {"reward": 0.0}}]}), encoding="utf-8")
+    assert cli.main(["sequence", str(tmp_path), "--task", "task_x"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("== task_x trial 0") and ORDER in out
+    assert cli.main(["messages", str(tmp_path), "--task", "task_x", "--trial", "0", "--grep", "noticed"]) == 0
+    assert "[0 user]" in capsys.readouterr().out
+    assert cli.main(["sequence", str(tmp_path), "--task", "task_other"]) == 0 and capsys.readouterr().out == ""
