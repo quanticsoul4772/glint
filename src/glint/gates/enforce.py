@@ -15,7 +15,8 @@ call_discoverable_agent_tool, a WRITE that τ²'s evaluator replays, so the repl
 gate decision replays unchanged. In replay a gate runs without a wall-clock timeout (core.run_gate).
 
 It also keeps who has a credit limit increase submitted and not decided (`env.tools.glint_increases`: user ->
-the request ids their last submit created; an approve or deny that ran for the user clears it), which the increase
+the request ids every submit that ran created for them; an approve or deny that ran clears the requests on its card,
+whichever user it names), which the increase
 gates judge on (glint.gates.bankdb.undecided_increases): the database cannot show a second decision. Submits and
 decisions go through call_discoverable_agent_tool, so the replay rebuilds the same record.
 
@@ -175,15 +176,21 @@ class Enforcer:
 
     @staticmethod
     def _record_increase(env, tool: str, args: dict, reply: ToolMessage, before: set[str] | None) -> None:
-        """Note the request ids a credit limit increase submit that ran created, under its user; an approve or deny
-        that ran for that user clears them."""
+        """Note the request ids a credit limit increase submit that ran created, added under its user (a second
+        submit, on another card, does not replace the first); an approve or deny that ran clears the requests on its
+        card, whichever user it names (τ²'s deny does not check that the card is that user's)."""
         if reply.error or str(reply.content).startswith("Error"):
             return
-        user = str(args.get("user_id", ""))
+        record = env.tools.glint_increases
         if tool == SUBMIT and before is not None:
-            env.tools.glint_increases[user] = sorted(increase_request_ids(env.tools.db) - before)
+            user = str(args.get("user_id", ""))
+            record[user] = record.get(user, []) + sorted(increase_request_ids(env.tools.db) - before)
         elif tool in (APPROVE, DENY):
-            env.tools.glint_increases.pop(user, None)
+            card, rows = args.get("credit_card_account_id"), env.tools.db.credit_limit_increase_requests.data
+            for user in list(record):
+                record[user] = [r for r in record[user] if (rows.get(r) or {}).get("credit_card_account_id") != card]
+                if not record[user]:
+                    del record[user]
 
     def _record_plan(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """Keep the dispute plan the agent got from plan_disputes; a later plan for the same user replaces it."""

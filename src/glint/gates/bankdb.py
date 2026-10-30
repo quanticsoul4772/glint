@@ -63,7 +63,8 @@ def increase_request_ids(db) -> set[str]:
 def undecided_increases(toolkit, user_id: str | None = None, card: str | None = None) -> list[str]:
     """Credit limit increase requests submitted in this conversation and not yet approved or denied (of this user, on
     this card; of anyone when both are None), from the enforcer's record (`env.tools.glint_increases`: user -> the
-    request ids their last submit created; an approve or deny that ran for the user clears it; glint.gates.enforce).
+    request ids every submit that ran created for them; an approve or deny that ran clears its card's requests;
+    glint.gates.enforce).
     The database cannot show it: τ²'s approve record reuses the submit request's id, so a request stays PENDING after
     a decision, and τ² records each decision tool once, under its name alone, so a second decision in the conversation
     leaves no trace there."""

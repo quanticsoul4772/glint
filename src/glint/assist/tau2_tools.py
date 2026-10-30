@@ -168,8 +168,9 @@ class DisputePlanTools(ToolKitBase):
 
 class BankingDecisionTools(DisputePlanTools):
     """Mixed in ahead of the banking toolkit class τ² composes per retrieval variant (see `install`). Its KB_search
-    and grep replace τ²'s (whole documents) with excerpts within a context budget (glint.assist.kb), for the tools
-    arm only; the base arm and glint-bank keep τ²'s."""
+    and grep replace τ²'s (whole documents) with excerpts within a context budget (glint.assist.kb), wherever this
+    class is applied: the tools arm and glint-bank with --decision-tools. The base arm and glint-bank without the flag
+    keep τ²'s."""
 
     @is_tool(ToolType.READ)
     def KB_search(self, query: str) -> str:
