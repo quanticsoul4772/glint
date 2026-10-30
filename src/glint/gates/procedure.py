@@ -23,8 +23,7 @@ import json
 import re
 
 from glint.assist import as_flag
-from glint.assist.banking import (CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, TODAY, card_of_transaction,
-                                  replacements_today)
+from glint.assist.banking import CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, TODAY, card_of_transaction, replacements_today
 from glint.gates.bankdb import as_date, money, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 

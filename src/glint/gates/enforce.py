@@ -45,8 +45,16 @@ from glint.assist.tau2_tools import add_plan_tool
 from glint.gates.bankdb import increase_request_ids
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
-from glint.gates.rules import (APPROVE, DENY, GATED_GENERIC, REQUIRED_GATES, SUBMIT, build_registry, manifest,
-                               parse_hidden_arguments)
+from glint.gates.rules import (
+    APPROVE,
+    DENY,
+    GATED_GENERIC,
+    REQUIRED_GATES,
+    SUBMIT,
+    build_registry,
+    manifest,
+    parse_hidden_arguments,
+)
 
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
