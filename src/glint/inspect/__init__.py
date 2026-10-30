@@ -255,8 +255,69 @@ def run_facts(sim: dict) -> dict:
             "history_before_first_filing": None if first_filing is None else any(i < first_filing for i in history),
             "searches": len(searches), "search_chars": sum(searches), "largest_search": max(searches, default=0),
             "order_before_submit": order_before_submit, "filing_before_decision": filing_before_decision,
-            "peak_prompt_tokens": max(prompts, default=0),
+            "peak_prompt_tokens": max(prompts, default=0), "claims_not_done": claims_not_done(sim, calls),
+            **exposure_and_verdict(calls),
             "termination": sim.get("termination_reason"), "error": str((sim.get("info") or {}).get("error") or "")}
+
+
+# Claims of a finished write in the agent's own words, each with the write that must have run by then. On τ²-bench a
+# false success (completion asserted, the record shows otherwise) is 45-48% of failures in single-control domains
+# (arXiv 2606.09863); v6 039 t0/t1 and v7 031 t0/t1 said a dispute was filed and filed none, v7 051 t3 said the
+# increase was denied and filed no deny (2026-10-30).
+CLAIMS = (
+    ("dispute filed", (DISPUTE,), re.compile(
+        r"\bdisputes?\b[^\n]{0,120}?\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:filed|submitted)"
+        r"|\bdisputes?\b[^\n]{0,120}?\b(?:filed|submitted)\s+successfully", re.IGNORECASE)),
+    ("replacement ordered", (ORDER,), re.compile(
+        r"\b(?:replacement|new card)\b[^\n]{0,80}?\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:ordered|placed)",
+        re.IGNORECASE)),
+    ("increase decided", (APPROVE, DENY_CLI), re.compile(
+        r"\b(?:increase|request)\b[^\n]{0,80}?\b(?:has|have)\s+been\s+(?:approved|denied)"
+        r"|\b(?:increase|request)\b[^\n]{0,40}?\b(?:is|was)\s+(?:approved|denied)\b", re.IGNORECASE)),
+)
+# the procedure document of each area a run can touch (tool names that put a run in the area)
+KEY_DOCS = (
+    ("increase", (SUBMIT, APPROVE, DENY_CLI, "check_credit_limit_increase"),
+     "doc_credit_cards_credit_card_account_logistics_007"),
+    ("dispute", (DISPUTE, "plan_disputes"), "doc_credit_cards_credit_cards_(general)_014"),
+    ("replacement", (ORDER,), "doc_credit_cards_credit_card_replacements_001"),
+)
+DOC_ID = re.compile(r"ID: (doc_[\w().\-]+)")
+
+
+def _verdict(content: str) -> str | None:
+    """The `verdict` of a check_credit_limit_increase reply (a JSON object, possibly followed by the open-items
+    footer)."""
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(content.lstrip())
+    except (ValueError, TypeError):
+        return None
+    return obj.get("verdict") if isinstance(obj, dict) else None
+
+
+def claims_not_done(sim: dict, calls: list[dict]) -> list[str]:
+    """The agent's claims of a write that never ran in the whole run (one entry per kind): a false success. A claim
+    made a turn before the write it announces is not counted (passing runs do that; tried on v6 and v7, 2026-10-30)."""
+    ran = {c["tool"] for c in calls if c["tool"] and not c["error"]}
+    texts = [str(m["content"]) for m in sim.get("messages") or [] if m.get("role") == "assistant" and m.get("content")]
+    return [name for name, tools, rx in CLAIMS if not ran & set(tools) and any(rx.search(t) for t in texts)]
+
+
+def exposure_and_verdict(calls: list[dict]) -> dict:
+    """The knowledge-base documents a run was shown, the key procedure documents of its areas it never saw, the last
+    credit limit increase verdict and whether a matching decision was filed, and its gate refusals by rule."""
+    seen = list(dict.fromkeys(d for c in calls if c["tool"] in SEARCH_TOOLS for d in DOC_ID.findall(c["content"])))
+    tools = {c["tool"] for c in calls if c["tool"]}
+    missing = [area for area, area_tools, doc in KEY_DOCS if tools & set(area_tools) and doc not in seen]
+    verdicts = [v for c in calls if c["tool"] == "check_credit_limit_increase" and not c["error"]
+                and (v := _verdict(c["content"]))]
+    filed = {APPROVE: "approve", DENY_CLI: "deny"}
+    decisions = [filed[c["tool"]] for c in calls if c["tool"] in filed and not c["error"]]
+    last = verdicts[-1] if verdicts else None
+    not_filed = (f"{last} verdict, {'no decision filed' if not decisions else 'filed ' + decisions[-1]}"
+                 if last in ("approve", "deny") and (not decisions or decisions[-1] != last) else None)
+    return {"docs_seen": seen, "key_docs_not_seen": missing, "increase_verdict": last,
+            "verdict_not_filed": not_filed, "gate_refusals": [c["deny"]["rule_id"] for c in calls if c["deny"]]}
 
 
 def facts_brief(f: dict) -> str:
@@ -264,9 +325,17 @@ def facts_brief(f: dict) -> str:
     history = {None: "-", True: "yes", False: "NO"}[f["history_before_first_filing"]]
     flags = [name for name, on in (("ORDER BEFORE INCREASE SUBMIT", f["order_before_submit"]),
                                    ("FILED BEFORE INCREASE DECIDED", f["filing_before_decision"])) if on]
+    flags += [f"CLAIMED NOT DONE: {c}" for c in f.get("claims_not_done", [])]
+    if f.get("verdict_not_filed"):
+        flags.append(f"VERDICT NOT FILED: {f['verdict_not_filed']}")
+    refusals = Counter(f.get("gate_refusals", []))
+    tail = (", refusals " + ", ".join(f"{r} x{n}" for r, n in refusals.most_common())) if refusals else ""
+    # information, not a flag: passing runs often skip the procedure document (050 follows the decision tool's steps)
+    if f.get("key_docs_not_seen"):
+        tail += ", key doc not seen: " + "/".join(f["key_docs_not_seen"])
     return (f"facts: plans {f['plans']}, filings {f['filings']} (+{f['filings_refused']} refused), history first "
             f"{history}, searches {f['searches']} ({f['search_chars'] // 1000}k chars), peak prompt "
-            f"{f['peak_prompt_tokens'] // 1000}k tokens" + "".join(f", {x}" for x in flags))
+            f"{f['peak_prompt_tokens'] // 1000}k tokens{tail}" + "".join(f", {x}" for x in flags))
 
 
 SEQUENCE_TOOLS = ("plan_disputes", DISPUTE, ORDER, SUBMIT, APPROVE, DENY_CLI, HISTORY)

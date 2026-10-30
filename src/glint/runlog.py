@@ -125,6 +125,8 @@ class RunEvents:
 
             self.facts = facts
         self.diffs: dict[tuple[str, int], dict] = {}  # (task_id, trial) -> compact diff of each failed run
+        self.field_runs: dict[str, list[str]] = {}  # wrong field -> the failed runs it was wrong in (repeat alert)
+        self.passes_audited, self.passes_with_refusals, self.passes_with_claims = 0, [], []
         self.poll_s, self.stall_s = poll_s, stall_s
         self.seen: set[tuple] = set()
         self.counts: dict[str, int] = {}
@@ -156,6 +158,34 @@ class RunEvents:
             from glint import inspect
 
             self._say(inspect.diffs_line(list(self.diffs.values())))
+        if self.facts is not None and self.passes_audited:
+            self._say(f"PASS AUDIT: {len(self.passes_with_refusals)} of {self.passes_audited} passing runs went through "
+                      f"a gate refusal {self.passes_with_refusals or ''}; {len(self.passes_with_claims)} claimed a write "
+                      f"that never ran {self.passes_with_claims or ''}")
+
+    def _repeated_fields(self, e: dict) -> list[str]:
+        """A WARNING the second time a field is wrong in a failed run of this arm (once per field): the v6 regression
+        (issue_noticed_date) showed on its first runs but surfaced only at the arm's end (2026-10-30)."""
+        run = f"{e['task_id']} t{e['trial']}"
+        out = []
+        for field in e["diff"]["fields"]:
+            runs = self.field_runs.setdefault(field, [])
+            runs.append(run)
+            if len(runs) == 2:
+                out.append(f"WARNING: repeated wrong field: {field} in 2 failed runs ({', '.join(runs)}); a "
+                           "regression would show this way; check before the arm ends")
+        return out
+
+    def _audit_pass(self, e: dict) -> None:
+        """Count passing runs that went through a gate refusal or claimed a write that never ran (a pass that may hide
+        a violation; procedure-aware evaluation found 27-78% of τ-bench passes corrupt, arXiv 2603.03116)."""
+        f = e.get("facts") or {}
+        if e["outcome"] == "pass":
+            self.passes_audited += 1
+            if f.get("gate_refusals"):
+                self.passes_with_refusals.append(f"{e['task_id']} t{e['trial']}")
+            if f.get("claims_not_done"):
+                self.passes_with_claims.append(f"{e['task_id']} t{e['trial']}")
 
     def _track_streak(self, e: dict) -> None:
         kind = e["outcome"]
@@ -228,6 +258,7 @@ class RunEvents:
                     self.seen.add(run_key(s))
                     e = event(s, self.label)
                     loud = "  <-- " + e["error"][:160] if e["outcome"] not in ("pass", "fail") else ""
+                    repeated: list[str] = []
                     if self.diff is not None and e["outcome"] in FAILED_RUNS:
                         # a diff that cannot be computed is recorded and printed as such, and the run's event
                         # still lands: the run log must not stop over an analysis error
@@ -235,6 +266,7 @@ class RunEvents:
                             e["diff"] = self.diff(s)
                             self.diffs[(str(e["task_id"]), int(e["trial"] or 0))] = e["diff"]
                             loud += "  " + e["diff"]["text"]
+                            repeated = self._repeated_fields(e)
                         except Exception as exc:  # noqa: BLE001  (recorded in the event and printed below)
                             e["diff_error"] = f"{type(exc).__name__}: {exc}"[:300]
                             loud += f"  WARNING: no diff ({e['diff_error'][:160]})"
@@ -255,6 +287,9 @@ class RunEvents:
                     tally = ", ".join(f"{k} {v}" for k, v in sorted(self.counts.items()))
                     self._say(f"{e['task_id']} trial {e['trial']}: {e['outcome'].upper()} (τ²: {e['termination']}, "
                               f"{kept}; so far {tally}){loud}")
+                    for line in repeated:
+                        self._say(line)
+                    self._audit_pass(e)
                     note = self.on_run(s) if self.on_run is not None else None
                     if note:
                         self._say(note)

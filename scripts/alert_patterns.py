@@ -16,7 +16,7 @@ import re
 ALERTS = (
     "FAILED", "METER FAILED", "SMOKE TEST FAILED", "MUSE CHECK FAILED", "COVERAGE GATE FAILED", "FAIL FAST", "ALERT",
     "WARNING", "CHECKPOINT LOCKED", "GPU CAP", "GPU CAP REACHED", "EMPTY REPLY", "TRUNCATED", "POOL WAIT",
-    "UNFOLLOWED REDIRECT",
+    "UNFOLLOWED REDIRECT", "CLAIMED NOT DONE", "VERDICT NOT FILED",
 )
 OUTCOMES = ("INFRASTRUCTURE_ERROR", "CONTEXT_OVERFLOW", "EMPTY_REPLY", "GLINT_ERROR", "BUDGET_STOP", "EVAL_ERROR",
             "too_many_errors")
@@ -24,7 +24,7 @@ OUTCOMES = ("INFRASTRUCTURE_ERROR", "CONTEXT_OVERFLOW", "EMPTY_REPLY", "GLINT_ER
 MARKERS = (r"BudgetExceeded", r"Traceback", r"SystemExit", r"still has", r"stopped, 0", r"this arm", r"\] done:",
            r"session start", r"/health -> (5|gave up)", r"^exit ")
 # Summaries printed at an arm's end or a resume, read with the results, not acted on mid-run
-INFO = ("NOTE", "RESUME", "POOL", "TRUNCATIONS", "MIXED CODE", "GATES", "GATE OUTCOMES", "DIFFS")
+INFO = ("NOTE", "RESUME", "POOL", "TRUNCATIONS", "MIXED CODE", "GATES", "GATE OUTCOMES", "DIFFS", "PASS AUDIT")
 # Labels inside transcripts (the desk, glint.inspect), not run-log lines
 TRANSCRIPT = ("USER", "AGENT", "TOOL RESULT", "UNKNOWN")
 

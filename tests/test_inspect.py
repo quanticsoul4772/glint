@@ -383,3 +383,41 @@ def test_cli_sequence_and_messages_read_one_task_from_the_arm_file(tmp_path, cap
     assert cli.main(["messages", str(tmp_path), "--task", "task_x", "--trial", "0", "--grep", "noticed"]) == 0
     assert "[0 user]" in capsys.readouterr().out
     assert cli.main(["sequence", str(tmp_path), "--task", "task_other"]) == 0 and capsys.readouterr().out == ""
+
+
+def test_a_claimed_write_that_never_ran_is_a_false_success_and_one_that_ran_is_not():
+    said = {"role": "assistant", "content": "The dispute for your charge (txn_1, $167.34) has been filed successfully."}
+    plan = {"role": "assistant", "tool_calls": [{"id": "p", "name": "plan_disputes", "arguments": {}}]}
+    lied = {"messages": [plan, {"role": "tool", "id": "p", "content": "{}"}, said]}
+    f = inspect.run_facts(lied)
+    assert f["claims_not_done"] == ["dispute filed"] and "CLAIMED NOT DONE: dispute filed" in inspect.facts_brief(f)
+    filed = {"messages": [_hidden_call(inspect.DISPUTE, {"transaction_id": "txn_1"}, 1),
+                          {"role": "tool", "id": "c1", "content": "filed"}, said]}
+    assert inspect.run_facts(filed)["claims_not_done"] == []
+
+
+def test_an_increase_verdict_without_its_decision_and_the_documents_a_run_saw():
+    check = {"role": "assistant", "tool_calls": [{"id": "k", "name": "check_credit_limit_increase", "arguments": {}}]}
+    verdict = {"role": "tool", "id": "k",
+               "content": '{"verdict": "deny", "denial_reason": "cooldown_period_active"}\n\n[open] something open'}
+    search = {"role": "assistant", "tool_calls": [{"id": "s", "name": "KB_search", "arguments": {"query": "cli"}}]}
+    found = {"role": "tool", "id": "s", "content": "1. CLI Eligibility\n   ID: doc_credit_cards_credit_card_account_"
+             "logistics_005\n   Excerpt: ..."}
+    told = {"role": "assistant", "content": "Unfortunately your credit limit increase request has been denied."}
+    f = inspect.run_facts({"messages": [search, found, check, verdict, told]})
+    assert f["increase_verdict"] == "deny" and f["verdict_not_filed"] == "deny verdict, no decision filed"
+    assert f["docs_seen"] == ["doc_credit_cards_credit_card_account_logistics_005"]
+    assert f["key_docs_not_seen"] == ["increase"] and f["claims_not_done"] == ["increase decided"]
+    brief = inspect.facts_brief(f)
+    assert "VERDICT NOT FILED: deny verdict, no decision filed" in brief and "key doc not seen: increase" in brief
+
+
+def test_run_events_warn_on_a_repeated_wrong_field_and_audit_the_passes(tmp_path, capsys):
+    results, events = tmp_path / "results.json", tmp_path / "events.jsonl"
+    with RunEvents(results, events, label="tools banking", poll_s=60, domain=DOMAIN):
+        results.write_text(json.dumps({"simulations": [failed_run(0), failed_run(1) | {"reward_info": {"reward": 1.0}},
+                                                       failed_run(2)]}), encoding="utf-8")
+    err = capsys.readouterr().err
+    assert err.count("WARNING: repeated wrong field: dispute_reason in 2 failed runs (task_041 t0, task_041 t2)") == 1
+    # the passing run went through the first dispute's gate refusal
+    assert "PASS AUDIT: 1 of 1 passing runs went through a gate refusal ['task_041 t1']; 0 claimed" in err
