@@ -218,6 +218,9 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                     user = str(w["args"].get("user_id", ""))
                     if w["name"] == rules.DISPUTE and user in plans:
                         await client.call_tool(PLAN_TOOL, plans.pop(user))
+                    if w["name"] == rules.REPLACE:  # recorded before address_ask: the address counts as confirmed
+                        with session.lock:
+                            session.env.tools.glint_address_asked.add(str(w["args"].get("credit_card_account_id", "")))
                     before, db = session.events.count(), session.env.get_db_hash()
                     reply = await _send(client, w["name"], w["args"])
                     denied = _denies(session, before)

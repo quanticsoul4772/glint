@@ -309,6 +309,8 @@ def test_a_replacement_ordered_after_the_plan_sets_the_card_action():
     order = next(json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
                  if a.name == WRAPPER and a.arguments.get("agent_tool_name") == banking.ORDER_TOOL)
     _call(env, "unlock_discoverable_agent_tool", agent_tool_name=banking.ORDER_TOOL)
+    # 039 ships to the address on file: address_ask refuses the first order once
+    assert "address_ask" in _call(env, WRAPPER, agent_tool_name=banking.ORDER_TOOL, arguments=json.dumps(order)).content
     assert _ran(_call(env, WRAPPER, agent_tool_name=banking.ORDER_TOOL, arguments=json.dumps(order)))
     verdict = _plan_gate(env, gold[0] | {"card_action": "keep_active"})
     assert verdict.rule_id == "procedure.dispute_plan.values" and "'cancel_and_reissue'" in verdict.fix
