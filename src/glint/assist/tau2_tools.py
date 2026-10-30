@@ -13,7 +13,7 @@ from tau2.domains.retail.tools import RetailTools
 from tau2.environment.toolkit import ToolKitBase, ToolType, is_tool
 from tau2.registry import registry
 
-from glint.assist import airline, banking, retail
+from glint.assist import airline, banking, kb, retail
 
 
 class AssistedRetailTools(RetailTools):
@@ -167,7 +167,54 @@ class DisputePlanTools(ToolKitBase):
 
 
 class BankingDecisionTools(DisputePlanTools):
-    """Mixed in ahead of the banking toolkit class τ² composes per retrieval variant (see `install`)."""
+    """Mixed in ahead of the banking toolkit class τ² composes per retrieval variant (see `install`). Its KB_search
+    and grep replace τ²'s (whole documents) with excerpts within a context budget (glint.assist.kb), for the tools
+    arm only; the base arm and glint-bank keep τ²'s."""
+
+    @is_tool(ToolType.READ)
+    def KB_search(self, query: str) -> str:
+        """Search the knowledge base for relevant documents.
+
+        Returns the 5 best documents, each with its title, ID and the paragraph that best matches the query. Read a
+        whole document with KB_read(doc_id).
+
+        Args:
+            query: The search query to find relevant documents
+
+        Returns:
+            The best documents' titles, IDs and best-matching paragraphs
+        """
+        return kb.format_results(self._kb_pipeline, self._kb_pipeline.retrieve(query), kb.query_score(query),
+                                 "No relevant documents found.")
+
+    @is_tool(ToolType.READ)
+    def grep(self, pattern: str) -> str:
+        """Search for a regex pattern in all knowledge base documents (case-insensitive).
+
+        Returns the 5 documents with the most matches, each with its title, ID and the paragraph with the most
+        matches. Read a whole document with KB_read(doc_id).
+
+        Args:
+            pattern: The regex pattern to search for (e.g., 'credit.*card', 'fee|charge')
+
+        Returns:
+            Matching documents' titles, IDs and best-matching paragraphs, ranked by match count
+        """
+        return kb.format_results(self._grep_pipeline, self._grep_pipeline.retrieve(pattern), kb.pattern_score(pattern),
+                                 f"No matches found for pattern: {pattern}")
+
+    @is_tool(ToolType.READ)
+    def KB_read(self, doc_id: str, offset: int = 0) -> str:
+        """Read a knowledge base document in full, 6,000 characters at a time.
+
+        Args:
+            doc_id: The document ID from a KB_search or grep result
+            offset: The character to start from (0 for the beginning; each page names where the next one starts)
+
+        Returns:
+            The document's title and the requested characters, with where the next page starts
+        """
+        return kb.read_page(self._kb_pipeline, doc_id, offset)
 
     @is_tool(ToolType.READ)
     def check_credit_limit_increase(self, user_id: str, credit_card_account_id: str, requested_increase_amount: float,
@@ -249,6 +296,10 @@ def assist_environment(env, domain: str, enforcer=None):
         # instance and put the decision tools ahead of its class in the MRO
         cls = type(env.tools)
         if not issubclass(cls, BankingDecisionTools):  # else already assisted (an installed constructor built it)
+            missing = {"KB_search", "grep"} - set(env.tools.tools)
+            if missing:  # the excerpt versions would add tools the base arm does not have
+                raise RuntimeError(f"the banking decision tools replace KB_search and grep; this retrieval variant "
+                                   f"lacks {sorted(missing)} (the runs use bm25_grep)")
             if cls not in _ASSISTED_BANKING:
                 _ASSISTED_BANKING[cls] = type(f"Assisted{cls.__name__}", (BankingDecisionTools, cls), {})
             env.tools.__class__ = _ASSISTED_BANKING[cls]
