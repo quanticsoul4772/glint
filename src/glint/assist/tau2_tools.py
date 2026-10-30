@@ -217,7 +217,9 @@ class BankingDecisionTools(DisputePlanTools):
         """
         return kb.read_page(self._kb_pipeline, doc_id, offset)
 
-    @is_tool(ToolType.READ)
+    # GENERIC with mutates_state=True, like plan_disputes: τ²'s strict replay skips READ tools, and the enforcer records
+    # this verdict for the open-items footer, so the replay must rebuild it. It never writes the database.
+    @is_tool(ToolType.GENERIC, mutates_state=True)
     def check_credit_limit_increase(self, user_id: str, credit_card_account_id: str, requested_increase_amount: float,
                                     other_requests: list[str] | None = None) -> dict:
         """Credit limit increase decision tool: call this as soon as the user asks for a credit limit increase,

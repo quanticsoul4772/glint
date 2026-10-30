@@ -30,8 +30,11 @@ puts plan_disputes on every gated banking toolkit, with or without the other dec
 
 On banking every reply the agent gets that is not an error (reads and allowed writes alike) ends with the open items
 of the customer's request that the recorded plans, the increase record and the database show (`_open_items`):
-disputes planned and not filed, replacements the customer chose and not ordered, increases submitted and not decided.
-plan_disputes' own reply carries none (the plan lists them). In banking-plan-v5-gated, 031 trial 1, 037 trial 3 and
+disputes planned and not filed, replacements the customer chose and not ordered, increase verdicts
+(check_credit_limit_increase approve or deny, `env.tools.glint_verdicts`) with no decision filed, increases submitted
+and not decided. plan_disputes' own reply carries none (the plan lists them). In banking-plan-v6/v7/v8-gated, 2, 6
+and 6 runs got an increase verdict and filed no matching decision, every one a failure (052 in all eight of v7/v8);
+check_credit_limit_increase is GENERIC with mutates_state=True so the replay rebuilds the verdict record. In banking-plan-v5-gated, 031 trial 1, 037 trial 3 and
 038 trial 3 each made the plan and filed none of its disputes before the customer ended the conversation. The items are a function of what the replay rebuilds, so a write's
 reply, footer included, replays unchanged.
 
@@ -67,6 +70,7 @@ from glint.gates.rules import (
 
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
+VERDICT_TOOL = "check_credit_limit_increase"
 
 
 def _open_items(tools) -> list[str]:
@@ -85,6 +89,11 @@ def _open_items(tools) -> list[str]:
             if c.get("card_action") == "cancel_and_reissue" and not replacements_today(db, card):
                 items.append(f"[open] {card}: the customer chose to cancel it and get a new one; {ORDER_TOOL} not "
                              "called yet")
+    for card, v in sorted(getattr(tools, "glint_verdicts", {}).items()):
+        decision = (f"{APPROVE} with new_credit_limit {v['new_credit_limit']}" if v["verdict"] == "approve"
+                    else f"{DENY} with denial_reason {v['denial_reason']}")
+        items.append(f"[open] check_credit_limit_increase said {v['verdict']} for {card}, and no decision is filed yet: "
+                     f"{SUBMIT} (if not submitted), the required lookups, then {decision}")
     pending = undecided_increases(tools)
     if pending:
         items.append(f"[open] credit limit increase submitted and not decided yet: {', '.join(pending)} (the "
@@ -188,10 +197,27 @@ class Enforcer:
             record[user] = record.get(user, []) + sorted(increase_request_ids(env.tools.db) - before)
         elif tool in (APPROVE, DENY):
             card, rows = args.get("credit_card_account_id"), env.tools.db.credit_limit_increase_requests.data
+            env.tools.glint_verdicts.pop(str(card), None)
             for user in list(record):
                 record[user] = [r for r in record[user] if (rows.get(r) or {}).get("credit_card_account_id") != card]
                 if not record[user]:
                     del record[user]
+
+    @staticmethod
+    def _record_verdict(env, call: ToolCall, reply: ToolMessage) -> None:
+        """Keep the latest approve or deny verdict check_credit_limit_increase gave for a card, until an approve or
+        deny runs on it (_record_increase). Any other verdict (reduce_amount, ask_amount, error) clears the card."""
+        if call.requestor != "assistant" or call.name != VERDICT_TOOL or reply.error:
+            return
+        try:
+            v = json.loads(reply.content)
+        except (TypeError, json.JSONDecodeError):
+            return
+        card = str((call.arguments or {}).get("credit_card_account_id", ""))
+        if isinstance(v, dict) and v.get("verdict") in ("approve", "deny"):
+            env.tools.glint_verdicts[card] = {k: v.get(k) for k in ("verdict", "new_credit_limit", "denial_reason")}
+        else:
+            env.tools.glint_verdicts.pop(card, None)
 
     def _record_plan(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """Keep the dispute plan the agent got from plan_disputes; a later plan for the same user replaces it."""
@@ -225,6 +251,7 @@ class Enforcer:
         if self.domain == "banking_knowledge":
             add_plan_tool(env)
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
+        env.tools.glint_verdicts = {}  # card -> the increase verdict check_credit_limit_increase gave, not filed yet
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
@@ -240,6 +267,7 @@ class Enforcer:
                 reply = original_response(message)
                 self._record_read(env, message, reply)
                 self._record_plan(env, message, reply, state["replay"])
+                self._record_verdict(env, message, reply)
                 return with_open_items(message, reply)
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
