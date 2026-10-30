@@ -440,6 +440,51 @@ def test_increase_record_and_its_decisions_replay_unchanged_in_taus_strict_repla
     assert replay.tools.glint_increases == env.tools.glint_increases != {}
 
 
+def test_an_increase_verdict_stays_open_until_its_decision_and_replays_unchanged():
+    # banking-plan-v7/v8-gated 052: check_credit_limit_increase said deny and no run filed the submit or the deny
+    from glint.assist.tau2_tools import assist_environment
+
+    def assisted():
+        task = Task.model_validate(BANKING["task_052"])
+        env = registry.get_env_constructor("banking_knowledge")(retrieval_variant="bm25_grep", task=task)
+        init = task.initial_state
+        env.set_state(init.initialization_data if init else None, init.initialization_actions if init else None, [])
+        return assist_environment(env, "banking_knowledge", enforcer), task
+
+    enforcer = Enforcer("banking_knowledge", EventLog(":memory:"))
+    env, task = assisted()
+    history = []
+
+    def send(name, arguments, i):
+        call = ToolCall(id=f"c{i}", name=name, arguments=arguments, requestor="assistant")
+        reply = env.get_response(call)
+        history.extend([AssistantMessage(role="assistant", tool_calls=[call]), reply])
+        return reply
+
+    gold = task.evaluation_criteria.actions
+    at = next(k for k, a in enumerate(gold) if _name(a) == rules.SUBMIT)
+    for k, a in enumerate(gold[:at]):
+        assert _ran(send(a.name, a.arguments, k))
+    submit = json.loads(gold[at].arguments["arguments"])
+    card = submit["credit_card_account_id"]
+    check = send("check_credit_limit_increase", {k: submit[k] for k in ("user_id", "credit_card_account_id",
+                                                                         "requested_increase_amount")}, "v")
+    verdict = json.loads(check.content.split("\n\n[open]")[0])
+    assert verdict["verdict"] == "deny"
+    item = f"[open] check_credit_limit_increase said deny for {card}, and no decision is filed yet"
+    assert item in check.content and item in send("get_current_time", {}, "t").content
+    assert _ran(send(gold[at].name, gold[at].arguments, at))  # the submit: its reply carries the item too
+    replay, _ = assisted()
+    init = task.initial_state
+    replay.set_state(init.initialization_data if init else None, init.initialization_actions if init else None,
+                     history, strict=True)
+    assert replay.tools.glint_verdicts == env.tools.glint_verdicts == {card: {
+        "verdict": "deny", "new_credit_limit": None, "denial_reason": verdict["denial_reason"]}}
+    for k, a in enumerate(gold[at + 1:], at + 1):
+        assert _ran(send(a.name, a.arguments, k))
+    assert env.tools.glint_verdicts == {} and "[open]" not in send("get_current_time", {}, "e").content
+
+
 def test_increase_record_keeps_each_cards_request_until_its_card_is_decided():
     # a second submit (another card) adds to the record; a decision clears its card's requests whoever it names
     from types import SimpleNamespace
