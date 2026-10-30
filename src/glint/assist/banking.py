@@ -256,15 +256,21 @@ PLAN_RULE = ("File the disputes in this order, each with its eligible_for_provis
 
 def noticed_date(value) -> tuple[str | None, str]:
     """(the customer's issue_noticed_date as MM/DD/YYYY, rejection): the format the dispute record takes
-    (credit_cards_(general)_014 field 11); (None, "") when the customer has not been asked yet."""
+    (credit_cards_(general)_014 field 11); (None, "") when the customer has not been asked yet. A date after the
+    domain's today is refused: in banking-plan-v6-gated the user simulator answered "today" with the real-world date
+    (10/30/2026) while τ²'s clock and gold say 11/14/2025 (037 trials 0 and 3, 039 trial 2)."""
     if value in (None, ""):
         return None, ""
     text = str(value).strip()
     for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
         try:
-            return datetime.strptime(text, fmt).strftime("%m/%d/%Y"), ""
+            day = datetime.strptime(text, fmt).date()
         except ValueError:
             continue
+        if day > TODAY:
+            return None, (f"issue_noticed_date {text!r} is after today ({TODAY:%m/%d/%Y}, get_current_time); if the "
+                          f"customer noticed the charge today, plan {TODAY:%m/%d/%Y}")
+        return day.strftime("%m/%d/%Y"), ""
     return None, f"issue_noticed_date {text!r} is not a date (MM/DD/YYYY)"
 
 
@@ -291,8 +297,12 @@ def card_actions(db, given: dict[str, set[str]]) -> tuple[dict[str, dict], dict[
             action = next(iter(answers), None)
             plans[card] = {"credit_card_account_id": card, "card_action": action, "replacement_ordered_today": []}
             if action == "cancel_and_reissue":
-                plans[card]["next_step"] = (f"Call {ORDER_TOOL} for {card} first (the customer chose to cancel the "
-                                            "card and get a new one), then file its disputes.")
+                # not "first": in banking-plan-v6-gated that word made all 4 runs of 054 order the replacement before
+                # the customer's credit limit increase, and a pending replacement makes the increase fail
+                plans[card]["next_step"] = (f"Order the replacement with {ORDER_TOOL} for {card} (the customer chose "
+                                            "to cancel the card and get a new one). If the customer also wants a "
+                                            "credit limit increase, submit and decide it before ordering: a pending "
+                                            "replacement makes the increase fail (credit_card_account_logistics_007).")
     return plans, rejected
 
 
@@ -404,8 +414,9 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
             questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")
         if noticed is None:
             # credit_cards_(general)_014 field 11 is the customer's answer; banking-plan-v5-gated task_054 trial 2
-            # filed today's 11/14/2025 for a charge the customer noticed on 11/12/2025 (its simulations file)
-            questions.append(f"When did you first notice the {tid} charge?")
+            # filed today's 11/14/2025 for a charge the customer noticed on 11/12/2025 (its simulations file). The
+            # question names today's date: asked without it, the v6 user simulator gave the real-world date for "today"
+            questions.append(f"When did you first notice the {tid} charge? (Today is {TODAY:%m/%d/%Y}.)")
         if entry["card_action"] is None:
             # credit_cards_(general)_014 card_action is the customer's choice; in banking-plan-v5-gated task_039
             # trials 2-3 filed all 8 disputes with the wrong card_action and trials 0-1 never ordered the replacement

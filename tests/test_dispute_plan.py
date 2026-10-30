@@ -247,7 +247,7 @@ def test_the_noticed_date_is_the_customers_answer_filed_as_planned():
     assert item["issue_noticed_date"] == "11/12/2025"
     unasked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[
         {k: v for k, v in item.items() if k != "issue_noticed_date"}]).content)
-    question = f"When did you first notice the {item['transaction_id']} charge?"
+    question = f"When did you first notice the {item['transaction_id']} charge? (Today is 11/14/2025.)"
     assert unasked["order"][0]["ask_user"] == question and unasked["ready"] == "False"  # τ² stringifies bools
     verdict = _plan_gate(env, gold[0])
     assert verdict.rule_id == "procedure.dispute_plan.ask" and "first noticed" in verdict.reason
@@ -261,6 +261,10 @@ def test_the_noticed_date_is_the_customers_answer_filed_as_planned():
     assert _plan_gate(env, gold[0]).allowed
     bad = banking.plan_disputes(env.tools.db, user, [item | {"issue_noticed_date": "last week"}])
     assert bad["order"] == [] and "is not a date" in bad["rejected"][0]["reason"]
+    # the v6 user simulator gave the real-world date for "today": a date after τ²'s today is refused, naming today
+    future = banking.plan_disputes(env.tools.db, user, [item | {"issue_noticed_date": "10/30/2026"}])
+    assert future["order"] == [] and "after today (11/14/2025" in future["rejected"][0]["reason"]
+    assert banking.plan_disputes(env.tools.db, user, [item | {"issue_noticed_date": "11/14/2025"}])["order"]
 
 
 def test_the_card_action_is_the_customers_answer_one_per_card():
@@ -285,7 +289,10 @@ def test_the_card_action_is_the_customers_answer_one_per_card():
     # cancel with no replacement ordered yet: the plan names the order as the next step; filings follow the plan
     plan = json.loads(_call(env, "plan_disputes", user_id=user, transactions=items).content)
     assert plan["card_actions"][0]["card_action"] == "cancel_and_reissue"
-    assert plan["card_actions"][0]["next_step"].startswith(f"Call {banking.ORDER_TOOL} for {card} first")
+    step = plan["card_actions"][0]["next_step"]
+    # not "first": that word made all 4 v6 runs of 054 order the replacement before the credit limit increase
+    assert step.startswith(f"Order the replacement with {banking.ORDER_TOOL} for {card}") and " first" not in step
+    assert "credit limit increase, submit and decide it before ordering" in step
     verdict = _plan_gate(env, gold[0] | {"card_action": "keep_active"})
     assert verdict.rule_id == "procedure.dispute_plan.values"
     assert "card_action 'keep_active' != the plan's 'cancel_and_reissue'" in verdict.facts
