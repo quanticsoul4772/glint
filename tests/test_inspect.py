@@ -442,7 +442,8 @@ def test_cli_refusals_counts_each_kind_and_names_the_false_and_plan_refusals(tmp
                                                            encoding="utf-8")
     assert cli.main(["refusals", str(tmp_path)]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("== tools banking_knowledge: 1 runs; 6 gate refusals: 1 live false refusals, "
+    assert out.startswith("== tools banking_knowledge: 1 runs; 6 gate refusals, 5 judged (the refused write matches gold): "
+                          "1 live false refusals, "
                           "1 plan differs from gold, 1 state differs, 2 held for precondition, 1 differs from gold")
     assert "  banking.dispute: differs from gold 1, state differs 1" in out
     assert f"LIVE FALSE REFUSALS: {TASK} trial 0: {DISPUTE} refused by banking.new_rule (message 7)" in out

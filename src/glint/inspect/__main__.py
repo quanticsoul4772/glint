@@ -145,8 +145,9 @@ def refusal_lines(data: Path, arm: str = "tools") -> list[str]:
                     if kind in ("live_false_refusals", "plan_differs_from_gold"):
                         named.append(f"{kind.replace('_', ' ').upper()}: {s['task_id']} trial {s.get('trial')}: "
                                      f"{row['tool']} refused by {row['rule_id']} (message {row['index']})")
-        lines.append(f"== {arm} {domain}: {runs} runs; {total['refused']} gate refusals: "
-                     + ", ".join(f"{total[k]} {k.replace('_', ' ')}" for k in inspect.KINDS))
+        judged = total["refused"] - total["differs_from_gold"]  # only a write gold also makes can be judged false
+        lines.append(f"== {arm} {domain}: {runs} runs; {total['refused']} gate refusals, {judged} judged (the refused "
+                     "write matches gold): " + ", ".join(f"{total[k]} {k.replace('_', ' ')}" for k in inspect.KINDS))
         for rule, kinds in sorted(per_rule.items(), key=lambda kv: -sum(kv[1].values())):
             lines.append(f"  {rule}: " + ", ".join(f"{k.replace('_', ' ')} {n}" for k, n in sorted(kinds.items())))
         lines += [f"  {n}" for n in named]
