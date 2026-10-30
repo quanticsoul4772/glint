@@ -307,6 +307,20 @@ def test_a_replacement_ordered_today_sets_the_card_action():
     assert "next_step" not in entry and {e["card_action"] for e in plan["order"]} == {"cancel_and_reissue"}
 
 
+def test_a_filing_needs_the_dispute_history_read_first():
+    # credit_cards_(general)_015 criterion 4 counts the disputes on record; task_037's gold files without the read
+    task = _task("task_037")
+    env = _env(task, Enforcer("banking_knowledge", EventLog(":memory:")))
+    gold = _gold_disputes(task)
+    _verify(env, gold[0]["user_id"])
+    _give_card_digits(env)
+    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    reply = _file(env, gold[0])
+    assert _denied(reply, "procedure.lookups") and banking.DISPUTE_HISTORY_TOOL in reply.content
+    _read_history(env, gold[0]["user_id"])
+    assert _ran(_file(env, gold[0]))
+
+
 def test_a_new_plan_replaces_the_old_one():
     env, _, gold = _gated("task_037")
     user = gold[0]["user_id"]
