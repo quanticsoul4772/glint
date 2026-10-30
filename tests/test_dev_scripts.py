@@ -34,13 +34,22 @@ def test_check_reports_each_step_and_removes_its_worktree(tmp_path):
 
 
 def test_check_fails_when_a_step_fails_and_on_an_unknown_ref(tmp_path):
-    bad = _stub(tmp_path / "py", 'echo "FAILED tests/test_x.py::test_y"; echo "1 failed"; exit 1')
+    # answers check.sh's pytest-cov probe (`-c "import pytest_cov"`) as a python that has it, then fails the tests
+    bad = _stub(tmp_path / "py", 'if [ "$1" = "-c" ]; then exit 0; fi\n'
+                'echo "FAILED tests/test_x.py::test_y"; echo "1 failed"; exit 1')
     lint = _stub(tmp_path / "ruff", "exit 0")
     r = _run("check.sh", ["HEAD"], {"PY": bad, "RUFF": lint})
     assert r.returncode == 1 and "pytest exit 1 (1 failed)" in r.stdout and "FAILED tests/test_x.py::test_y" in r.stdout
     r = _run("check.sh", ["no-such-ref-xyz"], {"PY": bad, "RUFF": lint})
     assert r.returncode == 1 and "no-such-ref-xyz: FAILED to check out" in r.stdout
     assert _run("check.sh", [], {}).returncode == 2
+
+
+def test_check_stops_with_a_clear_message_when_python_has_no_pytest_cov(tmp_path):
+    # the run folder's .venv has no pytest-cov: every ref would fail on --cov, which is not a test failure
+    nocov = _stub(tmp_path / "py", 'if [ "$1" = "-c" ]; then exit 1; fi\necho "3 passed"; exit 0')
+    r = _run("check.sh", ["HEAD"], {"PY": nocov, "RUFF": _stub(tmp_path / "ruff", "exit 0")})
+    assert r.returncode == 2 and "has no pytest-cov" in r.stderr and "pytest exit" not in r.stdout
 
 
 def test_stop_run_stops_the_app_with_yes_and_waits_for_zero_containers(tmp_path):
@@ -62,7 +71,8 @@ def test_stop_run_fails_loud_when_containers_stay(tmp_path):
 def test_check_puts_its_worktree_next_to_the_repo(tmp_path):
     # tests find the vendored τ² checkout at ../vendor relative to the repo, so the throwaway worktree is a sibling
     where = tmp_path / "where.txt"
-    py = _stub(tmp_path / "py", f'pwd >> "{where.as_posix()}"; echo "1 passed"; exit 0')
+    py = _stub(tmp_path / "py", 'if [ "$1" = "-c" ]; then exit 0; fi\n'  # the pytest-cov probe runs in the repo
+               f'pwd >> "{where.as_posix()}"; echo "1 passed"; exit 0')
     lint = _stub(tmp_path / "ruff", "exit 0")
     assert _run("check.sh", ["HEAD"], {"PY": py, "RUFF": lint}).returncode == 0
     parent = where.read_text(encoding="utf-8").splitlines()[0].rstrip("/").rsplit("/", 2)
