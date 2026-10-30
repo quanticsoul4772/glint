@@ -1,5 +1,429 @@
 [
  {
+  "set": "banking-plan-v5-gated",
+  "title": "Banking, untuned tasks, write gates enforced",
+  "role": "untuned",
+  "note": "Tasks 031 and 050-053, which no gate or plan change came from. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated versions are in docs/results.md; this is the latest, and also the best of the five on the untuned tasks, all against one baseline draw. k=4. Glimmer on Modal.",
+  "tasks": [
+   {
+    "task": "banking_knowledge-task_031",
+    "alone": "3/4",
+    "tools": "3/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_050",
+    "alone": "2/4",
+    "tools": "4/4",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_051",
+    "alone": "0/4",
+    "tools": "3/4",
+    "change": "improved",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_052",
+    "alone": "0/4",
+    "tools": "4/4",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_053",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   }
+  ],
+  "by_task": {
+   "improved": 3,
+   "tied": 2,
+   "worse": 0,
+   "no data": 0
+  },
+  "runs": {
+   "alone": [
+    5,
+    20
+   ],
+   "tools": [
+    14,
+    20
+   ]
+  }
+ },
+ {
+  "set": "banking-plan-v5-gated",
+  "title": "Banking, tuned tasks, write gates enforced",
+  "role": "tuned",
+  "note": "Tasks 037-041, 054 and 081: the gates and the dispute plan were shaped by their runs and correct answers (040 and 041 went from 0/4 to 4/4 and 3/4 after #117, which came from their failures). Do not read as general evidence. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated versions are in docs/results.md; this is the latest, and also the best of the five on the untuned tasks, all against one baseline draw. k=4. Glimmer on Modal.",
+  "tasks": [
+   {
+    "task": "banking_knowledge-task_037",
+    "alone": "4/4",
+    "tools": "3/4",
+    "change": "worse",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_038",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_039",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_040",
+    "alone": "0/4",
+    "tools": "4/4",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_041",
+    "alone": "0/4",
+    "tools": "3/4",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_054",
+    "alone": "0/4",
+    "tools": "1/4",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_081",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 4,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   }
+  ],
+  "by_task": {
+   "improved": 3,
+   "tied": 3,
+   "worse": 1,
+   "no data": 0
+  },
+  "runs": {
+   "alone": [
+    4,
+    28
+   ],
+   "tools": [
+    11,
+    28
+   ]
+  }
+ },
+ {
+  "set": "banking-test",
+  "title": "Banking test split, read once (current tools, no gates)",
+  "role": "held-out",
+  "note": "\u03c4\u00b2's 20 untouched banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute or credit-limit step, and a decision tool was called in 1 of 80 runs, so this shows the tools neither helped nor hurt tasks they were not built for. By task: 1 improved, 18 tied, 1 worse. No gated run on this split. k=4. Glimmer on Modal.",
+  "tasks": [
+   {
+    "task": "banking_knowledge-task_004",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_014",
+    "alone": "1/4",
+    "tools": "1/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_015",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_020",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_022",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 4,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_024",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 5,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_029",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_036",
+    "alone": "4/4",
+    "tools": "3/4",
+    "change": "worse",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_043",
+    "alone": "1/4",
+    "tools": "1/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_047",
+    "alone": "0/4",
+    "tools": "1/4",
+    "change": "improved",
+    "overflows": 2,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_060",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 3,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_074",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_077",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 4,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_078",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_079",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 2,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_080",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 5,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_082",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_083",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_099",
+    "alone": "0/4",
+    "tools": "0/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_102",
+    "alone": "4/4",
+    "tools": "4/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   }
+  ],
+  "by_task": {
+   "improved": 1,
+   "tied": 18,
+   "worse": 1,
+   "no data": 0
+  },
+  "runs": {
+   "alone": [
+    10,
+    80
+   ],
+   "tools": [
+    10,
+    80
+   ]
+  }
+ },
+ {
   "set": "heldout2",
   "title": "Retail and airline, held-out tasks (current tools)",
   "role": "held-out",
@@ -11,6 +435,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -21,6 +446,7 @@
     "tools": "4/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -31,6 +457,7 @@
     "tools": "3/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -41,6 +468,7 @@
     "tools": "4/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -51,6 +479,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -61,6 +490,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -71,6 +501,7 @@
     "tools": "3/4",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -81,6 +512,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -91,6 +523,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -101,6 +534,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -111,6 +545,7 @@
     "tools": "2/4",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -121,6 +556,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -131,6 +567,7 @@
     "tools": "3/4",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -141,6 +578,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -151,6 +589,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -161,6 +600,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -171,6 +611,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -181,6 +622,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -191,6 +633,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -201,6 +644,7 @@
     "tools": "2/4",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -235,6 +679,7 @@
     "tools": "1/2",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -245,6 +690,7 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -255,6 +701,7 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -265,6 +712,7 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -275,6 +723,7 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -285,6 +734,7 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -295,6 +745,7 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -305,6 +756,7 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -315,6 +767,7 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -325,6 +778,7 @@
     "tools": "2/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -335,6 +789,7 @@
     "tools": "1/4",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -345,6 +800,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -355,6 +811,7 @@
     "tools": "2/4",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -365,6 +822,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -375,6 +833,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -385,6 +844,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -395,6 +855,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -405,6 +866,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -415,6 +877,7 @@
     "tools": "4/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -425,6 +888,7 @@
     "tools": "3/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -459,6 +923,7 @@
     "tools": "3/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -469,6 +934,7 @@
     "tools": "3/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -479,6 +945,7 @@
     "tools": "0/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -489,6 +956,7 @@
     "tools": "0/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -499,6 +967,7 @@
     "tools": "0/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -509,6 +978,7 @@
     "tools": "4/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -519,6 +989,7 @@
     "tools": "1/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -529,6 +1000,7 @@
     "tools": "1/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -539,6 +1011,7 @@
     "tools": "0/4",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -549,6 +1022,7 @@
     "tools": "0/4",
     "change": "tied",
     "overflows": 7,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -583,6 +1057,7 @@
     "tools": "1/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -593,6 +1068,7 @@
     "tools": "4/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -627,6 +1103,7 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -637,6 +1114,7 @@
     "tools": "1/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -647,6 +1125,7 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -657,6 +1136,7 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -667,6 +1147,7 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -677,6 +1158,7 @@
     "tools": "2/2",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -687,6 +1169,7 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -697,6 +1180,7 @@
     "tools": "1/2",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -707,6 +1191,7 @@
     "tools": "0/2",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -717,6 +1202,7 @@
     "tools": "0/2",
     "change": "no data",
     "overflows": 4,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": "every run overflowed the context"
@@ -751,6 +1237,7 @@
     "tools": "2/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -761,6 +1248,7 @@
     "tools": "1/4",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -795,17 +1283,19 @@
     "tools": "1/8",
     "change": "worse",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
    },
    {
     "task": "retail-20",
-    "alone": "7/7",
+    "alone": "7/8",
     "tools": "8/8",
-    "change": "tied",
+    "change": "improved",
     "overflows": 0,
-    "infra_errors": 1,
+    "empty_replies": 1,
+    "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
    },
@@ -815,6 +1305,7 @@
     "tools": "8/8",
     "change": "improved",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
@@ -825,21 +1316,22 @@
     "tools": "6/8",
     "change": "tied",
     "overflows": 0,
+    "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
     "no_data_reason": null
    }
   ],
   "by_task": {
-   "improved": 1,
-   "tied": 2,
+   "improved": 2,
+   "tied": 1,
    "worse": 1,
    "no data": 0
   },
   "runs": {
    "alone": [
     23,
-    31
+    32
    ],
    "tools": [
     23,
