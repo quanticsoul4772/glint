@@ -212,11 +212,11 @@ CARD_DIGITS_HOW = (f"the customer's: give them {CARD_DIGITS_TOOL} (give_discover
                    "credit_card_account_id, and file the digits it reports")
 DISPUTE_HISTORY_TOOL = "get_user_dispute_history_7291"
 # Glimmer filed without this lookup in 12 of 35 failed banking-plan-v4-gated runs (039-041, 081), and τ² logs a read
-# its gold makes in the database it scores (the read log allowlist), so those runs failed on it alone (2026-10-29). A
-# hint, not a gate: τ²'s gold files disputes without the lookup in 031, 037 and 038, where an extra read is not logged.
+# its gold makes in the database it scores (the read log allowlist), so those runs failed on it alone (2026-10-29).
+# The filing requires it (glint.gates.procedure.REQUIRED_LOOKUPS); an extra read is not logged where gold lacks it.
 BEFORE_FILING = (f"Before filing, unlock and call {DISPUTE_HISTORY_TOOL} (call_discoverable_agent_tool) with this "
                  "user_id: the disputes already on record count toward the 2-dispute limit for provisional credit "
-                 "(credit_cards_(general)_015 criterion 4).")
+                 "(credit_cards_(general)_015 criterion 4). A filing is blocked until this lookup is done.")
 OVERCHARGE_NOTE = ("Ask what the customer should have been charged, as written; do not offer or suggest a full refund. "
                    "Plan resolution_requested 'full_refund' only when the customer asks for the whole charge back "
                    "without being offered it.")

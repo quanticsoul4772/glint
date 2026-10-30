@@ -100,9 +100,17 @@ def _gated(task_id: str, digits: bool = True):
     env = _env(task, Enforcer("banking_knowledge", EventLog(":memory:")))
     disputes = _gold_disputes(task)
     _verify(env, disputes[0]["user_id"])
+    _read_history(env, disputes[0]["user_id"])
     if digits:
         _give_card_digits(env)
     return env, task, disputes
+
+
+def _read_history(env, user_id: str) -> None:
+    """The dispute-history read every filing requires (procedure.REQUIRED_LOOKUPS, credit_cards_(general)_015
+    criterion 4)."""
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
+    _call(env, WRAPPER, agent_tool_name=banking.DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": user_id}))
 
 
 # ---- plan_disputes on the tuned tasks ------------------------------------------------------------------------------
@@ -299,6 +307,20 @@ def test_a_replacement_ordered_today_sets_the_card_action():
     assert "next_step" not in entry and {e["card_action"] for e in plan["order"]} == {"cancel_and_reissue"}
 
 
+def test_a_filing_needs_the_dispute_history_read_first():
+    # credit_cards_(general)_015 criterion 4 counts the disputes on record; task_037's gold files without the read
+    task = _task("task_037")
+    env = _env(task, Enforcer("banking_knowledge", EventLog(":memory:")))
+    gold = _gold_disputes(task)
+    _verify(env, gold[0]["user_id"])
+    _give_card_digits(env)
+    _call(env, "plan_disputes", user_id=gold[0]["user_id"], transactions=_items(gold))
+    reply = _file(env, gold[0])
+    assert _denied(reply, "procedure.lookups") and banking.DISPUTE_HISTORY_TOOL in reply.content
+    _read_history(env, gold[0]["user_id"])
+    assert _ran(_file(env, gold[0]))
+
+
 def test_a_new_plan_replaces_the_old_one():
     env, _, gold = _gated("task_037")
     user = gold[0]["user_id"]
@@ -347,6 +369,8 @@ def test_plan_gate_decisions_replay_unchanged_in_taus_strict_replay():
     send("log_verification", time_verified="2025-11-14 03:40:00 EST",
          **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
     send("give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
+    send("unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
+    send(WRAPPER, agent_tool_name=banking.DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": gold[0]["user_id"]}))
     send("unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
     assert _denied(send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[0])),
                    "procedure.dispute_plan.none")
@@ -388,6 +412,10 @@ def test_glint_bank_always_publishes_plan_disputes_and_its_plan_gates_the_filing
             _verify(env, gold[0]["user_id"])
             await client.call_tool("give_discoverable_user_tool",
                                    {"discoverable_tool_name": banking.CARD_DIGITS_TOOL})
+            await client.call_tool("unlock_discoverable_agent_tool",
+                                   {"agent_tool_name": banking.DISPUTE_HISTORY_TOOL})
+            await client.call_tool(WRAPPER, {"agent_tool_name": banking.DISPUTE_HISTORY_TOOL,
+                                             "arguments": json.dumps({"user_id": gold[0]["user_id"]})})
             await client.call_tool("unlock_discoverable_agent_tool", {"agent_tool_name": rules.DISPUTE})
             unplanned = await client.call_tool(WRAPPER, {"agent_tool_name": rules.DISPUTE,
                                                          "arguments": json.dumps(gold[0])})
@@ -419,7 +447,13 @@ def test_with_plans_inserts_one_plan_per_user_before_the_first_filing():
              ToolCall(id="4", name=rules.DISPUTE, arguments=b, requestor="assistant"),
              ToolCall(id="5", name=rules.DISPUTE, arguments=c, requestor="assistant")]
     out = with_plans(calls)
-    assert [c.id for c in out] == ["0", "1-plan", "1", "2", "3", "4", "5-plan", "5"]
+    assert [c.id for c in out] == ["0", "1-history-unlock", "1-history", "1-plan", "1", "2", "3", "4", "5-plan", "5"]
+    assert out[2].arguments == {"agent_tool_name": banking.DISPUTE_HISTORY_TOOL,
+                                "arguments": json.dumps({"user_id": "u1"})}
+    read = ToolCall(id="r", name=WRAPPER, requestor="assistant",
+                    arguments={"agent_tool_name": banking.DISPUTE_HISTORY_TOOL, "arguments": "{}"})
+    assert [c.id for c in with_plans([read] + calls)] == ["r", "0", "1-plan", "1", "2", "3", "4", "5-plan", "5"]
+    out = out[2:]
     assert out[1].arguments == {"user_id": "u1", "transactions": [
         _items([a])[0], {"transaction_id": "t2", "dispute_reason": "incorrect_amount"}]}
     assert filing(calls[0]) is None and filing(calls[3]) is None

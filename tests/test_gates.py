@@ -11,6 +11,7 @@ from tau2.environment.toolkit import ToolType
 from tau2.registry import registry
 
 from glint import paths
+from glint.assist import banking
 from glint.gates import (
     ChainBroken,
     Enforcer,
@@ -240,7 +241,11 @@ def _banking(task_id: str):
 
 
 def _plan(env, disputes: list[dict]):
-    items = [{k: d[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")} for d in disputes]
+    # the dispute-history read every filing requires (procedure.REQUIRED_LOOKUPS), as an agent makes it
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
+    _call(env, "call_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL,
+          arguments=json.dumps({"user_id": disputes[0]["user_id"]}))
+    items =[{k: d[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")} for d in disputes]
     reply = _call(env, "plan_disputes", user_id=disputes[0]["user_id"], transactions=items)
     assert not reply.error, reply.content
     return json.loads(reply.content)
