@@ -496,7 +496,7 @@ def test_increase_record_keeps_each_cards_request_until_its_card_is_decided():
 
     rows = {}
     tools = SimpleNamespace(db=SimpleNamespace(credit_limit_increase_requests=SimpleNamespace(data=rows)),
-                            glint_increases={})
+                            glint_increases={}, glint_verdicts={})
     env, ok = SimpleNamespace(tools=tools), ToolMessage(id="t", role="tool", content="done", requestor="assistant")
 
     def submit(rid, card, user="u1"):
