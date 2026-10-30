@@ -26,7 +26,8 @@ from tau2.runner.build import _derive_read_log_allowlist
 from glint import paths
 from glint.assist.banking import PLAN_TOOL
 from glint.gates import Enforcer, EventLog
-from glint.gates.replayplan import with_plans
+from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_plans
+from glint.gates.rules import ADDRESS_ASK
 
 DOMAINS = ("retail", "airline", "banking_knowledge")
 BANKING_SPLIT = paths.RESULTS / "split-partition-banking.json"
@@ -71,11 +72,22 @@ def replay(domain: str, tasks: list, events: EventLog) -> dict:
                         (init.message_history if init else None) or [])
         gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
                 for k, a in enumerate(task.evaluation_criteria.actions or [] if task.evaluation_criteria else [])]
-        for call in with_plans(gold) if domain == "banking_knowledge" else gold:
+        users = env.tools.db.users.data if domain == "banking_knowledge" else {}
+        calls = (with_address_asks(with_plans(gold), lambda u: (users.get(u) or {}).get("address"))
+                 if domain == "banking_knowledge" else gold)
+        for call in calls:
             k = call.id.removeprefix("gold-")
             if call.name == PLAN_TOOL:  # Glint's tool: the ungated twin has none
                 if env.get_response(call).error:
                     raise RuntimeError(f"{task.id}: plan_disputes failed on gold's disputes")
+                continue
+            if call.id.endswith(ADDRESS_ASK_SUFFIX):  # the order before asking: refused once, never sent to the twin
+                before = events.count()
+                env.get_response(call)
+                fired = [e["payload"]["rule_id"] for e in events.events("gate.fired", after=before)
+                         if e["payload"]["decision"] == "deny"]
+                if fired[:1] != [ADDRESS_ASK]:
+                    raise RuntimeError(f"{task.id}: the inserted order was not refused by {ADDRESS_ASK}: {fired}")
                 continue
             write = enforcer.write_call(env, call)
             ungated = twin.get_response(call)
