@@ -481,8 +481,19 @@ def test_a_fraud_replacement_without_expedited_shipping_is_asked_once():
     standard = order | {"expedited_shipping": False}
     reply = _hidden(env, rules.REPLACE, **standard)
     assert _denied(reply, "strongly recommends expedited shipping") and _rule(events) == rules.EXPEDITE_ASK
+    # 054's card is a Gold Rewards Card: credit_card_replacements_002 makes expedited shipping complimentary
+    assert "expedited shipping for the Gold Rewards Card is complimentary ($0.00)" in reply.content
     assert env.tools.glint_expedite_asked == {order["credit_card_account_id"]}
     assert _ran(_hidden(env, rules.REPLACE, **standard))  # the customer declined: allowed
+
+
+def test_the_expedite_fee_follows_the_shipping_documents_card_lists():
+    assert rules.expedite_fee_text("Silver Rewards Card") == "expedited shipping for the Silver Rewards Card costs $10.00"
+    assert rules.expedite_fee_text("EcoCard") == "expedited shipping for the EcoCard costs $15.00"
+    assert rules.expedite_fee_text("Diamond Elite Card").endswith("is complimentary ($0.00)")
+    # Crypto-Cash Back is in the database but not in credit_card_replacements_002's lists
+    assert rules.expedite_fee_text("Crypto-Cash Back") == ("credit_card_replacements_002 lists no expedited shipping "
+                                                           "fee for the Crypto-Cash Back")
 
 
 def test_an_expedited_or_non_fraud_replacement_is_not_asked():
