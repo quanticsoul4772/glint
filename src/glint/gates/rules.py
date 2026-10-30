@@ -315,8 +315,8 @@ def _replacement(toolkit, a: dict) -> GateResult:
                     details | {"reason": reason}, consequence="Asked once per card: the customer decides, and a "
                     "repeated order without expedited shipping goes through.",
                     facts=[f"reason: {reason}", f"expedited_shipping given: {a.get('expedited_shipping')!r}",
-                           "credit_card_replacements_001: \"If the reason is fraud_suspected or stolen, strongly "
-                           "recommend expedited shipping to minimize exposure\""])
+                           ("credit_card_replacements_001: \"If the reason is fraud_suspected or stolen, strongly "
+                            "recommend expedited shipping to minimize exposure\"")])
     return allow("banking.replacement", "glint.assist.banking.LIMIT_FIRST", details)
 
 
