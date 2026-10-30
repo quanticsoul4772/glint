@@ -27,6 +27,13 @@ replays it, it never writes the database (the database hash is unchanged), and i
 database and its arguments, so the strict replay compare matches and the replay rebuilds the same plans. attach()
 puts plan_disputes on every gated banking toolkit, with or without the other decision tools: the gate needs it.
 
+On banking every reply the agent gets that is not an error (reads and allowed writes alike) ends with the open items
+of the customer's request that the recorded plans, the increase record and the database show (`_open_items`):
+disputes planned and not filed, replacements the customer chose and not ordered, increases submitted and not decided.
+plan_disputes' own reply carries none (the plan lists them). In banking-plan-v5-gated, 031 trial 1, 037 trial 3 and
+038 trial 3 each made the plan and filed none of its disputes before the customer ended the conversation. The items are a function of what the replay rebuilds, so a write's
+reply, footer included, replays unchanged.
+
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": GateResult.message()} } to block a call (research/5-measurements/M0-results.md, M6a).
@@ -40,9 +47,9 @@ from collections.abc import Callable
 from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
-from glint.assist.banking import PLAN_TOOL
+from glint.assist.banking import ORDER_TOOL, PLAN_TOOL, replacements_today
 from glint.assist.tau2_tools import add_plan_tool
-from glint.gates.bankdb import increase_request_ids
+from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import (
@@ -58,6 +65,29 @@ from glint.gates.rules import (
 
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
+
+
+def _open_items(tools) -> list[str]:
+    """The customer's open items as the recorded plans, the increase record and the database show them: disputes
+    planned and not filed, cards the customer chose to cancel and replace with no replacement ordered today, increases
+    submitted and not decided. Deterministic."""
+    db, items = tools.db, []
+    for user, plan in sorted(getattr(tools, "glint_plans", {}).items()):
+        filed = {r.get("transaction_id") for r in db.transaction_disputes.data.values() if r.get("user_id") == user}
+        unfiled = [str(e["transaction_id"]) for e in plan.get("order", []) if e["transaction_id"] not in filed]
+        if unfiled:
+            items.append(f"[open] disputes planned for {user} and not filed yet, in the plan's order: "
+                         f"{', '.join(unfiled)}")
+        for c in plan.get("card_actions", []):
+            card = str(c.get("credit_card_account_id", ""))
+            if c.get("card_action") == "cancel_and_reissue" and not replacements_today(db, card):
+                items.append(f"[open] {card}: the customer chose to cancel it and get a new one; {ORDER_TOOL} not "
+                             "called yet")
+    pending = undecided_increases(tools)
+    if pending:
+        items.append(f"[open] credit limit increase submitted and not decided yet: {', '.join(pending)} (the "
+                     "required lookups, then approve or deny)")
+    return items
 
 
 def write_tools(toolkit) -> set[str]:
@@ -188,19 +218,26 @@ class Enforcer:
             add_plan_tool(env)
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
 
+        def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
+            if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name == PLAN_TOOL
+                    or reply.error or str(reply.content).startswith("Error")):
+                return reply
+            items = _open_items(env.tools)
+            return reply.model_copy(update={"content": f"{reply.content}\n\n" + "\n".join(items)}) if items else reply
+
         def get_response(message: ToolCall) -> ToolMessage:
             write = self.write_call(env, message)
             if write is None:
                 reply = original_response(message)
                 self._record_read(env, message, reply)
                 self._record_plan(env, message, reply, state["replay"])
-                return reply
+                return with_open_items(message, reply)
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
                 before = increase_request_ids(env.tools.db) if write[0] == SUBMIT else None
                 reply = original_response(message)
                 self._record_increase(env, *write, reply, before)
-                return reply
+                return with_open_items(message, reply)
             return ToolMessage(id=message.id, content=result.message(self.wording), requestor=message.requestor,
                                role="tool", error=True)
 

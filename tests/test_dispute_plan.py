@@ -14,7 +14,7 @@ from tau2.registry import registry
 from glint import paths
 from glint.assist import banking
 from glint.assist.tau2_tools import BankingDecisionTools, DisputePlanTools, add_plan_tool, install
-from glint.gates import Enforcer, EventLog, rules
+from glint.gates import Enforcer, EventLog, enforce, rules
 from glint.gates.core import run_gate
 from glint.gates.replayplan import PLAN_FIELDS, filing, plan_arguments, with_plans
 
@@ -335,6 +335,50 @@ def test_a_filing_needs_the_dispute_history_read_first():
     assert _denied(reply, "procedure.lookups") and banking.DISPUTE_HISTORY_TOOL in reply.content
     _read_history(env, gold[0]["user_id"])
     assert _ran(_file(env, gold[0]))
+
+
+def test_replies_carry_the_open_items_and_replay_them_unchanged():
+    # task_039: the customer chose cancel_and_reissue and gold orders the replacement after the 8 disputes; until then
+    # every reply that is not an error names what is still open (banking-plan-v5-gated 031 t1, 037 t3, 038 t3 planned
+    # and filed nothing)
+    task = _task("task_039")
+    install("banking_knowledge", Enforcer("banking_knowledge", EventLog(":memory:")))
+    constructor = registry.get_env_constructor("banking_knowledge")
+    env = constructor(retrieval_variant="bm25_grep", task=task)
+    init = task.initial_state
+    env.set_state(init.initialization_data if init else None, init.initialization_actions if init else None, [])
+    history, gold = [], _gold_disputes(task)
+    user = gold[0]["user_id"]
+
+    def send(name, /, **args):
+        call = ToolCall(id=f"c{len(history)}", name=name, arguments=args, requestor="assistant")
+        reply = env.get_response(call)
+        history.extend([AssistantMessage(role="assistant", tool_calls=[call]), reply])
+        return reply
+
+    assert "[open]" not in send("get_current_time").content  # nothing planned yet
+    u = env.tools.db.users.data[user]
+    send("log_verification", time_verified="2025-11-14 03:40:00 EST",
+         **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
+    send("give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
+    send("unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
+    send(WRAPPER, agent_tool_name=banking.DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": user}))
+    plan = send("plan_disputes", user_id=user, transactions=_items(gold))
+    assert "[open]" not in plan.content  # the plan lists them itself
+    card = json.loads(plan.content)["card_actions"][0]["credit_card_account_id"]
+    read = send("get_current_time").content
+    assert f"[open] disputes planned for {user} and not filed yet, in the plan's order: " + ", ".join(
+        d["transaction_id"] for d in gold) in read
+    assert f"[open] {card}: the customer chose to cancel it and get a new one; {banking.ORDER_TOOL}" in read
+    send("unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
+    filed = send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[0]))
+    assert _ran(filed) and ", ".join(d["transaction_id"] for d in gold[1:]) + "\n" in filed.content
+    denied = send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[5]))
+    assert _denied(denied, "procedure.dispute_plan.order") and "[open]" not in denied.content
+    replay = constructor(retrieval_variant="bm25_grep", task=task)
+    replay.set_state(init.initialization_data if init else None, init.initialization_actions if init else None,
+                     history, strict=True)  # raises if a replayed reply, footer included, differs
+    assert enforce._open_items(replay.tools) == enforce._open_items(env.tools)
 
 
 def test_a_new_plan_replaces_the_old_one():
