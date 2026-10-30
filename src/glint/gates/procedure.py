@@ -43,10 +43,11 @@ BANK_CREDIT_LOOKUPS = ((ACCOUNTS, "bank_accounts_(general)_043/_044"),
 # write -> the hidden lookups its procedure requires before it, each with its source document. Lookups the
 # knowledge base mentions without making them a precondition are not required. The credit card dispute requires the
 # dispute history: it is criterion 4's count of disputes on record, and τ² logs the read in the database it scores
-# where its gold makes it (the read log allowlist), so a filing without it fails those tasks (12 of 35 failed
-# banking-plan-v4-gated runs, banking.BEFORE_FILING; in banking-plan-v5-gated, with the hint, 081 trial 0 and 041 trial
-# 2 still filed before any history read). τ² logs a read under an id made from the tool name alone and keeps the first record, so a repeated
-# read changes nothing, and a read gold does not make is not logged. τ²'s train gold files without it in 031, 037 and
+# where its gold makes it (the read log allowlist), so a filing without it fails those tasks (12 of 37 failed
+# banking-plan-v4-gated runs filed without it, 8 failing on it alone, banking.BEFORE_FILING; in banking-plan-v5-gated,
+# with the hint, 081 trial 0 and 041 trial 2 still filed before any history read). τ² logs a read under an id made
+# from the tool name alone and keeps the first record, so a repeated read changes nothing, and a read gold does not
+# make is not logged. τ²'s train gold files without it in 031, 037 and
 # 038; replays insert it there with the plan call (glint.gates.replayplan).
 REQUIRED_LOOKUPS = {
     "approve_credit_limit_increase_5847": CLI_LOOKUPS,
@@ -361,7 +362,7 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     # a replacement ordered today for the card after the plan was made sets cancel_and_reissue, as the plan does when
     # the order comes first (glint.assist.banking.card_actions); the plan's older answer would contradict
     # banking.dispute, which requires cancel_and_reissue once the card is being replaced
-    txn = db.credit_card_transaction_history.data.get(tid) or {}
+    txn = db.credit_card_transaction_history.data.get(nxt["transaction_id"]) or {}  # the next entry's own card
     if replacements_today(db, card_of_transaction(db, user, txn)):
         nxt["card_action"] = "cancel_and_reissue"
     refund = (f", resolution_requested {nxt['resolution_requested']!r}" if nxt.get("resolution_requested") else "")

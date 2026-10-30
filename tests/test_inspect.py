@@ -301,9 +301,18 @@ def test_run_facts_name_the_lookups_the_plan_the_searches_and_how_the_run_ended(
     f = inspect.run_facts(sim)
     # the history read came after the first filing; a lookup that errored is not counted as made
     assert f["reads"] == [inspect.HISTORY] and f["history_before_first_filing"] is False
-    assert (f["plans"], f["filings"], f["searches"], f["search_chars"]) == (1, 1, 1, 900)
+    assert (f["plans"], f["filings"], f["filings_refused"], f["searches"], f["search_chars"]) == (1, 1, 0, 1, 900)
     line = inspect.facts_line(f)
     assert "dispute history before the first filing: NO" in line and "ended: user_stop" in line
+    # a filing the gate refused changed nothing: the history read before the filing that ran counts
+    refused = [_hidden_call(inspect.DISPUTE, {"transaction_id": "t1"}, 4),
+               {"role": "tool", "id": "c4", "content": "Error: this write was blocked by a policy gate and was NOT "
+                "executed.", "error": True},
+               _hidden_call(inspect.HISTORY, {"user_id": "u"}, 5), {"role": "tool", "id": "c5", "content": "[]"},
+               _hidden_call(inspect.DISPUTE, {"transaction_id": "t1"}, 6), {"role": "tool", "id": "c6", "content": "ok"}]
+    rescued = inspect.run_facts({"messages": refused, "termination_reason": "user_stop", "info": {}})
+    assert (rescued["history_before_first_filing"], rescued["filings"], rescued["filings_refused"]) == (True, 1, 1)
+    assert "filings ran 1 (refused 1)" in inspect.facts_line(rescued)
     overflow = inspect.run_facts({"messages": [], "termination_reason": "infrastructure_error",
                                   "info": {"error": "ContextWindowExceededError: 131072 tokens"}})
     assert overflow["history_before_first_filing"] is None

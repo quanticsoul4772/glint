@@ -440,6 +440,38 @@ def test_increase_record_and_its_decisions_replay_unchanged_in_taus_strict_repla
     assert replay.tools.glint_increases == env.tools.glint_increases != {}
 
 
+def test_increase_record_keeps_each_cards_request_until_its_card_is_decided():
+    # a second submit (another card) adds to the record; a decision clears its card's requests whoever it names
+    from types import SimpleNamespace
+
+    from tau2.data_model.message import ToolMessage
+
+    from glint.gates.bankdb import increase_request_ids, undecided_increases
+    from glint.gates.enforce import Enforcer as E
+
+    rows = {}
+    tools = SimpleNamespace(db=SimpleNamespace(credit_limit_increase_requests=SimpleNamespace(data=rows)),
+                            glint_increases={})
+    env, ok = SimpleNamespace(tools=tools), ToolMessage(id="t", role="tool", content="done", requestor="assistant")
+
+    def submit(rid, card, user="u1"):
+        before = increase_request_ids(tools.db)
+        rows[rid] = {"credit_card_account_id": card, "user_id": user}
+        E._record_increase(env, rules.SUBMIT, {"user_id": user, "credit_card_account_id": card}, ok, before)
+
+    submit("r1", "card1")
+    submit("r2", "card2")
+    assert undecided_increases(tools, "u1") == ["r1", "r2"]
+    # a deny for card2 that names another user: card2's request is decided, card1's still blocks
+    E._record_increase(env, rules.DENY, {"user_id": "u2", "credit_card_account_id": "card2"}, ok, None)
+    assert undecided_increases(tools, "u1") == ["r1"] and undecided_increases(tools, card="card2") == []
+    failed = ToolMessage(id="t", role="tool", content="Error: not found", requestor="assistant")
+    E._record_increase(env, rules.APPROVE, {"user_id": "u1", "credit_card_account_id": "card1"}, failed, None)
+    assert undecided_increases(tools, "u1") == ["r1"]  # a decision τ² refused decides nothing
+    E._record_increase(env, rules.APPROVE, {"user_id": "u1", "credit_card_account_id": "card1"}, ok, None)
+    assert tools.glint_increases == {}
+
+
 def test_transfer_reason_after_fraud_is_the_fraud_code():
     env, task, _ = _bank("task_081")
     _play(env, task, "transfer_to_human_agents")  # the stolen cards are closed and the fraud disputes filed

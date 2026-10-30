@@ -222,17 +222,20 @@ DISPUTE, HISTORY = "file_credit_card_transaction_dispute_4829", "get_user_disput
 
 def run_facts(sim: dict) -> dict:
     """What a run did beside its writes, from its messages: the hidden lookups that ran (in order, once each), whether
-    the dispute-history read came before the first dispute filing, plan_disputes calls, dispute filings tried, the
-    knowledge-base search results (count and characters) and how the run ended (τ²'s termination reason and
-    info.error). Each answered a question the run diff could not (v6 diagnosis, 2026-10-30)."""
+    the dispute-history read came before the first dispute filing that ran, plan_disputes calls, dispute filings that
+    ran and those refused (by a gate or τ²), the knowledge-base search results (count and characters) and how the run
+    ended (τ²'s termination reason and info.error). A refused filing changed nothing, so it is not "the first filing":
+    a run the history-read gate refused, that then read the history and filed, read it before its first filing. Each
+    answered a question the run diff could not (v6 diagnosis, 2026-10-30)."""
     calls = gate_summary.run_calls(sim)
     reads = list(dict.fromkeys(c["tool"] for c in calls if c["tool"] and HIDDEN_READ.match(c["tool"])
                                and not c["error"]))
-    first_filing = next((c["index"] for c in calls if c["tool"] == DISPUTE), None)
+    filed = [c["index"] for c in calls if c["tool"] == DISPUTE and not c["error"]]
+    first_filing = filed[0] if filed else None
     history = [c["index"] for c in calls if c["tool"] == HISTORY and not c["error"]]
     searches = [len(c["content"]) for c in calls if c["tool"] in SEARCH_TOOLS]
-    return {"reads": reads, "plans": sum(c["tool"] == "plan_disputes" for c in calls),
-            "filings": sum(c["tool"] == DISPUTE for c in calls),
+    return {"reads": reads, "plans": sum(c["tool"] == "plan_disputes" for c in calls), "filings": len(filed),
+            "filings_refused": sum(c["tool"] == DISPUTE and c["error"] for c in calls),
             "history_before_first_filing": None if first_filing is None else any(i < first_filing for i in history),
             "searches": len(searches), "search_chars": sum(searches), "largest_search": max(searches, default=0),
             "termination": sim.get("termination_reason"), "error": str((sim.get("info") or {}).get("error") or "")}
@@ -242,8 +245,8 @@ def facts_line(f: dict) -> str:
     history = ("" if f["history_before_first_filing"] is None else
                f" (dispute history before the first filing: {'yes' if f['history_before_first_filing'] else 'NO'})")
     ended = f"ended: {f['termination']}" + (f" ({f['error'][:160]})" if f["error"] else "")
-    return (f"  facts: lookups {', '.join(f['reads']) or 'none'}{history}; plan_disputes {f['plans']}, filings tried "
-            f"{f['filings']}; searches {f['searches']} ({f['search_chars']:,} chars, largest {f['largest_search']:,}); "
+    return (f"  facts: lookups {', '.join(f['reads']) or 'none'}{history}; plan_disputes {f['plans']}, filings ran "
+            f"{f['filings']} (refused {f['filings_refused']}); searches {f['searches']} ({f['search_chars']:,} chars, largest {f['largest_search']:,}); "
             f"{ended}")
 
 

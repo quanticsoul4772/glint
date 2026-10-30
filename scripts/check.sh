@@ -15,6 +15,8 @@ if [ -x "$venv/python.exe" ]; then py_default="$venv/python.exe"; elif [ -x "$ve
 if [ -x "$venv/ruff.exe" ]; then ruff_default="$venv/ruff.exe"; elif [ -x "$venv/ruff" ]; then ruff_default="$venv/ruff"; else ruff_default=ruff; fi
 PY=${PY:-$py_default}
 RUFF=${RUFF:-$ruff_default}
+# the coverage step needs pytest-cov; without it every ref would fail on --cov (the run folder's .venv lacks it)
+"$PY" -c "import pytest_cov" 2>/dev/null || { echo "check.sh: $PY has no pytest-cov; set PY to a python that has it (glint-dev's .venv)" >&2; exit 2; }
 status=0
 for ref in "$@"; do
   # next to the repo, not in the system temp folder: tests find the vendored τ² checkout relative to the repo's

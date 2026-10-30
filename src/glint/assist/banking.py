@@ -217,8 +217,9 @@ CARD_DIGITS_TOOL = "get_card_last_4_digits"
 CARD_DIGITS_HOW = (f"the customer's: give them {CARD_DIGITS_TOOL} (give_discoverable_user_tool) with the card's "
                    "credit_card_account_id, and file the digits it reports")
 DISPUTE_HISTORY_TOOL = "get_user_dispute_history_7291"
-# Glimmer filed without this lookup in 12 of 35 failed banking-plan-v4-gated runs (039-041, 081), and τ² logs a read
-# its gold makes in the database it scores (the read log allowlist), so those runs failed on it alone (2026-10-29).
+# Glimmer filed without this lookup in 12 of the 37 failed banking-plan-v4-gated runs (039-041, 081; overflows count as
+# failures), and τ² logs a read its gold makes in the database it scores (the read log allowlist), so 8 of those 12
+# failed on it alone (counts corrected 2026-10-30; first written as "12 of 35 ... on it alone").
 # The filing requires it (glint.gates.procedure.REQUIRED_LOOKUPS); an extra read is not logged where gold lacks it.
 BEFORE_FILING = (f"Before filing, unlock and call {DISPUTE_HISTORY_TOOL} (call_discoverable_agent_tool) with this "
                  "user_id: the disputes already on record count toward the 2-dispute limit for provisional credit "
