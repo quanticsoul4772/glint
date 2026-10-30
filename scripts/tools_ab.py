@@ -753,7 +753,8 @@ def generate(cfg: dict) -> None:
 def analyze(cfg: dict) -> None:
     report = {}
     # Domains come from the result files themselves (the design run predates tasks.json)
-    domains = sorted({p.stem.split("-", 1)[1] for p in cfg["data"].glob("*-*.json") if p.stem != "tasks"})
+    # (arm files only: the released-<arm>-<domain>-<time>.json side files of a rerun are not a domain)
+    domains = sorted({p.stem.split("-", 1)[1] for arm in ("base", "tools") for p in cfg["data"].glob(f"{arm}-*.json")})
     if not domains:
         raise FileNotFoundError(f"no results in {cfg['data']}")
     planned = tuple(cfg.get("arms", ("base", "tools")))

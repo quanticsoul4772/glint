@@ -47,6 +47,16 @@ def test_analyze_warns_about_a_missing_arm_and_one_armed_tasks(run_set, make_sim
     assert "WARNING: airline-7: only the base arm has runs" in out
 
 
+def test_analyze_does_not_read_a_reruns_released_side_files_as_domains(run_set, make_sim, capsys):
+    # banking-test's rerun left released-<arm>-<domain>-<time>.json beside the arm files, and analyze warned that
+    # "base-banking_knowledge-20261028-121251" had no tools arm (2026-10-29)
+    cfg = run_set({("base", "retail"): [make_sim("1", 0)], ("tools", "retail"): [make_sim("1", 0)]}, k=1)
+    (cfg["data"] / "released-base-retail-20261028-121251.json").write_text('{"simulations": []}', encoding="utf-8")
+    assert set(_report(cfg)) == {"retail-1"}
+    out = capsys.readouterr().out
+    assert "no tools arm" not in out and "no base arm" not in out
+
+
 def test_analyze_warns_when_a_tools_arm_never_called_a_tool(run_set, make_sim, capsys):
     _report(run_set({("base", "retail"): [make_sim("1", 0)], ("tools", "retail"): [make_sim("1", 0)]}, k=1))
     assert "the tools arm for retail made 0 Glint tool calls" in capsys.readouterr().out

@@ -74,12 +74,17 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 ## What was measured
 τ²-bench v1.0.1, Glimmer at medium reasoning, both arms with the same seeds on the same backend. Reported **by task** (runs of one task are not independent); tuned and untuned tasks apart. Full detail: [docs/results.md](docs/results.md).
 
+- **Banking with every write gated (v5, design data): 3 of 5 untuned tasks improved, 0 worse, not significant** (the same 12 tasks, k=4; the gated arm also has the decision tools and a dispute plan).
+  - **5 untuned tasks:** 050: 2/4 → 4/4; 051: 0/4 → 3/4; 052: 0/4 → 4/4; 031 and 053 tied; sign test p = 0.25; runs 5/20 → 14/20.
+  - **7 tuned tasks** (the gates and the plan were shaped by their runs): 3 improved, 3 tied, 1 worse (037: 4/4 → 3/4); runs 4/28 → 11/28. 040 and 041 went from 0/4 to 4/4 and 3/4 after a change made from their own failures.
+  - v5 is the latest of five gated versions, not the best-chosen; their untuned totals ranged from 7/20 to 14/20 on changes that do not touch most of those tasks, so the differences between versions are not established at k=4. All versions by task: [docs/results.md](docs/results.md#banking-write-gates-enforced-design-data-k4).
+  - Replaying τ²'s expected actions for the 77 banking training tasks through the gates: 0 false refusals in 272 expected writes (task_005's 2 writes on placeholder verification are denied and listed apart).
 - **Banking, current tools: the only domain with a gain, not significant** (12 tasks with a dispute or credit-limit step, k=4).
   - **10 untuned tasks: 3 improved** (037: 0/4 → 3/4; 050: 2/4 → 4/4; 052: 0/4 → 1/4), 7 tied, 0 worse; sign test p = 0.25; runs 6/40 → 12/40. Their correct answers were used to check the tools' rules, so they are not fully held-out.
   - **2 tuned tasks improved** (038: 0/4 → 1/4; 054: 0/4 → 4/4). The tools were refined after reading their runs.
   - Wrong writes (writes Glint's own checks judge wrong) did not fall on the untuned tasks: 39 without the tools vs 43 with. On the tuned tasks: 11 → 0.
 - **Retail and airline: no gain, and on retail the tools lose runs.** Held-out tasks on the current tools (k=4): retail 39/40 without the tools vs 35/40 with; airline 37/40 vs 38/40. By task: 2 improved, 14 tied, 4 worse (sign test p = 0.69).
-- **In progress:** τ²'s untouched banking test split (all 20 tasks, k=4); only task_080 has a dispute or credit-limit step. Results will be added when it ends.
+- **Banking test split, read once as the final check (20 untouched tasks, k=4, tools without gates): no gain.** 10/80 without the tools vs 10/80 with; by task 1 improved (047: 0/4 → 1/4), 1 worse (036: 4/4 → 3/4), 18 tied. Only task_080 has a dispute or credit-limit step, and a decision tool was called in 1 of the 80 runs, so the split mainly shows the tools neither helped nor hurt tasks they were not built for. There is no gated run on this split: the gate rules were shaped partly by its failures.
 - Earlier runs on tool code from before the ce7b242 verdict fixes are superseded; they are kept in [docs/results.md](docs/results.md) because the desk's replay pairs come from them.
 
 ![Results tab: per set, tasks improved, tied and worse, runs passed with and without Glint, and pass dots per task](docs/images/desk-results.png)

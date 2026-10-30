@@ -17,7 +17,27 @@ import tools_ab  # after the log setup above
 
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "results.json"
 TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading these tasks' runs
+# the gates and the dispute plan were shaped by these tasks' runs or gold (by_task.TUNED)
+TUNED_GATES = {"task_037", "task_038", "task_039", "task_040", "task_041", "task_054", "task_081"}
+# a tools-only set -> the set whose base arm it is compared with (same tasks, trials and seeds; checked in main)
+BASE_FROM = {"banking-plan-v5-gated": "banking-plan-gated"}
+GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on #117, against the "
+              "ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Five earlier gated "
+              "versions are in docs/results.md; this is the latest, not the best-chosen. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
+    ("banking-plan-v5-gated", True, "Banking, untuned tasks, write gates enforced", "untuned",
+     ("Tasks 031 and 050-053, which no gate or plan change came from. " + GATED_NOTE),
+     lambda task: task not in TUNED_GATES),
+    ("banking-plan-v5-gated", True, "Banking, tuned tasks, write gates enforced", "tuned",
+     ("Tasks 037-041, 054 and 081: the gates and the dispute plan were shaped by their runs and correct answers "
+      "(040 and 041 went from 0/4 to 4/4 and 3/4 after #117, which came from their failures). Do not read as general "
+      "evidence. " + GATED_NOTE),
+     lambda task: task in TUNED_GATES),
+    ("banking-test", True, "Banking test split, read once (current tools, no gates)", "held-out",
+     ("τ²'s 20 untouched banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute "
+      "or credit-limit step, and a decision tool was called in 1 of 80 runs, so this shows the tools neither helped "
+      "nor hurt tasks they were not built for. By task: 1 improved, 18 tied, 1 worse. No gated run on this split. "
+      "k=4. Glimmer on Modal.")),
     ("heldout2", True, "Retail and airline, held-out tasks (current tools)", "held-out",
      ("A fresh random draw of 10 retail and 10 airline tasks, excluding the design tasks, the whole failure "
       "inventory and the first draw; no tool change came from these tasks. Run on the current tools. By task: 2 "
@@ -53,6 +73,23 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
 ]
 
 
+def seeds(arm_file: Path) -> dict:
+    return {(s["task_id"], s["trial"]): s["seed"]
+            for s in json.loads(arm_file.read_text(encoding="utf-8"))["simulations"]}
+
+
+def with_base(report: dict, cfg: dict, base_cfg: dict) -> dict:
+    """`report` (a tools-only set) with each task's base arm taken from `base_cfg`'s set. Refuses unless both ran the
+    same (task, trial) pairs with the same seeds, so the two arms differ only by Glint."""
+    for arm_file in sorted(cfg["data"].glob("tools-*.json")):
+        base_file = base_cfg["data"] / arm_file.name.replace("tools-", "base-", 1)
+        if seeds(arm_file) != seeds(base_file):
+            raise SystemExit(f"{arm_file} and {base_file} differ in tasks, trials or seeds; they cannot be compared")
+    tools_ab.analyze(base_cfg)
+    base = json.loads(base_cfg["out"].read_text(encoding="utf-8"))
+    return {key: arms | {"base": base[key]["base"]} for key, arms in report.items() if "base" in base.get(key, {})}
+
+
 def main():
     out = []
     for name, modal, title, role, note, *only in SETS:
@@ -63,6 +100,8 @@ def main():
             continue
         tools_ab.analyze(cfg)
         report = json.loads(cfg["out"].read_text(encoding="utf-8"))
+        if name in BASE_FROM:
+            report = with_base(report, cfg, tools_ab.for_backend(tools_ab.SETS[BASE_FROM[name]], modal))
         rows, tally = [], {"improved": 0, "tied": 0, "worse": 0, "no data": 0}
         compared = []  # the tasks with both arms: the tally and the run totals both come from these
         for key in sorted(report, key=lambda k: (k.split("-")[0], k)):
