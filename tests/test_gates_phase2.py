@@ -397,6 +397,7 @@ def test_a_resubmitted_increase_blocks_again_after_the_first_decision():
     assert env.tools.glint_increases == {}  # a submit τ² refused records nothing
     assert _ran(_hidden(env, rules.SUBMIT, **second | {"requested_increase_amount": 500}))
     assert len(env.tools.glint_increases[second["user_id"]]) == 1
+    assert "[open] credit limit increase submitted and not decided yet" in _call(env, "get_current_time").content
     pay = json.loads(next(a.arguments["arguments"] for a in task.evaluation_criteria.actions
                           if _name(a) == "pay_credit_card_from_checking_9182")) | {"amount": 100}  # gold paid 3000
     assert _denied(_hidden(env, "pay_credit_card_from_checking_9182", **pay), "approve or deny")
