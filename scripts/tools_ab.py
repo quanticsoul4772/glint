@@ -691,8 +691,8 @@ def generate(cfg: dict) -> None:
             print(empty, flush=True)
         return response
 
-    # every Glimmer call's exact prompt and completion token ids (τ²'s saved runs keep neither), for activation capture
-    recorded = recording(route, data / "calls.jsonl", require_ids=bool(cfg.get("modal")))
+    # every Glimmer call's token counts and timing, tied to its task and trial (the gate log's run context)
+    recorded = recording(route, data / "calls.jsonl", context=current_run)
     llm_utils.completion = guarded(guarded(recorded, glim, only=("Muse-Glimmer",)), meta, RateLimiter(per_minute=120),
                                    only=("muse-spark", "muse-wonder"))
     nl.DEFAULT_LLM_NL_ASSERTIONS, nl.DEFAULT_LLM_NL_ASSERTIONS_ARGS = SPARK, {**META, "temperature": 0.0}
