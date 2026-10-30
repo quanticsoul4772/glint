@@ -153,7 +153,10 @@ class BankServer:
 
     def _install(self, s: BankSession, env) -> None:
         base = set(env.tools.get_tools())
-        assist_environment(env, DOMAIN, s.enforcer)
+        if self.decision_tools:  # the tools arm's toolkit, its excerpt KB_search and grep and KB_read included
+            assist_environment(env, DOMAIN, s.enforcer)
+        else:  # τ²'s own tools, gated; attach() adds plan_disputes, which the plan gate needs
+            s.enforcer.attach(env)
         s.env = env
         s.published = set(env.tools.get_tools()) if self.decision_tools else base | {PLAN_TOOL}
 
