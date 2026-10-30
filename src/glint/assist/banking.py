@@ -247,6 +247,20 @@ PLAN_RULE = ("File the disputes in this order, each with its eligible_for_provis
              "largest amount first.")
 
 
+def noticed_date(value) -> tuple[str | None, str]:
+    """(the customer's issue_noticed_date as MM/DD/YYYY, rejection): the format the dispute record takes
+    (credit_cards_(general)_014 field 11); (None, "") when the customer has not been asked yet."""
+    if value in (None, ""):
+        return None, ""
+    text = str(value).strip()
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).strftime("%m/%d/%Y"), ""
+        except ValueError:
+            continue
+    return None, f"issue_noticed_date {text!r} is not a date (MM/DD/YYYY)"
+
+
 def card_of_transaction(db, user_id: str, txn: dict) -> str:
     """The credit card account a transaction was charged to (by its account id, else by the user's card type)."""
     return txn.get("credit_card_account_id") or next(
@@ -280,8 +294,8 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     overcharge itself as `partial_refund_amount`. The customer's own choice wins: an item with resolution_requested
     'full_refund' (the customer asked for the whole charge back) is planned as a full refund with no amount.
 
-    `transactions`: the disputes the customer wants, each {transaction_id, dispute_reason, contacted_merchant} (the
-    last None when not asked yet), and for incorrect_amount `expected_amount` or `partial_refund_amount`. Criterion 4
+    `transactions`: the disputes the customer wants, each {transaction_id, dispute_reason, contacted_merchant,
+    issue_noticed_date} (the last two None when not asked yet; the date is filed as MM/DD/YYYY), and for incorrect_amount `expected_amount` or `partial_refund_amount`. Criterion 4
     counts the disputes on record in the past 12 months plus the planned ones ahead. A transaction already disputed is listed under `already_filed`; an unknown transaction, a reason
     outside τ²'s list or a repeated transaction under `rejected`. Reads the live database only; deterministic."""
     user_id = str(user_id or "")
@@ -300,17 +314,19 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
                f"transaction {tid!r} does not exist for user {user_id}" if txn is None or txn.get("user_id") != user_id
                else f"dispute_reason {reason!r} is not one of {list(DISPUTE_REASONS)}"
                if reason not in DISPUTE_REASONS else "")
-        refund = None
+        refund, noticed = None, None
         if not why and reason == OVERCHARGE:
             refund, why = overcharge(_money(txn.get("transaction_amount")), item)
+        if not why:
+            noticed, why = noticed_date(item.get("issue_noticed_date"))
         seen.add(tid)
         if why:
             rejected.append({"transaction_id": tid, "reason": why})
         elif tid in disputed:
             already.append(tid)
         else:
-            wanted.append((tid, reason, contacted, card_of_transaction(db, user_id, txn), refund))
-    first = [check_dispute(db, user_id, card, tid, reason, contacted) for tid, reason, contacted, card, _ in wanted]
+            wanted.append((tid, reason, contacted, card_of_transaction(db, user_id, txn), refund, noticed))
+    first = [check_dispute(db, user_id, card, tid, reason, contacted) for tid, reason, contacted, card, *_ in wanted]
     qualifies = [all(ok for name, ok in v.get("provisional_credit_criteria", {"none": False}).items()
                      if name != COUNT_CRITERION) for v in first]
     amount = {tid: _money(db.credit_card_transaction_history.data[tid].get("transaction_amount"))
@@ -318,13 +334,13 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     credit_group = sorted((w for w, q in zip(wanted, qualifies) if q), key=lambda w: -amount[w[0]])  # stable
     ordered = credit_group + [w for w, q in zip(wanted, qualifies) if not q]
     order, ask = [], []
-    for tid, reason, contacted, card, refund in ordered:
+    for tid, reason, contacted, card, refund, noticed in ordered:
         v = check_dispute(db, user_id, card, tid, reason, contacted, planned_before=len(order))
         if "provisional_credit_criteria" not in v:
             rejected.append({"transaction_id": tid, "reason": "; ".join(v["reasons"])})
             continue
         entry = {"position": len(order) + 1, "transaction_id": tid, "dispute_reason": reason,
-                 "contacted_merchant": contacted,
+                 "contacted_merchant": contacted, "issue_noticed_date": noticed,
                  "eligible_for_provisional_credit": v["eligible_for_provisional_credit"],
                  "can_get_credit": all(ok for name, ok in v["provisional_credit_criteria"].items()
                                        if name != COUNT_CRITERION),
@@ -340,6 +356,10 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
         questions = []
         if contacted is None:
             questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")
+        if noticed is None:
+            # credit_cards_(general)_014 field 11 is the customer's answer; a task_054 run filed another date than
+            # the customer's (banking-plan-v5-gated trial 2, 2026-10-30)
+            questions.append(f"When did you first notice the {tid} charge?")
         if reason == OVERCHARGE:
             # for the agent, not the customer: Glimmer's "full refund for all?" was agreed to and filed as the
             # customer's choice (039-041, 2026-10-29); a suggested full refund is not the customer asking for one

@@ -144,7 +144,9 @@ class DisputePlanTools(ToolKitBase):
                 'duplicate_charge', 'incorrect_amount', 'goods_services_not_received',
                 'goods_services_not_as_described', 'canceled_subscription_still_charging', 'refund_never_processed',
                 "contacted_merchant": the customer's answer to "did you try to resolve this with the merchant
-                first?" (true/false; leave it out if not asked yet), and for an 'incorrect_amount' dispute either
+                first?" (true/false; leave it out if not asked yet), "issue_noticed_date": the customer's answer to
+                "when did you first notice this charge?" (MM/DD/YYYY; leave it out if not asked yet, and the plan asks
+                for it), and for an 'incorrect_amount' dispute either
                 "expected_amount" (what the customer should have been charged) or "partial_refund_amount" (the
                 overcharge); leave both out until the customer has said, and the plan asks for it. Ask what the
                 customer should have been charged without offering or suggesting a full refund; only if the customer
@@ -155,7 +157,7 @@ class DisputePlanTools(ToolKitBase):
                 τ²-bench train tasks 039-041; the policy says to ask the customer).
 
         Returns:
-            dict: order (position, transaction_id, dispute_reason, contacted_merchant,
+            dict: order (position, transaction_id, dispute_reason, contacted_merchant, issue_noticed_date,
             eligible_for_provisional_credit, provisional_credit_criteria, and resolution_requested with
             partial_refund_amount for incorrect_amount), already_filed, rejected, ask_user, ready.
         """

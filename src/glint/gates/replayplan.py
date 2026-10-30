@@ -15,7 +15,7 @@ from glint.gates.rules import DISPUTE, parse_hidden_arguments
 
 WRAPPER = "call_discoverable_agent_tool"
 # a filing's partial_refund_amount is the overcharge the plan takes for an incorrect_amount dispute
-PLAN_FIELDS = ("transaction_id", "dispute_reason", "contacted_merchant", "partial_refund_amount")
+PLAN_FIELDS = ("transaction_id", "dispute_reason", "contacted_merchant", "partial_refund_amount", "issue_noticed_date")
 
 
 def filing(call: ToolCall) -> dict | None:

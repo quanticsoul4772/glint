@@ -16,7 +16,7 @@ from glint.assist import banking
 from glint.assist.tau2_tools import BankingDecisionTools, DisputePlanTools, add_plan_tool, install
 from glint.gates import Enforcer, EventLog, rules
 from glint.gates.core import run_gate
-from glint.gates.replayplan import filing, plan_arguments, with_plans
+from glint.gates.replayplan import PLAN_FIELDS, filing, plan_arguments, with_plans
 
 logger.remove()
 TASKS = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
@@ -24,7 +24,7 @@ TASKS = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" 
 TEST_SPLIT = set(json.loads((paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))
                  ["test_untouched"])
 WRAPPER = "call_discoverable_agent_tool"
-FIELDS = ("transaction_id", "dispute_reason", "contacted_merchant", "partial_refund_amount")
+FIELDS = PLAN_FIELDS
 
 
 def _task(task_id: str) -> Task:
@@ -231,6 +231,30 @@ def test_a_plan_made_before_the_merchant_answer_holds_the_filing_until_replanned
     assert _ran(_file(env, gold[0]))
 
 
+def test_the_noticed_date_is_the_customers_answer_filed_as_planned():
+    # task_054: the customer noticed the charge on 11/12/2025, two days before τ²'s clock (credit_cards_(general)_014
+    # field 11: ask the customer)
+    env, _, gold = _gated("task_054", digits=False)
+    user, item = gold[0]["user_id"], _items(gold)[0]
+    assert item["issue_noticed_date"] == "11/12/2025"
+    unasked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[
+        {k: v for k, v in item.items() if k != "issue_noticed_date"}]).content)
+    question = f"When did you first notice the {item['transaction_id']} charge?"
+    assert unasked["order"][0]["ask_user"] == question and unasked["ready"] == "False"  # τ² stringifies bools
+    verdict = _plan_gate(env, gold[0])
+    assert verdict.rule_id == "procedure.dispute_plan.ask" and "first noticed" in verdict.reason
+    # an ISO answer is planned in the record's MM/DD/YYYY; a filing with today's date is off the plan
+    plan = json.loads(_call(env, "plan_disputes", user_id=user,
+                            transactions=[item | {"issue_noticed_date": "2025-11-12"}]).content)
+    assert plan["order"][0]["issue_noticed_date"] == "11/12/2025" and plan["ready"] == "True"
+    verdict = _plan_gate(env, gold[0] | {"issue_noticed_date": "11/14/2025"})
+    assert verdict.rule_id == "procedure.dispute_plan.values"
+    assert "issue_noticed_date '11/14/2025' != the plan's '11/12/2025'" in verdict.facts
+    assert _plan_gate(env, gold[0]).allowed
+    bad = banking.plan_disputes(env.tools.db, user, [item | {"issue_noticed_date": "last week"}])
+    assert bad["order"] == [] and "is not a date" in bad["rejected"][0]["reason"]
+
+
 def test_a_new_plan_replaces_the_old_one():
     env, _, gold = _gated("task_037")
     user = gold[0]["user_id"]
@@ -363,7 +387,7 @@ def test_an_incorrect_amount_dispute_is_planned_as_a_partial_refund_of_the_overc
     env, _, gold = _gated("task_039")
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
-    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date")}
     asked = json.loads(_call(env, "plan_disputes", user_id=user, transactions=[base]).content)
     entry = asked["order"][0]
     assert "resolution_requested" not in entry and "should you have been charged" in entry["ask_user"]
@@ -381,7 +405,7 @@ def test_the_plan_gate_holds_an_overcharge_filing_to_the_planned_partial_refund(
     env, _, gold = _gated("task_039")
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
-    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date")}
     _call(env, "plan_disputes", user_id=user, transactions=[base])
     reply = _file(env, over)
     assert _denied(reply, "procedure.dispute_plan.ask") and "should have been charged" in reply.content
@@ -398,7 +422,7 @@ def test_a_customer_who_asks_for_a_full_refund_gets_one():
     env, _, gold = _gated("task_039")
     over = next(d for d in gold if d["dispute_reason"] == "incorrect_amount")
     user = over["user_id"]
-    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
+    base = {k: over[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date")}
     plan = json.loads(_call(env, "plan_disputes", user_id=user,
                             transactions=[base | {"resolution_requested": "full_refund"}]).content)
     entry = plan["order"][0]
