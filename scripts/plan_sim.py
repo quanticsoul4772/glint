@@ -21,7 +21,7 @@ from loguru import logger
 from tau2.data_model.message import ToolCall
 from tau2.registry import registry
 
-from glint.assist.banking import CARD_DIGITS_TOOL, PLAN_TOOL
+from glint.assist.banking import CARD_DIGITS_TOOL, DISPUTE_HISTORY_TOOL, PLAN_TOOL
 from glint.gates import Enforcer, EventLog
 from glint.gates.rules import DISPUTE
 
@@ -74,6 +74,9 @@ def simulate(task, filings: dict[str, dict]) -> dict:
     _call(env, "log_verification", time_verified=NOW, **{k: user[k] for k in VERIFY_FIELDS})
     # the card-digits tool every dispute on a card without digits on file needs given first (procedure.card_digits)
     _call(env, "give_discoverable_user_tool", discoverable_tool_name=CARD_DIGITS_TOOL)
+    # the dispute-history read every filing requires (procedure.REQUIRED_LOOKUPS)
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=DISPUTE_HISTORY_TOOL)
+    _call(env, WRAPPER, agent_tool_name=DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": user_id}))
     refunds = gold_refunds(task)
     items = [{k: f[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
              | ({"partial_refund_amount": refunds[f["transaction_id"]]} if f["transaction_id"] in refunds else {})

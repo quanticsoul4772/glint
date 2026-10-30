@@ -4,13 +4,18 @@ it: τ²'s gold actions (gate_replay, bank_replay) and Glimmer's runs recorded b
 `with_plans(calls)` inserts, before each user's first credit card dispute filing, one plan_disputes call carrying
 that user's filings in the list, in their order (the first filing of each transaction; a retry is not listed twice).
 The plan orders them by its own rule (glint.assist.banking.plan_disputes), so a replay checks whether the filings
-follow the plan the conversation's own disputes give. Deterministic.
+follow the plan the conversation's own disputes give. When the conversation has not read the dispute history before
+that filing (τ²'s gold in 031, 037, 038), the read the filing requires (glint.gates.procedure.REQUIRED_LOOKUPS) goes
+in first, unlocked and called as an agent does; τ² does not log a read its gold lacks, so the scored database is
+unchanged. A replay's 0 false refusals is on gold plus these inserted plan steps. Deterministic.
 """
 from __future__ import annotations
 
+import json
+
 from tau2.data_model.message import ToolCall
 
-from glint.assist.banking import PLAN_TOOL
+from glint.assist.banking import DISPUTE_HISTORY_TOOL, PLAN_TOOL
 from glint.gates.rules import DISPUTE, parse_hidden_arguments
 
 WRAPPER = "call_discoverable_agent_tool"
@@ -40,15 +45,28 @@ def plan_arguments(filings: list[dict]) -> dict[str, dict]:
     return plans
 
 
+def _history_read(call: ToolCall) -> bool:
+    args = call.arguments or {}
+    return call.requestor == "assistant" and call.name == WRAPPER and args.get("agent_tool_name") == DISPUTE_HISTORY_TOOL
+
+
 def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
-    """`calls` with a plan_disputes call before each user's first dispute filing (ids `<filing id>-plan`)."""
+    """`calls` with a plan_disputes call before each user's first dispute filing (ids `<filing id>-plan`), and the
+    dispute-history read before it when none came earlier (ids `<filing id>-history-unlock`, `<filing id>-history`)."""
     plans = plan_arguments([f for c in calls if (f := filing(c))])
-    out, planned = [], set()
+    out, planned, read = [], set(), False
     for c in calls:
         f = filing(c)
         user = str(f.get("user_id", "")) if f else None
         if f is not None and user not in planned:
             planned.add(user)
+            if not read:
+                out.append(ToolCall(id=f"{c.id}-history-unlock", name="unlock_discoverable_agent_tool",
+                                    arguments={"agent_tool_name": DISPUTE_HISTORY_TOOL}, requestor="assistant"))
+                out.append(ToolCall(id=f"{c.id}-history", name=WRAPPER, requestor="assistant", arguments={
+                    "agent_tool_name": DISPUTE_HISTORY_TOOL, "arguments": json.dumps({"user_id": user})}))
+                read = True
             out.append(ToolCall(id=f"{c.id}-plan", name=PLAN_TOOL, arguments=plans[user], requestor="assistant"))
+        read = read or _history_read(c)
         out.append(c)
     return out

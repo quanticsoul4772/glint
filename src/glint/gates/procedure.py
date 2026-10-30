@@ -41,11 +41,12 @@ CLI_LOOKUPS = ((DISPUTES_HISTORY, "credit_card_account_logistics_007"), (PENDING
 BANK_CREDIT_LOOKUPS = ((ACCOUNTS, "bank_accounts_(general)_043/_044"),
                        (TRANSACTIONS, "bank_accounts_(general)_017/_043/_044"))
 # write -> the hidden lookups its procedure requires before it, each with its source document. Lookups the
-# knowledge base mentions without making them a precondition are not required (credit card disputes: the dispute
-# history feeds the provisional credit count, which plan_disputes reads from the database; τ²'s train gold files some
-# disputes without that lookup (031, 037, 038), so requiring it would deny gold's own writes. τ² does log the read in
-# the database it scores where its gold makes it (039-041, 053, 054, 080, 081: the read log allowlist), so
-# plan_disputes tells the agent to make it (banking.BEFORE_FILING)).
+# knowledge base mentions without making them a precondition are not required. The credit card dispute requires the
+# dispute history: it is criterion 4's count of disputes on record, and τ² logs the read in the database it scores
+# where its gold makes it (the read log allowlist), so a filing without it fails those tasks (12 of 35 failed
+# banking-plan-v4-gated runs, banking.BEFORE_FILING). τ² logs a read under an id made from the tool name alone and keeps the first record, so a repeated
+# read changes nothing, and a read gold does not make is not logged. τ²'s train gold files without it in 031, 037 and
+# 038; replays insert it there with the plan call (glint.gates.replayplan).
 REQUIRED_LOOKUPS = {
     "approve_credit_limit_increase_5847": CLI_LOOKUPS,
     "deny_credit_limit_increase_5848": CLI_LOOKUPS,
@@ -59,6 +60,7 @@ REQUIRED_LOOKUPS = {
     "order_debit_card_5739": ((CARDS, "bank_accounts_(general)_029 replacement history"),
                               (ACCOUNTS, "bank_accounts_(general)_023 eligibility")),
     "file_debit_card_transaction_dispute_6281": ((TRANSACTIONS, "bank_accounts_(general)_031 argument 1"),),
+    "file_credit_card_transaction_dispute_4829": ((DISPUTES_HISTORY, "credit_cards_(general)_015 criterion 4"),),
 }
 # writes that act for a user and so need that user verified today (the knowledge base's first step everywhere)
 VERIFIED_WRITES = (
