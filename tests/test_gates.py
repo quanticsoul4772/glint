@@ -350,6 +350,7 @@ def test_banking_replacement_waits_for_the_increase_decision():
     assert _denied(reply) and "credit limit increase first" in reply.content
     assert len(env.tools.db.credit_card_orders.data) == orders
     assert not _hidden(env, rules.APPROVE, **_gold(gold, rules.APPROVE)).error
+    assert "address_ask" in _hidden(env, rules.REPLACE, **replace).content  # 054 ships to the address on file
     assert not _hidden(env, rules.REPLACE, **replace).error
     assert len(env.tools.db.credit_card_orders.data) == orders + 1
 

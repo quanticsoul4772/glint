@@ -13,7 +13,7 @@ from tau2.registry import registry
 from glint import paths
 from glint.gates import Enforcer, EventLog, Gate, GateRegistry, allow, rules
 from glint.gates import procedure as proc
-from glint.gates.replayplan import with_plans
+from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_plans
 
 logger.remove()
 BANKING = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
@@ -40,11 +40,19 @@ def _name(action) -> str:
 def _play(env, task, tool: str, n: int = 0) -> dict:
     """Send τ²'s gold actions through the gated environment up to (not including) the n-th call of `tool`; return
     that call's arguments. Every gold action on the way must be allowed. Gold's disputes are planned before the
-    first one (glint.gates.replayplan), as an agent following the plan gate does."""
+    first one, and an order to the address on file is sent once before it and refused by address_ask
+    (glint.gates.replayplan), as an agent following the gates does."""
     seen = 0
     gold = [ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
             for k, a in enumerate(task.evaluation_criteria.actions)]
-    for action in with_plans(gold):
+    users = env.tools.db.users.data
+    for action in with_address_asks(with_plans(gold), lambda u: (users.get(u) or {}).get("address")):
+        if action.id.endswith(ADDRESS_ASK_SUFFIX):
+            if _name(action) == tool and seen == n:  # the caller sends this order itself
+                args = action.arguments
+                return json.loads(args["arguments"]) if action.name == "call_discoverable_agent_tool" else dict(args)
+            assert _denied(env.get_response(action), "confirm the shipping address")
+            continue
         if _name(action) == tool:
             if seen == n:
                 args = action.arguments
@@ -524,6 +532,7 @@ def test_a_fraud_replacement_without_expedited_shipping_is_asked_once():
     order = _play(env, task, rules.REPLACE)  # gold's increase is decided on the way
     assert order["reason"] == "fraud_suspected" and order["expedited_shipping"] is True
     standard = order | {"expedited_shipping": False}
+    assert _denied(_hidden(env, rules.REPLACE, **standard), "confirm the shipping address")  # 054 ships to the file
     reply = _hidden(env, rules.REPLACE, **standard)
     assert _denied(reply, "strongly recommends expedited shipping") and _rule(events) == rules.EXPEDITE_ASK
     # 054's card is a Gold Rewards Card: credit_card_replacements_002 makes expedited shipping complimentary
@@ -544,11 +553,13 @@ def test_the_expedite_fee_follows_the_shipping_documents_card_lists():
 def test_an_expedited_or_non_fraud_replacement_is_not_asked():
     env, task, _ = _bank("task_054")
     order = _play(env, task, rules.REPLACE)
-    assert _ran(_hidden(env, rules.REPLACE, **order))  # gold's own order, expedited: allowed at once
+    assert _denied(_hidden(env, rules.REPLACE, **order), "confirm the shipping address")  # asked once
+    assert _ran(_hidden(env, rules.REPLACE, **order))  # gold's own order, expedited: no expedite ask
     env2, task2, _ = _bank("task_054")
     order2 = _play(env2, task2, rules.REPLACE)
     lost = order2 | {"reason": "lost"}
     lost.pop("expedited_shipping")
+    env2.tools.glint_address_asked.add(lost["credit_card_account_id"])  # the address was confirmed already
     assert "was NOT executed" not in _hidden(env2, rules.REPLACE, **lost).content  # not a fraud or theft reason
 
 
@@ -570,6 +581,8 @@ def test_the_expedite_ask_and_its_repeat_replay_unchanged_in_taus_strict_replay(
         send(ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant"))
     order = json.loads(gold[upto].arguments["arguments"]) | {"expedited_shipping": False}
     wrapped = {"agent_tool_name": rules.REPLACE, "arguments": json.dumps(order)}
+    assert _denied(send(ToolCall(id="o0", name="call_discoverable_agent_tool", arguments=wrapped,
+                                 requestor="assistant")), "confirm the shipping address")
     assert _denied(send(ToolCall(id="o1", name="call_discoverable_agent_tool", arguments=wrapped,
                                  requestor="assistant")), "strongly recommends")
     assert _ran(send(ToolCall(id="o2", name="call_discoverable_agent_tool", arguments=wrapped, requestor="assistant")))
@@ -578,6 +591,37 @@ def test_the_expedite_ask_and_its_repeat_replay_unchanged_in_taus_strict_replay(
     replay.set_state(init.initialization_data if init else None, init.initialization_actions if init else None,
                      history, strict=True)
     assert replay.tools.glint_expedite_asked == env.tools.glint_expedite_asked != set()
+    assert replay.tools.glint_address_asked == env.tools.glint_address_asked != set()
+
+
+def test_an_order_to_the_address_on_file_is_asked_once_and_another_address_is_not():
+    # credit_card_replacements_001: confirm the shipping address (primary or alternate); v8's 037 trials 1-2 shipped
+    # home without asking and the customer wanted the work address
+    env, task, events = _bank("task_037")
+    order = _play(env, task, rules.REPLACE)
+    home = env.tools.db.users.data[order["user_id"]]["address"]
+    assert order["shipping_address"] != home  # gold ships to the work address: allowed at once
+    reply = _hidden(env, rules.REPLACE, **order | {"shipping_address": " " + home.upper()})
+    assert _denied(reply, "confirm the shipping address") and _rule(events) == rules.ADDRESS_ASK
+    assert home in reply.content and env.tools.glint_address_asked == {order["credit_card_account_id"]}
+    assert _ran(_hidden(env, rules.REPLACE, **order))  # the customer gave the work address
+    env2, task2, _ = _bank("task_037")
+    assert _ran(_hidden(env2, rules.REPLACE, **_play(env2, task2, rules.REPLACE)))
+
+
+def test_replays_insert_the_refused_order_before_gold_orders_to_the_address_on_file():
+    from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks
+    for task_id, inserted in (("task_054", 1), ("task_037", 0)):
+        env, task, _ = _bank(task_id)
+        users = env.tools.db.users.data
+        gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
+                for k, a in enumerate(task.evaluation_criteria.actions)]
+        calls = with_address_asks(gold, lambda u, users=users: (users.get(u) or {}).get("address"))
+        asks = [k for k, c in enumerate(calls) if c.id.endswith(ADDRESS_ASK_SUFFIX)]
+        assert len(asks) == inserted and len(calls) == len(gold) + inserted
+        for k in asks:  # the copy sits just before gold's own order, with the same call
+            assert calls[k + 1].id + ADDRESS_ASK_SUFFIX == calls[k].id
+            assert calls[k + 1].arguments == calls[k].arguments
 
 
 def test_transfer_reason_after_fraud_is_the_fraud_code():

@@ -43,7 +43,7 @@ from glint import paths
 from glint.assist.banking import PLAN_TOOL
 from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
-from glint.gates.replayplan import plan_arguments, with_plans
+from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, plan_arguments, with_address_asks, with_plans
 
 RECS = paths.RESULTS / "failure-review-2026-10-28" / "recs.json"
 DOMAIN = "banking_knowledge"
@@ -87,14 +87,23 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                     raise RuntimeError(f"load_scenario({task_id}) failed: {_text(loaded)}")
                 session, twin = bank.session(), build_environment(task)
                 actions = task.evaluation_criteria.actions or [] if task.evaluation_criteria else []
-                calls = with_plans([ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments,
-                                             requestor=a.requestor) for k, a in enumerate(actions)])
+                users = twin.tools.db.users.data
+                calls = with_address_asks(with_plans([ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments,
+                                                               requestor=a.requestor) for k, a in enumerate(actions)]),
+                                          lambda u, users=users: (users.get(u) or {}).get("address"))
                 for call in calls:
                     k, action = call.id.removeprefix("gold-"), call
                     if call.name == PLAN_TOOL:  # Glint's tool: the ungated twin has none
                         reply = await client.call_tool(PLAN_TOOL, call.arguments)
                         if reply.is_error:
                             errors.append({"task_id": task_id, "action": k, "tool": PLAN_TOOL, "text": _text(reply)})
+                        continue
+                    if call.id.endswith(ADDRESS_ASK_SUFFIX):  # refused once by address_ask; never sent to the twin
+                        before = session.events.count()
+                        await client.call_tool(call.name, call.arguments)
+                        if [d["rule_id"] for d in _denies(session, before)][:1] != [rules.ADDRESS_ASK]:
+                            errors.append({"task_id": task_id, "action": k, "tool": call.name,
+                                           "text": "the inserted order was not refused by address_ask"})
                         continue
                     ungated = twin.get_response(call)
                     if action.requestor != "assistant":
@@ -209,6 +218,9 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                     user = str(w["args"].get("user_id", ""))
                     if w["name"] == rules.DISPUTE and user in plans:
                         await client.call_tool(PLAN_TOOL, plans.pop(user))
+                    if w["name"] == rules.REPLACE:  # recorded before address_ask: the address counts as confirmed
+                        with session.lock:
+                            session.env.tools.glint_address_asked.add(str(w["args"].get("credit_card_account_id", "")))
                     before, db = session.events.count(), session.env.get_db_hash()
                     reply = await _send(client, w["name"], w["args"])
                     denied = _denies(session, before)

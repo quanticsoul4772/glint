@@ -57,6 +57,7 @@ from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import (
+    ADDRESS_ASK,
     APPROVE,
     DENY,
     EXPEDITE_ASK,
@@ -253,6 +254,7 @@ class Enforcer:
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
         env.tools.glint_verdicts = {}  # card -> the increase verdict check_credit_limit_increase gave, not filed yet
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
+        env.tools.glint_address_asked = set()  # cards whose replacement the address_ask gate refused once
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
             if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name == PLAN_TOOL
@@ -275,8 +277,9 @@ class Enforcer:
                 reply = original_response(message)
                 self._record_increase(env, *write, reply, before)
                 return with_open_items(message, reply)
-            if result.rule_id == EXPEDITE_ASK:  # asked once per card: the repeat order is the customer's choice
-                env.tools.glint_expedite_asked.add(str((write[1] or {}).get("credit_card_account_id", "")))
+            asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
+            if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
+                asked[result.rule_id].add(str((write[1] or {}).get("credit_card_account_id", "")))
             return ToolMessage(id=message.id, content=result.message(self.wording), requestor=message.requestor,
                                role="tool", error=True)
 
