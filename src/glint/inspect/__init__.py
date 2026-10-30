@@ -17,6 +17,7 @@ run_denies. CLI: `python -m glint.inspect diff DATA_FOLDER [--task T] [--arm too
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from functools import cache
 from pathlib import Path
@@ -212,6 +213,38 @@ def diffs_line(compacts: list[dict], top: int = 5) -> str:
         tools.update(c["tools"])
     return (f"DIFFS: {len(compacts)} failed runs diffed against τ²'s expected writes; top fields "
             f"{dict(fields.most_common(top))}; top tools {dict(tools.most_common(top))}")
+
+
+HIDDEN_READ = re.compile(r"get_[a-z_0-9]+_\d{4}$")  # banking's hidden lookups (get_user_dispute_history_7291, ...)
+SEARCH_TOOLS = ("KB_search", "grep", "KB_read")
+DISPUTE, HISTORY = "file_credit_card_transaction_dispute_4829", "get_user_dispute_history_7291"
+
+
+def run_facts(sim: dict) -> dict:
+    """What a run did beside its writes, from its messages: the hidden lookups that ran (in order, once each), whether
+    the dispute-history read came before the first dispute filing, plan_disputes calls, dispute filings tried, the
+    knowledge-base search results (count and characters) and how the run ended (τ²'s termination reason and
+    info.error). Each answered a question the run diff could not (v6 diagnosis, 2026-10-30)."""
+    calls = gate_summary.run_calls(sim)
+    reads = list(dict.fromkeys(c["tool"] for c in calls if c["tool"] and HIDDEN_READ.match(c["tool"])
+                               and not c["error"]))
+    first_filing = next((c["index"] for c in calls if c["tool"] == DISPUTE), None)
+    history = [c["index"] for c in calls if c["tool"] == HISTORY and not c["error"]]
+    searches = [len(c["content"]) for c in calls if c["tool"] in SEARCH_TOOLS]
+    return {"reads": reads, "plans": sum(c["tool"] == "plan_disputes" for c in calls),
+            "filings": sum(c["tool"] == DISPUTE for c in calls),
+            "history_before_first_filing": None if first_filing is None else any(i < first_filing for i in history),
+            "searches": len(searches), "search_chars": sum(searches), "largest_search": max(searches, default=0),
+            "termination": sim.get("termination_reason"), "error": str((sim.get("info") or {}).get("error") or "")}
+
+
+def facts_line(f: dict) -> str:
+    history = ("" if f["history_before_first_filing"] is None else
+               f" (dispute history before the first filing: {'yes' if f['history_before_first_filing'] else 'NO'})")
+    ended = f"ended: {f['termination']}" + (f" ({f['error'][:160]})" if f["error"] else "")
+    return (f"  facts: lookups {', '.join(f['reads']) or 'none'}{history}; plan_disputes {f['plans']}, filings tried "
+            f"{f['filings']}; searches {f['searches']} ({f['search_chars']:,} chars, largest {f['largest_search']:,}); "
+            f"{ended}")
 
 
 def arm_diffs(domain: str, sims: list[dict]) -> dict[tuple[str, int], dict]:
