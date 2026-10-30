@@ -21,6 +21,7 @@ from collections import Counter
 from loguru import logger
 from tau2.data_model.message import ToolCall
 from tau2.registry import registry
+from tau2.runner.build import _derive_read_log_allowlist
 
 from glint import paths
 from glint.assist.banking import PLAN_TOOL
@@ -47,9 +48,12 @@ def tasks_of(domain: str) -> list:
 
 
 def _env(domain: str, task):
+    """The environment τ²'s runner builds for `task`; for banking that includes the read log, which records the
+    hidden reads gold makes in the scored database (tau2.runner.build._build_env_kwargs)."""
     constructor = registry.get_env_constructor(domain)
     if domain == "banking_knowledge":
-        return constructor(retrieval_variant="bm25_grep", task=task)
+        return constructor(retrieval_variant="bm25_grep", task=task,
+                           read_log_allowlist=_derive_read_log_allowlist(task))
     return constructor()
 
 

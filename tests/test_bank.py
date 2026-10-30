@@ -336,6 +336,17 @@ def test_gold_replay_through_mcp_has_no_false_refusal_and_matches_the_ungated_tw
     assert report["hash_mismatches"] == [] and report["result_mismatches"] == []
 
 
+def test_replay_environments_record_the_hidden_reads_gold_makes_as_taus_runner_does():
+    # without τ²'s read log a replay never records a hidden read, so its hash check proves nothing about reads
+    import gate_replay
+
+    task = bank.tasks()["task_039"]
+    assert "get_user_dispute_history_7291" in bank.build_environment(task).tools._read_log_allowlist
+    assert gate_replay._env("banking_knowledge", task).tools._read_log_allowlist == \
+        bank.build_environment(task).tools._read_log_allowlist
+    assert bank.build_environment().tools._read_log_allowlist == set()
+
+
 def test_wrong_write_replay_denies_each_with_its_expected_rule():
     import bank_replay
 
