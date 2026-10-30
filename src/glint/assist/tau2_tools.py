@@ -146,7 +146,9 @@ class DisputePlanTools(ToolKitBase):
                 "contacted_merchant": the customer's answer to "did you try to resolve this with the merchant
                 first?" (true/false; leave it out if not asked yet), "issue_noticed_date": the customer's answer to
                 "when did you first notice this charge?" (MM/DD/YYYY; leave it out if not asked yet, and the plan asks
-                for it), and for an 'incorrect_amount' dispute either
+                for it), "card_action": the customer's answer to "keep the card active, or cancel it and get a
+                new one?" ('keep_active' or 'cancel_and_reissue'; one answer per card; leave it out if not asked yet,
+                and the plan asks for it), and for an 'incorrect_amount' dispute either
                 "expected_amount" (what the customer should have been charged) or "partial_refund_amount" (the
                 overcharge); leave both out until the customer has said, and the plan asks for it. Ask what the
                 customer should have been charged without offering or suggesting a full refund; only if the customer
@@ -158,7 +160,7 @@ class DisputePlanTools(ToolKitBase):
 
         Returns:
             dict: order (position, transaction_id, dispute_reason, contacted_merchant, issue_noticed_date,
-            eligible_for_provisional_credit, provisional_credit_criteria, and resolution_requested with
+            card_action, eligible_for_provisional_credit, provisional_credit_criteria, and resolution_requested with
             partial_refund_amount for incorrect_amount), already_filed, rejected, ask_user, ready.
         """
         return banking.plan_disputes(self.db, user_id, transactions)

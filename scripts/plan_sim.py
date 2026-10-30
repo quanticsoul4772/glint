@@ -77,7 +77,7 @@ def simulate(task, filings: dict[str, dict]) -> dict:
     refunds = gold_refunds(task)
     items = [{k: f[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant")}
              | ({"partial_refund_amount": refunds[f["transaction_id"]]} if f["transaction_id"] in refunds else {})
-             | ({"issue_noticed_date": f["issue_noticed_date"]} if f.get("issue_noticed_date") else {})  # the run's
+             | {k: f[k] for k in ("issue_noticed_date", "card_action") if f.get(k)}  # the run's own answers
              for f in filings.values()]
     plan = json.loads(_call(env, PLAN_TOOL, user_id=user_id, transactions=items).content)
     denied = []
