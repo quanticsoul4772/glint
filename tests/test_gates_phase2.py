@@ -523,6 +523,10 @@ def test_a_plan_naming_an_increase_holds_the_disputes_until_the_increase_is_deci
     assert proc.as_flag(plan["increase_first"]) and "increase first" in plan["sequencing"]
     held = proc.dispute_plan(env.tools, dispute)
     assert held.rule_id == "procedure.dispute_plan.increase_first" and not held.allowed
+    # 054's customer first asks over the maximum (reduce_amount): the advice keeps the increase, and drops it only
+    # when it cannot be decided
+    assert "reduce_amount or ask_amount, ask the customer for the amount and keep the increase" in held.fix
+    assert "says unknown or error (it cannot be decided)" in held.fix
     none = json.loads(_call(env, "plan_disputes", user_id=dispute["user_id"], transactions=[item],
                             other_requests=[]).content)
     assert "increase_first" not in none
