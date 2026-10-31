@@ -771,7 +771,7 @@ def test_the_unseen_set_is_the_59_gated_train_tasks_outside_banking12_with_both_
 
 
 def test_the_unseen_v10_set_is_the_tools_arm_on_the_same_tasks_in_its_own_folder():
-    # decision 2026-10-31: the search fix (#171) is tested on the unseen tasks, where 41 of 108 tools runs hit the
+    # decision 2026-10-31: the search fix (PR 171) is tested on the unseen tasks, where 41 of 108 tools runs hit the
     # step limit; Glimmer alone is unchanged, so only the tools arm runs again
     import tools_ab
 

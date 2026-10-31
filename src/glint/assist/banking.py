@@ -236,7 +236,7 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str, increase_deci
 
     `arguments_json` carries the arguments as a JSON string: τ² turns every bool and number in a tool result into a
     string, and the filing tool stores what it is given, so a copy of `arguments` would file "True" where gold has
-    true and fail the task with no refusal (code review of #153, 2026-10-30)."""
+    true and fail the task with no refusal (code review of PR 153, 2026-10-30)."""
     entry = next((e for e in plan.get("order", []) if e["transaction_id"] == transaction_id), None)
     if entry is None:
         return None
@@ -554,7 +554,7 @@ def _same(field: str, given, on_file) -> bool:
     if field == "date_of_birth":
         try:
             return _date(str(given).strip()) == _date(str(on_file))
-        except (ValueError, IndexError):  # "1990" or "5/3": _date reads value[4] (code review of #156)
+        except (ValueError, IndexError):  # "1990" or "5/3": _date reads value[4] (code review of PR 156)
             return False
     if field == "phone_number":
         return re.sub(r"\D", "", str(given))[-10:] == re.sub(r"\D", "", str(on_file))[-10:]

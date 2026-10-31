@@ -1,6 +1,6 @@
 """One-task cost check (spend-guard rule): Glimmer on one τ-Knowledge banking task, k=1, no Wonder. Contributor
 Spark user simulator and NL judge. Glimmer output capped at 8,192 tokens (τ²'s default 65,536 halves the
-prompt room); retrieval at the default top_k=10. Caps: Glimmer $1, Meta $0.50, both through one meter logger (PR #8).
+prompt room); retrieval at the default top_k=10. Caps: Glimmer $1, Meta $0.50, both through one meter logger (PR 8).
 Reports Glimmer and Meta dollars, tokens and calls for the run, and the reward.
 Usage: python -X utf8 cost_check.py [TASK_ID]
 """

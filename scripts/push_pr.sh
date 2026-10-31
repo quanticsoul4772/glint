@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Push the current branch only if it has no PR yet or its PR is still open.
-# Two commits were lost on 2026-10-27 by pushing to a branch whose PR had just been merged (#14, #28).
+# Two commits were lost on 2026-10-27 by pushing to a branch whose PR had just been merged (PR 14, PR 28).
 # Usage: scripts/push_pr.sh
 set -euo pipefail
 branch=$(git rev-parse --abbrev-ref HEAD)

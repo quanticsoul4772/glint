@@ -23,10 +23,10 @@ TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading
 TUNED_GATES = set(by_task.TUNED)
 # a tools-only set -> the set whose base arm it is compared with (same tasks, trials and seeds; checked in main)
 BASE_FROM = {"banking-plan-v9-gated": "banking-plan-gated"}
-GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on the code at #147, "
+GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on the code at PR 147, "
               "against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight "
               "earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is "
-              "compared with one baseline draw. Later changes (#148, #149: refusal wording and which requests count "
+              "compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count "
               "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
     ("banking-plan-v9-gated", True, "Banking, untuned tasks, write gates enforced (v9)", "untuned",

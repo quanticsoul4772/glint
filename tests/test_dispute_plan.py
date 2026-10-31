@@ -750,7 +750,7 @@ def test_a_ready_check_names_the_filing_call_with_the_plans_values():
 
 
 def test_a_ready_check_gives_no_filing_the_plan_gate_would_refuse():
-    # code review of #153: a plan entry with questions open, or a plan holding disputes for an undecided increase,
+    # code review of PR 153: a plan entry with questions open, or a plan holding disputes for an undecided increase,
     # got filing arguments that procedure.dispute_plan then refused
     env, _, gold = _gated("task_040")
     user = gold[0]["user_id"]
@@ -777,7 +777,7 @@ def test_a_ready_check_gives_no_filing_the_plan_gate_would_refuse():
 
 def test_a_filing_with_text_flags_is_refused_and_counted_as_differing_from_gold():
     # τ² shows bools and numbers as text; a filing that copies "True" or "24.56" stores text, the database τ² compares
-    # differs from gold's, and the task fails with no refusal (code review of #153; checked with the database hash)
+    # differs from gold's, and the task fails with no refusal (code review of PR 153; checked with the database hash)
     from glint import inspect
 
     env, _, gold = _gated("task_037")

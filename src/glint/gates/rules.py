@@ -187,7 +187,7 @@ def _dispute(db, a: dict) -> GateResult:
     source = "glint.assist.banking.check_dispute"
     # τ² shows every bool and number to the model as text, and the filing tool stores what it is given: a "True" or
     # "24.56" string changes the database τ² compares with gold's true / 24.56, and the task fails with no refusal
-    # (code review of #153, 2026-10-30; checked with the database hash)
+    # (code review of PR 153, 2026-10-30; checked with the database hash)
     typed = [f"{k} {a[k]!r} is text" for k in ("contacted_merchant", "eligible_for_provisional_credit",
                                                "partial_refund_amount") if isinstance(a.get(k), str)]
     if typed:

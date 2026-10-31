@@ -819,7 +819,7 @@ def test_banking_verification_check_needs_two_matching_fields_and_gives_golds_lo
     assert not one["verified"] and one["did_not_match"] == ["phone_number"] and "log_verification" not in one
     assert "1 more matching value(s) needed" in one["next_step"]
     assert banking.check_verification(tools.db, gold["user_id"], {"date_of_birth": "not a date"})["matched"] == []
-    # code review of #156: a short date crashed the whole check; an email differing in `_`/`-`/`+` matched
+    # code review of PR 156: a short date crashed the whole check; an email differing in `_`/`-`/`+` matched
     short = banking.check_verification(tools.db, gold["user_id"], given | {"date_of_birth": "1990"})
     assert short["verified"] and short["did_not_match"] == ["date_of_birth"]
     local, domain = user["email"].split("@")

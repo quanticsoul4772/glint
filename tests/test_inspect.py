@@ -483,7 +483,7 @@ def test_check_facts_name_a_ready_check_never_filed_and_a_verification_never_log
              call("log_verification", {"user_id": "u1"}, 3), reply(3, "logged")]
     f = inspect.check_facts(summary.run_calls({"messages": msgs}))
     assert not f["dispute_ready_not_unlocked"] and not f["verified_not_logged"]
-    # the last replies carry no footer: nothing was open at the end, whatever an earlier footer said (review of #163)
+    # the last replies carry no footer: nothing was open at the end, whatever an earlier footer said (review of PR 163)
     assert f["open_items_at_end"] == 0
     # an error reply never carries the footer, so it does not end the open items either
     msgs += [call("log_verification", {"user_id": "u1"}, 4), reply(4, "Error: x" + footer, error=True),

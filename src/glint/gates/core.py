@@ -21,8 +21,8 @@ log = logging.getLogger("glint.gates")
 
 Decision = Literal["allow", "deny"]
 # How a deny reads to the agent: "plain" (what the check found, the facts it used, why it matters, what to do next;
-# since #87) or "terse" (#86's layout: Reason, Purpose, Fix and Verdict, with the facts joined into the Reason line
-# as #86's reasons carried their specifics inline, and no consequence line). "terse" exists for the measurement that
+# since PR 87) or "terse" (PR 86's layout: Reason, Purpose, Fix and Verdict, with the facts joined into the Reason line
+# as PR 86's reasons carried their specifics inline, and no consequence line). "terse" exists for the measurement that
 # separates dispute planning from the plain-language messages (decision 2026-10-29).
 WORDINGS = ("plain", "terse")
 # A gate reads a few database rows; 60 s is far beyond any real evaluation. A live timeout is the one way a live

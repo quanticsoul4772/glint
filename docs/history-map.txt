@@ -1,4 +1,4 @@
-# Old-to-new commit map for the history rewrite of 2026-11-01 (git filter-repo): one line per commit,
+# Old-to-new commit map for the history rewrite of 2026-10-31 (git filter-repo): one line per commit,
 # the original commit (in the private original repository) and the same commit in this repository.
 # Author, committer and dates are unchanged; see README, 'Built during the event'.
 000cf50b5ce9dc321da90a4b4a3038c73988f009 5b1e5b8451c02051bc9514b69291d1eaa5e95e39

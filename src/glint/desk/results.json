@@ -3,7 +3,7 @@
   "set": "banking-plan-v9-gated",
   "title": "Banking, untuned tasks, write gates enforced (v9)",
   "role": "untuned",
-  "note": "Tasks 050 and 053, which no gate, plan or open-item change came from. 053's failures are likely the simulated customer's answers (not checked); two tasks cannot reach p < 0.05 by sign test. Glint's decision tools with every write gated (a denied write does not run), on the code at #147, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is compared with one baseline draw. Later changes (#148, #149: refusal wording and which requests count as a credit limit increase) are not in this run. k=4. Glimmer on Modal.",
+  "note": "Tasks 050 and 053, which no gate, plan or open-item change came from. 053's failures are likely the simulated customer's answers (not checked); two tasks cannot reach p < 0.05 by sign test. Glint's decision tools with every write gated (a denied write does not run), on the code at PR 147, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count as a credit limit increase) are not in this run. k=4. Glimmer on Modal.",
   "tasks": [
    {
     "task": "banking_knowledge-task_050",
@@ -49,7 +49,7 @@
   "set": "banking-plan-v9-gated",
   "title": "Banking, tuned tasks, write gates enforced (v9)",
   "role": "tuned",
-  "note": "Tasks 031, 037-041, 051, 052, 054 and 081: the gates, the dispute plan and the open items were shaped by their runs and correct answers (052 went from 0/4 in v7 and v8 to 3/4 after the open item for an unfiled increase verdict, which came from its failures). Do not read as general evidence. Glint's decision tools with every write gated (a denied write does not run), on the code at #147, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is compared with one baseline draw. Later changes (#148, #149: refusal wording and which requests count as a credit limit increase) are not in this run. k=4. Glimmer on Modal.",
+  "note": "Tasks 031, 037-041, 051, 052, 054 and 081: the gates, the dispute plan and the open items were shaped by their runs and correct answers (052 went from 0/4 in v7 and v8 to 3/4 after the open item for an unfiled increase verdict, which came from its failures). Do not read as general evidence. Glint's decision tools with every write gated (a denied write does not run), on the code at PR 147, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count as a credit limit increase) are not in this run. k=4. Glimmer on Modal.",
   "tasks": [
    {
     "task": "banking_knowledge-task_031",

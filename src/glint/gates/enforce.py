@@ -171,7 +171,7 @@ class Enforcer:
             self.events.emit("gate.fired", {
                 "domain": self.domain, "gate": gate, "tool": tool, "args": args, "decision": result.decision,
                 "rule_id": result.rule_id, "source": result.source, "reason": result.reason,
-                # since #87 a deny's specifics (which value, which lookup) are in its facts, not its reason
+                # since PR 87 a deny's specifics (which value, which lookup) are in its facts, not its reason
                 "facts": list(result.facts), "consequence": result.consequence,
                 "duration_ms": round(ms, 3), "replay": replay, **self.context()})
             return True

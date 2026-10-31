@@ -1,4 +1,4 @@
-"""Would dispute planning have set gold's provisional credit flags in recorded runs? (PR #85, tasks 039-041.)
+"""Would dispute planning have set gold's provisional credit flags in recorded runs? (PR 85, tasks 039-041.)
 
 For each recorded run of a task with credit card disputes in gold, the run's own disputes (every transaction it filed,
 in the order it first filed them, with the arguments of its last filing of each) are filed again in plan order: a
