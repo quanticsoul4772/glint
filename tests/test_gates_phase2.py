@@ -363,7 +363,7 @@ def test_a_dispute_waits_for_the_submitted_increase():
                               if _name(a) == rules.DISPUTE))
     assert _denied(_hidden(env, rules.DISPUTE, **dispute), "credit limit increase first")
     assert _ran(_hidden(env, rules.APPROVE, **approve))
-    _call(env, "plan_disputes", user_id=dispute["user_id"], transactions=[dispute])
+    _call(env, "plan_disputes", other_requests=[], user_id=dispute["user_id"], transactions=[dispute])
     assert _ran(_hidden(env, rules.DISPUTE, **dispute))
 
 
@@ -493,6 +493,29 @@ def test_an_increase_verdict_stays_open_until_its_decision_and_replays_unchanged
     assert env.tools.glint_verdicts == {} and "[open]" not in send("get_current_time", {}, "e").content
 
 
+def test_a_plan_naming_an_increase_holds_the_disputes_until_the_increase_is_decided():
+    # banking-plan-v8-gated 054 trial 3 filed the dispute first; the increase was then denied for the pending dispute
+    env, task, _ = _bank("task_054")
+    _play(env, task, rules.SUBMIT)
+    dispute = next(json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
+                   if _name(a) == rules.DISPUTE)
+    item = {k: dispute[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "card_action")}
+    plan = json.loads(_call(env, "plan_disputes", user_id=dispute["user_id"], transactions=[item],
+                            other_requests=["credit limit increase", "replacement card"]).content)
+    assert proc.as_flag(plan["increase_first"]) and "increase first" in plan["sequencing"]
+    held = proc.dispute_plan(env.tools, dispute)
+    assert held.rule_id == "procedure.dispute_plan.increase_first" and not held.allowed
+    none = json.loads(_call(env, "plan_disputes", user_id=dispute["user_id"], transactions=[item],
+                            other_requests=[]).content)
+    assert "increase_first" not in none
+    env2, task2, _ = _bank("task_054")
+    _play(env2, task2, rules.DISPUTE)  # gold's submit, lookups and approve run on the way
+    assert env2.tools.glint_increase_decided == {dispute["user_id"]}
+    _call(env2, "plan_disputes", user_id=dispute["user_id"], transactions=[item],
+          other_requests=["credit limit increase"])
+    assert proc.dispute_plan(env2.tools, dispute).rule_id != "procedure.dispute_plan.increase_first"
+
+
 def test_increase_record_keeps_each_cards_request_until_its_card_is_decided():
     # a second submit (another card) adds to the record; a decision clears its card's requests whoever it names
     from types import SimpleNamespace
@@ -504,7 +527,7 @@ def test_increase_record_keeps_each_cards_request_until_its_card_is_decided():
 
     rows = {}
     tools = SimpleNamespace(db=SimpleNamespace(credit_limit_increase_requests=SimpleNamespace(data=rows)),
-                            glint_increases={}, glint_verdicts={})
+                            glint_increases={}, glint_verdicts={}, glint_increase_decided=set())
     env, ok = SimpleNamespace(tools=tools), ToolMessage(id="t", role="tool", content="done", requestor="assistant")
 
     def submit(rid, card, user="u1"):

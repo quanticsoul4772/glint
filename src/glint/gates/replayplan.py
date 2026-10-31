@@ -42,7 +42,7 @@ def plan_arguments(filings: list[dict]) -> dict[str, dict]:
     plans: dict[str, dict] = {}
     for f in filings:
         user = str(f.get("user_id", ""))
-        items = plans.setdefault(user, {"user_id": user, "transactions": []})["transactions"]
+        items = plans.setdefault(user, {"user_id": user, "transactions": [], "other_requests": []})["transactions"]
         if all(i["transaction_id"] != f.get("transaction_id") for i in items):
             items.append({k: f.get(k) for k in PLAN_FIELDS if f.get(k) is not None})
     return plans

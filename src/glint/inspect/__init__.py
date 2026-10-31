@@ -110,7 +110,8 @@ def run_writes(sim: dict, domain: str) -> dict:
 # expedite question, the card-digits tool): gold takes those steps before its writes, so refusing a write identical to
 # gold's on one of them holds it for the step and is not a false refusal. Every other rule judges the write's values.
 PRECONDITION_RULES = ("procedure.verified", "procedure.lookups", "procedure.dispute_plan.none",
-                      "procedure.dispute_plan.ask", "procedure.dispute_plan.order", "procedure.dispute_plan.not_planned",
+                      "procedure.dispute_plan.ask", "procedure.dispute_plan.order",
+                      "procedure.dispute_plan.increase_first", "procedure.dispute_plan.not_planned",
                       "procedure.increase_first", "procedure.increase_undecided", "procedure.transfer.increase_undecided",
                       "procedure.card_digits.give", "banking.replacement.increase_first",
                       "banking.replacement.expedite_ask")

@@ -313,7 +313,13 @@ def card_of_transaction(db, user_id: str, txn: dict) -> str:
          if v.get("user_id") == user_id and v.get("card_type") == txn.get("credit_card_type")), "")
 
 
-def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
+def wants_increase(other_requests: list[str] | None) -> bool:
+    """Whether the customer's other requests name a credit limit increase."""
+    others = " ".join(str(r) for r in other_requests or []).lower()
+    return "limit" in others or "increase" in others or "cli" in others.split()
+
+
+def plan_disputes(db, user_id: str, transactions: list[dict], other_requests: list[str] | None = None) -> dict:
     """The filing order of a customer's credit card disputes and each one's provisional credit.
 
     Policy: `credit_cards_(general)_015` (provisional credit criteria 1-5: account open 60 days, a qualifying reason,
@@ -343,7 +349,10 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
     issue_noticed_date, card_action} (the last three None when not asked yet; the date is filed as MM/DD/YYYY; one
     card_action per card, see card_actions), and for incorrect_amount `expected_amount` or `partial_refund_amount`. Criterion 4
     counts the disputes on record in the past 12 months plus the planned ones ahead. A transaction already disputed is listed under `already_filed`; an unknown transaction, a reason
-    outside τ²'s list or a repeated transaction under `rejected`. Reads the live database only; deterministic."""
+    outside τ²'s list or a repeated transaction under `rejected`. When `other_requests` (the customer's requests not done
+    yet) name a credit limit increase, the plan says `increase_first` with LIMIT_FIRST as its `sequencing`: a pending
+    dispute fails the increase (credit_card_account_logistics_005 criterion 3), and in banking-plan-v8-gated 054
+    trial 3 the dispute went first and the increase was denied for it. Reads the live database only; deterministic."""
     user_id = str(user_id or "")
     year_ago = TODAY.replace(year=TODAY.year - 1)
     on_record = [r for r in _rows(db.transaction_disputes, user_id=user_id)
@@ -435,8 +444,11 @@ def plan_disputes(db, user_id: str, transactions: list[dict]) -> dict:
             entry["ask_user"] = " ".join(questions)
             ask.extend(q for q in questions if q not in ask)
         order.append(entry)
-    return {"user_id": user_id, "rule": PLAN_RULE, "before_filing": BEFORE_FILING,
+    plan = {"user_id": user_id, "rule": PLAN_RULE, "before_filing": BEFORE_FILING,
             "disputes_on_record_past_12_months": len(on_record),
             "order": order, "card_actions": [cards[c] for c in dict.fromkeys(w[3] for w in ordered)],
             "already_filed": already, "rejected": rejected, "ask_user": ask,
             "ready": bool(order) and not ask and not rejected}
+    if wants_increase(other_requests):
+        plan |= {"increase_first": True, "sequencing": LIMIT_FIRST}
+    return plan
