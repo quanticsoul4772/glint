@@ -467,3 +467,21 @@ def test_run_events_warn_on_a_repeated_wrong_field_and_audit_the_passes(tmp_path
     assert err.count("WARNING: repeated wrong field: dispute_reason in 2 failed runs (task_041 t0, task_041 t2)") == 1
     # the passing run went through the first dispute's gate refusal
     assert "PASS AUDIT: 1 of 1 passing runs went through a gate refusal ['task_041 t1']; 0 claimed" in err
+
+
+def test_check_facts_name_a_ready_check_never_filed_and_a_verification_never_logged():
+    # 2026-10-30 review: v9's 7 runs whose check said ready and never unlocked the filing tool were counted by hand
+    ready = json.dumps({"ready": "True", "card_action": "keep_active"})
+    footer = "\n\n[open] disputes planned for u1 and not filed yet, in the plan's order: t1"
+    msgs = [call("check_card_dispute", {"user_id": "u1", "transaction_id": "t1"}, 0), reply(0, ready + footer),
+            call("check_verification", {"user_id": "u1", "email": "a@b.c"}, 1),
+            reply(1, json.dumps({"verified": "True"}) + footer)]
+    f = inspect.check_facts(summary.run_calls({"messages": msgs}))
+    assert f == {"dispute_checks_ready": 1, "dispute_ready_not_unlocked": True, "verified_not_logged": True,
+                 "open_items_at_end": 1}
+    msgs += [call("unlock_discoverable_agent_tool", {"agent_tool_name": DISPUTE}, 2), reply(2, "Tool unlocked"),
+             call("log_verification", {"user_id": "u1"}, 3), reply(3, "logged")]
+    f = inspect.check_facts(summary.run_calls({"messages": msgs}))
+    assert not f["dispute_ready_not_unlocked"] and not f["verified_not_logged"]
+    brief = inspect.facts_brief(inspect.run_facts({"messages": msgs[:4]}))
+    assert "READY NEVER FILED: 1 ready checks" in brief and "VERIFIED NOT LOGGED" in brief and "OPEN AT END: 1" in brief

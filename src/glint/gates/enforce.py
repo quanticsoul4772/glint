@@ -73,6 +73,7 @@ from glint.gates.rules import (
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
 VERDICT_TOOL = "check_credit_limit_increase"
+CHECK_TOOLS = ("check_card_dispute", "check_verification", VERDICT_TOOL)  # decision tools logged as check.recorded
 
 
 def _open_items(tools) -> list[str]:
@@ -244,6 +245,30 @@ class Enforcer:
         except Exception:
             log.exception("the dispute_plan.recorded event was not logged")
 
+    def _record_check(self, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
+        """A check.recorded event for each decision-tool answer the agent got (check_card_dispute,
+        check_verification, check_credit_limit_increase): what it said, so a diagnosis counts "the check said ready
+        and nothing was filed" from the gate log instead of by hand (2026-10-30 review: v9's 7 such runs were counted
+        by reading messages). Never decides anything; a failure to log is logged, not raised."""
+        if call.requestor != "assistant" or call.name not in CHECK_TOOLS:
+            return
+        try:
+            v = json.loads(str(reply.content).split("\n\n[open]")[0]) if not reply.error else {}
+        except json.JSONDecodeError:
+            v = {}
+        v = v if isinstance(v, dict) else {}
+        a = call.arguments or {}
+        filing = v.get("filing") if isinstance(v.get("filing"), dict) else None
+        try:
+            self.events.emit("check.recorded", {
+                "domain": self.domain, "tool": call.name, "replay": replay, "error": bool(reply.error),
+                **{k: a[k] for k in ("user_id", "credit_card_account_id", "transaction_id") if a.get(k)},
+                "ready": v.get("ready"), "verdict": v.get("verdict"), "verified": v.get("verified"),
+                "filing": None if filing is None else ("arguments" if "arguments_json" in filing else "next_step"),
+                **self.context()})
+        except Exception:
+            log.exception("the check.recorded event was not logged")
+
     def attach(self, env):
         """Gate this environment instance's writes. Raises when a write tool of its toolkit has no gate."""
         if getattr(env, "glint_enforcer", None) is self:
@@ -276,6 +301,7 @@ class Enforcer:
                 self._record_read(env, message, reply)
                 self._record_plan(env, message, reply, state["replay"])
                 self._record_verdict(env, message, reply)
+                self._record_check(message, reply, state["replay"])
                 return with_open_items(message, reply)
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:

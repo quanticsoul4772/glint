@@ -314,7 +314,7 @@ def run_facts(sim: dict) -> dict:
             "searches": len(searches), "search_chars": sum(searches), "largest_search": max(searches, default=0),
             "order_before_submit": order_before_submit, "filing_before_decision": filing_before_decision,
             "peak_prompt_tokens": max(prompts, default=0), "claims_not_done": claims_not_done(sim, calls),
-            **exposure_and_verdict(calls),
+            **exposure_and_verdict(calls), **check_facts(calls),
             "termination": sim.get("termination_reason"), "error": str((sim.get("info") or {}).get("error") or "")}
 
 
@@ -378,6 +378,36 @@ def exposure_and_verdict(calls: list[dict]) -> dict:
             "verdict_not_filed": not_filed, "gate_refusals": [c["deny"]["rule_id"] for c in calls if c["deny"]]}
 
 
+def _reply_json(content: str) -> dict:
+    """A decision tool's JSON answer, without the open-items footer; {} when it is not JSON."""
+    try:
+        v = json.loads(content.split("\n\n[open]")[0])
+    except json.JSONDecodeError:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def check_facts(calls: list[dict]) -> dict:
+    """What the decision tools told the run and whether it acted on it (2026-10-30 review: v9's "the check said
+    ready and the filing tool was never unlocked", 7 runs, was counted by hand):
+    - dispute_checks_ready: check_card_dispute answers with "ready" true; dispute_ready_not_unlocked: at least one,
+      and the filing tool was never unlocked or run;
+    - verified_not_logged: check_verification said verified and no log_verification ran after it;
+    - open_items_at_end: the [open] lines on the last reply that carried any (what was still open when it ended)."""
+    ready = [c["index"] for c in calls if c["tool"] == "check_card_dispute" and not c["error"]
+             and str(_reply_json(c["content"]).get("ready")) == "True"]
+    unlocked = any((c["tool"] == "unlock_discoverable_agent_tool" and c["named"] == DISPUTE) or c["tool"] == DISPUTE
+                   for c in calls)
+    verified = [c["index"] for c in calls if c["tool"] == "check_verification" and not c["error"]
+                and str(_reply_json(c["content"]).get("verified")) == "True"]
+    logged = [c["index"] for c in calls if c["tool"] == "log_verification" and not c["error"]]
+    footers = [c["content"] for c in calls if "\n[open] " in c["content"]]
+    open_at_end = [line for line in footers[-1].splitlines() if line.startswith("[open] ")] if footers else []
+    return {"dispute_checks_ready": len(ready), "dispute_ready_not_unlocked": bool(ready) and not unlocked,
+            "verified_not_logged": bool(verified) and not any(i > verified[0] for i in logged),
+            "open_items_at_end": len(open_at_end)}
+
+
 def facts_brief(f: dict) -> str:
     """run_facts in one short clause for the run log's per-run line; the step-order flags in capitals."""
     history = {None: "-", True: "yes", False: "NO"}[f["history_before_first_filing"]]
@@ -386,6 +416,12 @@ def facts_brief(f: dict) -> str:
     flags += [f"CLAIMED NOT DONE: {c}" for c in f.get("claims_not_done", [])]
     if f.get("verdict_not_filed"):
         flags.append(f"VERDICT NOT FILED: {f['verdict_not_filed']}")
+    if f.get("dispute_ready_not_unlocked"):
+        flags.append(f"READY NEVER FILED: {f['dispute_checks_ready']} ready checks, filing tool never unlocked")
+    if f.get("verified_not_logged"):
+        flags.append("VERIFIED NOT LOGGED: check_verification said verified, no log_verification after it")
+    if f.get("open_items_at_end"):
+        flags.append(f"OPEN AT END: {f['open_items_at_end']} item(s)")
     refusals = Counter(f.get("gate_refusals", []))
     tail = (", refusals " + ", ".join(f"{r} x{n}" for r, n in refusals.most_common())) if refusals else ""
     # information, not a flag: passing runs often skip the procedure document (050 follows the decision tool's steps)
