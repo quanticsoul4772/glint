@@ -732,7 +732,7 @@ def generate(cfg: dict) -> None:
     truncated, truncated_lock = [0], threading.Lock()  # Glimmer responses cut at max_tokens in the current arm
 
     last_call = [time.time()]  # when Glimmer last answered: RunEvents tells a slow run from a stalled server by it
-    run_clock: dict[tuple[str, str], tuple[float, int]] = {}
+    run_clock: dict[tuple[str, str], tuple[float, int, int, float]] = {}
     clock_lock = threading.Lock()
 
     def route(*args, **kwargs):
@@ -744,9 +744,12 @@ def generate(cfg: dict) -> None:
             raise BudgetExceeded("the Modal session was halted (GPU cap reached or the GPU watcher failed)")
         response = glimmer(*args, **kwargs)
         last_call[0] = time.time()
-        with clock_lock:  # each run's first model call and call count, for RunEvents' long-run warning
-            first, calls = run_clock.get(current_run(), (last_call[0], 0))
-            run_clock[current_run()] = (first, calls + 1)
+        # each run's first call, call count, peak prompt tokens and latest call, for RunEvents: the long-run warning,
+        # and the record of a run τ² keeps nothing of (a context overflow)
+        prompt = int(getattr(getattr(response, "usage", None), "prompt_tokens", 0) or 0)
+        with clock_lock:
+            first, calls, peak, _ = run_clock.get(current_run(), (last_call[0], 0, 0, 0.0))
+            run_clock[current_run()] = (first, calls + 1, max(peak, prompt), last_call[0])
         if response.choices[0].finish_reason == "length":  # τ²'s own warning names no task
             task_id, trial = current_run()
             with truncated_lock:

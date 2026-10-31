@@ -103,15 +103,17 @@ class RunEvents:
                  stall_s: float = 1200.0, on_run: Callable[[dict], str | None] | None = None,
                  domain: str | None = None, on_halt: Callable[[str], None] | None = None,
                  activity: Callable[[], float] | None = None,
-                 running: Callable[[], dict[tuple[str, str], tuple[float, int]]] | None = None,
+                 running: Callable[[], dict[tuple[str, str], tuple[float, int, int, float]]] | None = None,
                  long_run_s: float = LONG_RUN_S, heartbeat_s: float = HEARTBEAT_S):
         self.results_path, self.events_path, self.label = Path(results_path), Path(events_path), label
         # called once, with the reason, when a fail-fast pattern is seen (HALT_SAME_CAUSE, HALT_STALLS); the caller
         # stops the arm. Without it the pattern is still printed as a FAIL FAST line.
         self.on_halt, self.halted = on_halt, None
         self.activity = activity  # time.time() of the model's latest call; a stall with calls still made is not one
-        # (task_id, trial) -> (time of its first model call, model calls so far) for every run that has called the
-        # model: a run past long_run_s is warned about once (2026-10-30: task_018 ran 61 min, 151 messages, unflagged)
+        # (task_id, trial) -> (time of its first model call, model calls so far, peak prompt tokens, time of its
+        # latest call) for every run that has called the model: a run past long_run_s is warned about once
+        # (2026-10-30: task_018 ran 61 min, 151 messages, unflagged), and a run τ² kept nothing of (a context
+        # overflow) gets its calls, time and peak from here
         self.running, self.long_run_s, self.heartbeat_s = running, long_run_s, heartbeat_s
         self.finished_runs: set[tuple[str, str]] = set()
         self._long_warned: set[tuple[str, str]] = set()
@@ -272,7 +274,15 @@ class RunEvents:
                     e = event(s, self.label)
                     loud = "  <-- " + e["error"][:160] if e["outcome"] not in ("pass", "fail") else ""
                     repeated: list[str] = []
-                    if self.diff is not None and e["outcome"] in FAILED_RUNS:
+                    if not e["messages"] and self.running is not None:
+                        clock = self.running().get((str(e["task_id"]), str(e["trial"])))
+                        if clock is not None:  # τ² kept no messages or time (a context overflow): the call log's
+                            start, calls, peak, last = clock
+                            e["from_calls"] = {"model_calls": calls, "seconds": round(last - start, 1),
+                                               "peak_prompt_tokens": peak}
+                    # a run τ² kept no messages of has nothing to diff: its "missing N" fed the DIFFS line and the
+                    # repeated-field warnings with empty conversations (12 of 23 diffs in the unseen base arm)
+                    if self.diff is not None and e["outcome"] in FAILED_RUNS and e["messages"]:
                         # a diff that cannot be computed is recorded and printed as such, and the run's event
                         # still lands: the run log must not stop over an analysis error
                         try:
@@ -297,8 +307,11 @@ class RunEvents:
                     by_task = self.tasks_by_outcome.setdefault(e["outcome"], {})
                     by_task[str(e["task_id"])] = by_task.get(str(e["task_id"]), 0) + 1
                     fh.write(json.dumps(e, default=str) + "\n")
+                    calls = e.get("from_calls")
                     kept = (f"{e['duration_s']:.0f} s, {e['messages']} msgs" if e["messages"] else
-                            "τ² kept no messages or time")
+                            "τ² kept no messages or time" + (
+                                f"; call log: {calls['model_calls']} model calls over {calls['seconds']:.0f} s, peak "
+                                f"prompt {calls['peak_prompt_tokens']} tokens" if calls else ""))
                     tally = ", ".join(f"{k} {v}" for k, v in sorted(self.counts.items()))
                     self._say(f"{e['task_id']} trial {e['trial']}: {e['outcome'].upper()} (τ²: {e['termination']}, "
                               f"{kept}; so far {tally}){loud}")
@@ -330,7 +343,7 @@ class RunEvents:
         self._long_runs()
         return new
 
-    def _open_runs(self) -> dict[tuple[str, str], tuple[float, int]]:
+    def _open_runs(self) -> dict[tuple[str, str], tuple[float, int, int, float]]:
         if self.running is None:
             return {}
         return {k: v for k, v in self.running().items() if k not in self.finished_runs}
@@ -339,7 +352,7 @@ class RunEvents:
         """One WARNING per run that has gone past long_run_s since its first model call without finishing: τ²'s
         max_steps ends a long run, so a run far past it is hung or looping (searches, refusals)."""
         now = time.time()
-        for (task, trial), (start, calls) in sorted(self._open_runs().items()):
+        for (task, trial), (start, calls, *_) in sorted(self._open_runs().items()):
             if now - start > self.long_run_s and (task, trial) not in self._long_warned:
                 self._long_warned.add((task, trial))
                 self._say(f"WARNING: {task} trial {trial} has run {(now - start) / 60:.0f} min ({calls} model calls) "
