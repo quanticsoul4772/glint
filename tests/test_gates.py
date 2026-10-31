@@ -246,7 +246,7 @@ def _plan(env, disputes: list[dict]):
     _call(env, "call_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL,
           arguments=json.dumps({"user_id": disputes[0]["user_id"]}))
     items =[{k: d[k] for k in ("transaction_id", "dispute_reason", "contacted_merchant", "issue_noticed_date", "card_action")} for d in disputes]
-    reply = _call(env, "plan_disputes", user_id=disputes[0]["user_id"], transactions=items)
+    reply = _call(env, "plan_disputes", other_requests=[], user_id=disputes[0]["user_id"], transactions=items)
     assert not reply.error, reply.content
     return json.loads(reply.content)
 
@@ -350,6 +350,7 @@ def test_banking_replacement_waits_for_the_increase_decision():
     assert _denied(reply) and "credit limit increase first" in reply.content
     assert len(env.tools.db.credit_card_orders.data) == orders
     assert not _hidden(env, rules.APPROVE, **_gold(gold, rules.APPROVE)).error
+    assert "address_ask" in _hidden(env, rules.REPLACE, **replace).content  # 054 ships to the address on file
     assert not _hidden(env, rules.REPLACE, **replace).error
     assert len(env.tools.db.credit_card_orders.data) == orders + 1
 
@@ -594,7 +595,8 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
     for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "banking-plan-terse-gated",
                  "banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
                  "banking-plan-v5-gated", "banking-plan-v6-gated", "banking-plan-v7-gated",
-                 "banking-plan-v8-gated", "heldout2-gated"):  # banking-unseen-gated: k=2, tested below
+                 "banking-plan-v8-gated", "banking-plan-v9-gated", "heldout2-gated"):
+        # banking-unseen-gated is k=2: tested in its own test below
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
@@ -740,7 +742,7 @@ def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_a
 
 @pytest.mark.parametrize("name", ["banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
                                   "banking-plan-v5-gated", "banking-plan-v6-gated",
-                                  "banking-plan-v7-gated", "banking-plan-v8-gated"])
+                                  "banking-plan-v7-gated", "banking-plan-v8-gated", "banking-plan-v9-gated"])
 def test_the_v2_and_v3_sets_are_the_plan_gated_tools_arm_again_in_their_own_folders(name):
     import tools_ab
 

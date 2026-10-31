@@ -345,6 +345,16 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
                     {"user_id": user, "transaction_id": tid},
                     consequence=f"{CREDIT_ORDER} Plan every dispute the customer asked for in one call.",
                     facts=[f"user {user} has no {PLAN_TOOL} result in this conversation", count_fact(db, user)])
+    if as_flag(plan.get("increase_first")) and user not in getattr(toolkit, "glint_increase_decided", set()):
+        return deny("procedure.dispute_plan.increase_first", PLAN_SOURCE, "the customer also asked for a credit limit "
+                    "increase, and no increase was approved or denied for them in this conversation yet",
+                    "Do the credit limit increase first: submit it, the required lookups, then approve or deny. Then "
+                    f"file the disputes. If the customer no longer wants the increase, call {PLAN_TOOL} again with "
+                    "other_requests without it.", {"user_id": user, "transaction_id": tid},
+                    consequence="A pending dispute fails the increase (credit_card_account_logistics_005 criterion "
+                    "3), so the increase is decided first.",
+                    facts=[f"the {PLAN_TOOL} call for {user} named a credit limit increase in other_requests",
+                           f"no approve or deny of an increase for {user} ran in this conversation"])
     filed = {r.get("transaction_id") for r in db.transaction_disputes.data.values() if r.get("user_id") == user}
     remaining = [e for e in plan["order"] if e["transaction_id"] not in filed]
     details = {"user_id": user, "transaction_id": tid, "plan": [e["transaction_id"] for e in plan["order"]],

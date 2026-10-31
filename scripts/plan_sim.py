@@ -82,7 +82,7 @@ def simulate(task, filings: dict[str, dict]) -> dict:
              | ({"partial_refund_amount": refunds[f["transaction_id"]]} if f["transaction_id"] in refunds else {})
              | {k: f[k] for k in ("issue_noticed_date", "card_action") if f.get(k)}  # the run's own answers
              for f in filings.values()]
-    plan = json.loads(_call(env, PLAN_TOOL, user_id=user_id, transactions=items).content)
+    plan = json.loads(_call(env, PLAN_TOOL, user_id=user_id, transactions=items, other_requests=[]).content)
     denied = []
     for e in plan["order"]:
         flag = str(e["eligible_for_provisional_credit"]) == "True"  # τ² shows tool-result bools as strings

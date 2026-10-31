@@ -38,7 +38,7 @@ from tau2.registry import registry
 
 from glint import paths
 from glint.gates import Enforcer, EventLog
-from glint.gates.replayplan import with_plans
+from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_plans
 
 CAUSES = {"a": "wrong policy value", "b": "procedure step skipped or out of order",
           "c": "extra write", "d": "did not use a needed tool or info", "e": "overflow or max steps",
@@ -90,8 +90,12 @@ def replay_run(dom: str, task, calls: list[dict], labels: dict, events: EventLog
     sent = [ToolCall(id=k, name=c["name"], arguments=c["arguments"], requestor=c["requestor"])
             for k, c in recorded.items()]
     if dom == "banking_knowledge":
-        sent = with_plans(sent)
+        users = env.tools.db.users.data
+        sent = with_address_asks(with_plans(sent), lambda u: (users.get(u) or {}).get("address"))
     for k, call in enumerate(sent):
+        if call.id.endswith(ADDRESS_ASK_SUFFIX):  # the order before asking, refused once; never sent to the twin
+            env.get_response(call)
+            continue
         c = recorded.get(call.id, {"i": -1, "name": call.name, "arguments": call.arguments})
         if not env.tools.has_tool(call.name) and not (env.user_tools and env.user_tools.has_tool(call.name)):
             continue

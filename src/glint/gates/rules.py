@@ -313,6 +313,19 @@ def expedite_fee_text(card_type: str | None) -> str:
             else f"expedited shipping for the {card_type} costs ${fee:.2f}")
 
 
+# credit_card_replacements_001: "Confirm the shipping address with the customer (primary or alternate, including any
+# unit or suite information)". In banking-plan-v8-gated 037 trials 1-2 the agent shipped to the home address without
+# asking; the customer wanted the work address, and the order could not be changed. Ask-once, like expedite_ask: the
+# first order to the address on file is refused and the enforcer records the card (env.tools.glint_address_asked); an
+# order to another address shows the agent asked and goes through. Replays insert the refused order before gold's
+# orders to the address on file (glint.gates.replayplan).
+ADDRESS_ASK, ADDRESS_SOURCE = "banking.replacement.address_ask", "credit_card_replacements_001"
+
+
+def same_address(given, on_file) -> bool:
+    return " ".join(str(given or "").lower().split()) == " ".join(str(on_file).lower().split())
+
+
 def _replacement(toolkit, a: dict) -> GateResult:
     card = a.get("credit_card_account_id", "")
     pending = undecided_increases(toolkit, card=card)
@@ -322,6 +335,18 @@ def _replacement(toolkit, a: dict) -> GateResult:
                     "increase was submitted and not decided yet", "Approve or deny the submitted credit limit "
                     "increase first, then order the replacement.", details, consequence=procedure.INCREASE_FIRST,
                     facts=[f"undecided increase requests for {card}: {', '.join(map(str, pending))}"])
+    on_file = (toolkit.db.users.data.get(str(a.get("user_id", ""))) or {}).get("address")
+    if (on_file and same_address(a.get("shipping_address"), on_file)
+            and card not in getattr(toolkit, "glint_address_asked", set())):
+        return deny(ADDRESS_ASK, ADDRESS_SOURCE, "this order ships to the address on file, and the policy says to "
+                    "confirm the shipping address with the customer first (primary or alternate)", "Ask the customer "
+                    f"whether to ship the new card to the address on file ({on_file}) or to another address, with any "
+                    "unit or suite. Then order to the address they give; the repeat to the address on file is allowed.",
+                    details | {"address_on_file": on_file}, consequence="Asked once per card: an order to another "
+                    "address, or a repeat to the address on file, goes through.",
+                    facts=[f"shipping_address given: {a.get('shipping_address')!r}", f"address on file: {on_file!r}",
+                           ("credit_card_replacements_001: \"Confirm the shipping address with the customer (primary "
+                            "or alternate, including any unit or suite information)\"")])
     reason = a.get("reason")
     if (reason in EXPEDITE_REASONS and not as_flag(a.get("expedited_shipping"))
             and card not in getattr(toolkit, "glint_expedite_asked", set())):
