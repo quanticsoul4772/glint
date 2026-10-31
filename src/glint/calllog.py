@@ -60,8 +60,10 @@ def call_record(response, messages: list[dict], model: str, context: Callable[[]
     prompt = usage.get("prompt_tokens") or len(dump.get("prompt_token_ids") or [])
     completion = usage.get("completion_tokens") or len(
         _get(choice, "provider_specific_fields", "token_ids") or choice.get("token_ids") or [])
-    task, trial = context() if context is not None else ("unknown", "unknown")
-    return {"ts": time.time(), "model": model, "task_id": task, "trial": trial, "request_key": request_key(messages),
+    # (task, trial) or (task, trial, simulation_id): tools_ab's run_context gives the attempt's id too
+    task, trial, *rest = context() if context is not None else ("unknown", "unknown")
+    return {"ts": time.time(), "model": model, "task_id": task, "trial": trial,
+            **({"simulation_id": rest[0]} if rest else {}), "request_key": request_key(messages),
             "n_messages": len(messages), "prompt_tokens": int(prompt), "completion_tokens": int(completion)}
 
 

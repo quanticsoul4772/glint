@@ -155,3 +155,18 @@ def test_generate_prints_the_empty_reply_line_and_warns_at_the_arm_end(stand_in,
     assert "WARNING: base retail: 1 of 2 runs ended on an empty Glimmer reply" in out
     assert "WARNING: tools retail: 0" not in out
 
+
+
+def test_run_context_names_the_attempt_by_its_simulation_id(tmp_path):
+    # the gate log keyed runs by (task, trial) as text, events.jsonl by number and simulation id (2026-10-30 review)
+    import tools_ab
+    from tau2.utils import llm_utils
+
+    token = tools_ab.CURRENT_RUN.set(("task_050", 3))
+    log_token = llm_utils.llm_log_dir.set(tmp_path / "artifacts" / "task_task_050" / "sim_ab12" / "llm_debug")
+    try:
+        assert tools_ab.run_context() == {"task_id": "task_050", "trial": 3, "simulation_id": "ab12"}
+    finally:
+        llm_utils.llm_log_dir.reset(log_token)
+        tools_ab.CURRENT_RUN.reset(token)
+    assert tools_ab.run_context()["simulation_id"] is None  # outside a run

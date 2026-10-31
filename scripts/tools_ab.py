@@ -565,6 +565,18 @@ def current_run() -> tuple[str, str]:
     return (task_dir[len("task_"):] if task_dir.startswith("task_") else "unknown"), "unknown"
 
 
+def run_context() -> dict:
+    """The run a gate event or a model call belongs to: task_id, trial (a number, as in events.jsonl and τ²'s
+    results) and simulation_id, τ²'s id for this attempt, from its per-run log folder (artifacts/task_<id>/
+    sim_<id>/llm_debug; tools_ab runs with verbose_logs). A resumed rerun keeps (task, trial) and gets a new
+    simulation id, so its gate events no longer mix with the first attempt's (2026-10-30 review)."""
+    task_id, trial = current_run()
+    log_dir = llm_utils.llm_log_dir.get()
+    sim_dir = Path(log_dir).parent.name if log_dir is not None else ""
+    return {"task_id": task_id, "trial": int(trial) if trial.isdigit() else trial,
+            "simulation_id": sim_dir[len("sim_"):] if sim_dir.startswith("sim_") else None}
+
+
 SAVE_TRIES, SAVE_WAIT_S = 6, 0.5
 
 
@@ -657,7 +669,7 @@ def _enforcer(cfg: dict, domain: str, data: Path) -> Enforcer | None:
     if not cfg.get("gates", True):
         return None
     return Enforcer(domain, EventLog(data / f"gates-{domain}.sqlite"),
-                    context=lambda: dict(zip(("task_id", "trial"), current_run())),
+                    context=run_context,
                     wording=cfg.get("deny_wording", "plain"))
 
 
@@ -761,7 +773,7 @@ def generate(cfg: dict) -> None:
         return response
 
     # every Glimmer call's token counts and timing, tied to its task and trial (the gate log's run context)
-    recorded = recording(route, data / "calls.jsonl", context=current_run)
+    recorded = recording(route, data / "calls.jsonl", context=lambda: tuple(run_context().values()))
     llm_utils.completion = guarded(guarded(recorded, glim, only=("Muse-Glimmer",)), meta, RateLimiter(per_minute=120),
                                    only=("muse-spark", "muse-wonder"))
     nl.DEFAULT_LLM_NL_ASSERTIONS, nl.DEFAULT_LLM_NL_ASSERTIONS_ARGS = SPARK, {**META, "temperature": 0.0}

@@ -590,7 +590,7 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
     assert tools_ab._enforcer({"gates": False}, "retail", tmp_path) is None
     enforcer = tools_ab._enforcer({}, "retail", tmp_path)
     assert enforcer.events.path.endswith("gates-retail.sqlite") and enforcer.context() == {
-        "task_id": "unknown", "trial": "unknown"}
+        "task_id": "unknown", "trial": "unknown", "simulation_id": None}
     assert "banking-test-gated" not in tools_ab.SETS  # the banking test split is read once (decision 2026-10-28)
     for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "banking-plan-terse-gated",
                  "banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
