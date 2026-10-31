@@ -212,6 +212,55 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
     return out
 
 
+FILING_TOOL = "file_credit_card_transaction_dispute_4829"
+# banking-plan-v9-gated: 7 of the 8 failed runs that planned disputes and never filed one (040 t0, 041 t3, 031 t2,
+# 053 t0-t3) called check_card_dispute, got "ready": "True", never unlocked the filing tool, and in 6 the agent told
+# the customer a dispute was filed. A ready check names the call that files it.
+NOT_FILED = (f"Nothing is filed yet: this check files nothing. To file it, unlock {FILING_TOOL} "
+             "(unlock_discoverable_agent_tool, once per conversation), then call it (call_discoverable_agent_tool) with "
+             "these arguments. The dispute is filed only when that call returns a dispute id; until then, do not tell "
+             "the customer it is filed.")
+
+
+def filing_call(db, user_id: str, plan: dict, transaction_id: str) -> dict | None:
+    """The filing of one planned dispute: the plan's values and the customer's record, with what the agent still
+    supplies named; None when the plan does not have the transaction. `eligible_for_provisional_credit` is the plan's,
+    which counts the disputes filed ahead of it (check_dispute alone does not know the plan's order). A dispute the
+    plan files later names the one to file first, as the plan gate (procedure.dispute_plan.order) would."""
+    entry = next((e for e in plan.get("order", []) if e["transaction_id"] == transaction_id), None)
+    if entry is None:
+        return None
+    filed = {r.get("transaction_id") for r in _rows(db.transaction_disputes, user_id=user_id)}
+    first = next((e["transaction_id"] for e in plan["order"] if e["transaction_id"] not in filed), None)
+    if first != transaction_id:
+        return {"filed": transaction_id in filed, "next_step": f"The plan files {first} before {transaction_id}: "
+                f"check and file {first} first." if first else f"{transaction_id} is already filed."}
+    user = db.users.data.get(user_id) or {}
+    args = {"transaction_id": entry["transaction_id"], "user_id": user_id, "full_name": user.get("name"),
+            "phone": user.get("phone_number"), "email": user.get("email"), "address": user.get("address"),
+            # the plan as the agent got it: τ² turns every bool in a tool result into the string "True"/"False"
+            "dispute_reason": entry["dispute_reason"],
+            "contacted_merchant": None if entry["contacted_merchant"] is None else as_flag(entry["contacted_merchant"]),
+            "issue_noticed_date": entry["issue_noticed_date"], "card_action": entry["card_action"],
+            "eligible_for_provisional_credit": as_flag(entry["eligible_for_provisional_credit"])}
+    txn = db.credit_card_transaction_history.data.get(entry["transaction_id"]) or {}
+    args["purchase_date"] = txn.get("transaction_date")
+    if replacements_today(db, card_of_transaction(db, user_id, txn)):
+        args["card_action"] = "cancel_and_reissue"  # a replacement ordered after the plan, as the plan gate does
+    for key in ("card_last_4_digits", "resolution_requested", "partial_refund_amount"):
+        if entry.get(key) is not None:
+            args[key] = _money(entry[key]) if key == "partial_refund_amount" else entry[key]  # "24.56" as recorded
+    still = []
+    if "card_last_4_digits" not in args:
+        still.append(f"card_last_4_digits: {entry.get('card_last_4_digits_from', CARD_DIGITS_HOW)}")
+    if "resolution_requested" not in args:
+        still.append("resolution_requested: what the customer asks for")
+    out = {"filed": False, "next_step": NOT_FILED, "tool": FILING_TOOL, "arguments": args}
+    if still:
+        out["you_supply"] = still
+    return out
+
+
 PLAN_TOOL = "plan_disputes"
 OVERCHARGE = "incorrect_amount"
 CARD_DIGITS_TOOL = "get_card_last_4_digits"

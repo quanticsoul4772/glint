@@ -692,3 +692,41 @@ def test_the_digits_tool_for_no_known_card_is_denied():
     named = _call(env, "give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL,
                   arguments="not json")
     assert _denied(named, "banking.give_card_digits.unknown_card")
+
+
+def test_a_ready_check_names_the_filing_call_with_the_plans_values():
+    # banking-plan-v9-gated: 7 of 8 failed runs that planned and never filed (040 t0, 041 t3, 031 t2, 053 t0-t3) got
+    # "ready" from check_card_dispute and never unlocked the filing tool. The ready check now gives the filing itself.
+    task = _task("task_040")
+    install("banking_knowledge", Enforcer("banking_knowledge", EventLog(":memory:")))
+    env = _env(task)
+    gold = _gold_disputes(task)
+    user = gold[0]["user_id"]
+    by_id = {d["transaction_id"]: d for d in gold}
+
+    def check(tid):
+        d = by_id[tid]
+        card = banking.card_of_transaction(env.tools.db, user, env.tools.db.credit_card_transaction_history.data[tid])
+        return env.tools.check_card_dispute(user, card, tid, d["dispute_reason"], d["contacted_merchant"])
+
+    _verify(env, user)
+    _read_history(env, user)
+    _give_card_digits(env)
+    assert "filing" not in check(gold[0]["transaction_id"])  # no plan yet
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold))
+    order = [e["transaction_id"] for e in env.tools.glint_plans[user]["order"]]
+    later = check(order[1])["filing"]
+    assert later == {"filed": False, "next_step": f"The plan files {order[0]} before {order[1]}: check and file "
+                     f"{order[0]} first."}
+    for tid in order:
+        out = check(tid)
+        f = out["filing"]
+        assert f["filed"] is False and f["tool"] == rules.DISPUTE and "Nothing is filed yet" in f["next_step"]
+        assert any(s.startswith("card_last_4_digits: the customer's") for s in f["you_supply"])  # 040 has none on file
+        g = by_id[tid]
+        # every value the tool gives is gold's; the customer's card digits and requested resolution come from them
+        assert f["arguments"] == {k: v for k, v in g.items() if k in f["arguments"]}
+        assert set(g) - set(f["arguments"]) <= {"card_last_4_digits", "resolution_requested", "partial_refund_amount"}
+        supplied = {k: g[k] for k in ("card_last_4_digits", "resolution_requested", "partial_refund_amount") if k in g}
+        assert _ran(_file(env, f["arguments"] | supplied)), tid
+    assert check(order[0])["filing"] == {"filed": True, "next_step": f"{order[0]} is already filed."}
