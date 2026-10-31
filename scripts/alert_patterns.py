@@ -18,6 +18,7 @@ ALERTS = (
     "WARNING", "CHECKPOINT LOCKED", "GPU CAP", "GPU CAP REACHED", "EMPTY REPLY", "TRUNCATED", "POOL WAIT",
     "UNFOLLOWED REDIRECT", "CLAIMED NOT DONE", "VERDICT NOT FILED",
     "READY NEVER FILED", "VERIFIED NOT LOGGED", "OPEN AT END",  # decision tools not acted on (2026-10-30 review)
+    "CONTAINER STARTED",  # a new GPU container: a cold start, and the one before it is gone (2026-10-31)
     "ALIVE",  # the 10-minute heartbeat: its absence while the job runs means the driver died (2026-10-30 review)
 )
 OUTCOMES = ("INFRASTRUCTURE_ERROR", "CONTEXT_OVERFLOW", "EMPTY_REPLY", "GLINT_ERROR", "BUDGET_STOP", "EVAL_ERROR",

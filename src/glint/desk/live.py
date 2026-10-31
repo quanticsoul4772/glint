@@ -221,7 +221,7 @@ class LiveSession:
         return out
 
 
-SCALEDOWN_S = 120.0  # glimmer_serve's scaledown_window: the container stays up this long after the last request
+SCALEDOWN_S = 300.0  # glimmer_serve.SCALEDOWN_S: the container stays up this long after the last request
 
 
 class DeskBudget:

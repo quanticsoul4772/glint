@@ -131,10 +131,10 @@ def test_desk_budget_records_gpu_and_refuses_past_the_caps(tmp_path):
 
     import pytest
 
-    from glint.desk.live import BudgetExceeded, DeskBudget
+    from glint.desk.live import SCALEDOWN_S, BudgetExceeded, DeskBudget
 
     log, ledger = tmp_path / "sessions.jsonl", tmp_path / "ledger.jsonl"
-    budget = DeskBudget(gpu_usd_per_day=0.25, pairs_per_day=2, ledger=ledger, log_path=log)
+    budget = DeskBudget(gpu_usd_per_day=0.40, pairs_per_day=2, ledger=ledger, log_path=log)
     budget.check()
     panes = {"alone": types.SimpleNamespace(error="boom", started=0.0, finished=60.0),
              "tools": types.SimpleNamespace(error=None, started=0.0, finished=70.0)}
@@ -145,11 +145,11 @@ def test_desk_budget_records_gpu_and_refuses_past_the_caps(tmp_path):
                                      take_uncharged=lambda until: until,
                                      outcomes=lambda: {"alone": None, "tools": True})
 
-    budget.record(session())  # 180 s + 120 s scale-down = 300 s at $2.94/h = $0.245
+    budget.record(session())  # 180 s + the 300 s scale-down = 480 s at $2.94/h = $0.392
     row = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
-    assert row["gpu_seconds"] == 300 and row["tools_outcome"] is True and row["alone_outcome"] is None
+    assert row["gpu_seconds"] == 180 + SCALEDOWN_S and row["tools_outcome"] is True and row["alone_outcome"] is None
     assert row["alone_error"] == "boom" and row["tools_seconds"] == 70
-    budget.check()  # $0.245 < $0.25, 1 pair < 2
+    budget.check()  # $0.392 < $0.40, 1 pair < 2
     budget.record(session())
     with pytest.raises(BudgetExceeded):
         budget.check()
@@ -338,9 +338,9 @@ def test_a_running_pair_is_charged_as_it_runs_and_stopped_at_the_cap(tmp_path):
         assert session.stop_reason.startswith("the daily GPU cap is reached") and session.halt.is_set()
         assert round(session.charged_s) == 200
         session.ended = session.started + 210
-        budget.record(session)  # charges only the rest: 10 s + the 120 s scale-down
+        budget.record(session)  # charges only the rest: 10 s + the scale-down window
         rows = [json.loads(x) for x in (tmp_path / "ledger.jsonl").read_text(encoding="utf-8").splitlines()]
-        assert round(sum(r["seconds"] for r in rows if r.get("kind") == "gpu")) == 330
+        assert round(sum(r["seconds"] for r in rows if r.get("kind") == "gpu")) == 210 + live.SCALEDOWN_S
         logged = json.loads((tmp_path / "sessions.jsonl").read_text(encoding="utf-8"))
         assert logged["stopped"] == session.stop_reason and logged["event"] == "end"
     finally:
@@ -745,3 +745,11 @@ def test_live_status_reports_a_missing_baseten_key(monkeypatch):
     monkeypatch.setenv("BASETEN_API_KEY", "x")
     status = client.get("/api/live/status").json()
     assert status["fallback_available"] is True and status["fallback_missing"] == []
+
+
+def test_the_desk_bills_the_same_scale_down_window_glimmer_serve_sets():
+    # the window went from 120 s to 300 s (2026-10-31); the desk's live budget must charge the same
+    from glint import glimmer_serve
+    from glint.desk import live as desk_live
+
+    assert desk_live.SCALEDOWN_S == glimmer_serve.SCALEDOWN_S

@@ -568,7 +568,20 @@ def _watch():
     watch._buf, watch._lock, watch._closed, watch._proc = watch.lines, threading.Lock(), False, None
     watch.suppressed, watch.last_periodic = 0, None
     watch._echoed, watch.stage_repeats = set(), 0
+    watch._containers = []
     return watch
+
+
+def test_a_new_container_is_named_once_with_the_one_it_replaced(capsys):
+    # 2026-10-31: the container scaled down mid-run and a new one cold-started; nothing in the run log said so
+    watch = _watch()
+    for line in ("2026-10-31T00:45:46 ta-01AAA INFO boot", "2026-10-31T05:28:00 ta-01AAA INFO serving",
+                 "2026-10-31T05:33:26 ta-01BBB INFO boot", "2026-10-31T05:33:27 ta-01BBB INFO loading",
+                 "2026-10-31T05:33:28 ta-01AAA INFO late line from the old container", "no container id here"):
+        watch._take(line)
+    starts = [line for line in capsys.readouterr().err.splitlines() if "CONTAINER STARTED" in line]
+    assert len(starts) == 2 and "ta-01AAA, container 1 this session" in starts[0] and "gone" not in starts[0]
+    assert "ta-01BBB, container 2 this session; ta-01AAA is gone (its last log line came at 05:28:00)" in starts[1]
 
 
 STATS = ("2026-10-28T14:02:{:02d} ta-01 (APIServer pid=1) INFO [loggers.py:123] Engine 000: Avg prompt throughput: "

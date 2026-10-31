@@ -39,7 +39,11 @@ image = (modal.Image.from_registry("nvidia/cuda:12.9.0-devel-ubuntu22.04", add_p
          .pip_install(f"vllm=={VLLM_VERSION}"))
 
 
-@app.function(image=image, gpu=GPU, cpu=4, memory=32768, timeout=3600, max_containers=1, scaledown_window=120,
+SCALEDOWN_S = 300  # desk/live.py bills each live pair with the same window (test_desk checks they agree)
+# scaledown_window 300 s, not 120: on 2026-10-31 a lull of under 5 min with 12 runs open (all waiting on the simulated
+# customer) dropped the container twice mid-run, each costing a ~2.5 min cold start. The session stops the app at the
+# end of a run (session()), so the longer window adds no idle tail there; the meter bills session wall time anyway.
+@app.function(image=image, gpu=GPU, cpu=4, memory=32768, timeout=3600, max_containers=1, scaledown_window=SCALEDOWN_S,
               volumes={"/vol": weights, "/root/.cache/vllm": vllm_cache})
 @modal.concurrent(max_inputs=32)
 @modal.web_server(8000, startup_timeout=900, requires_proxy_auth=True)
@@ -310,6 +314,7 @@ class LogWatch:
         self._echoed: set[tuple[str, str]] = set()
         self.stage_repeats = 0
         self._seen: set[str] = set()
+        self._containers: list[tuple[str, str]] = []  # (container id, time of its latest log line), in start order
         self._buf = self.lines
         self._cmd = [modal_cli, "app", "logs", app_name, "-f", "--timestamps", "--show-container-id"]
         self._env, self._restart_s = env, restart_s
@@ -351,6 +356,7 @@ class LogWatch:
             return
         self._seen.add(line)
         self._buf.append(line)
+        self._container_change(line)
         if self._periodic(line):
             self.suppressed += 1
             self.last_periodic = line.strip()
@@ -369,6 +375,27 @@ class LogWatch:
             return
         self._echoed.add((container, stage))
         say(f"[vllm] {line.strip()[:240]}")
+
+    def _container_change(self, line: str) -> None:
+        """One CONTAINER STARTED line when a new container id first logs, naming the one before it, which is gone:
+        on 2026-10-31 the container scaled down mid-run (scaledown_window) and a new one cold-started, and nothing
+        in the run log said so until its boot stage lines were found by hand."""
+        m = re.search(r"\bta-\w+", line)
+        if m is None:
+            return
+        container = m.group(0)
+        # the line's own time (`--timestamps` puts it first), not the time the watch read it (review, 2026-10-31)
+        stamped = re.match(r"\s*\d{4}-\d\d-\d\dT(\d\d:\d\d:\d\d)", line)
+        at = stamped.group(1) if stamped else time.strftime("%H:%M:%S")
+        if self._containers and self._containers[-1][0] == container:
+            self._containers[-1] = (container, at)
+            return
+        if any(c == container for c, _ in self._containers):
+            return  # an older container's late line
+        before = (f"; {self._containers[-1][0]} is gone (its last log line came at {self._containers[-1][1]})"
+                  if self._containers else "")
+        self._containers.append((container, at))
+        say(f"CONTAINER STARTED: {container}, container {len(self._containers)} this session{before}")
 
     @staticmethod
     def _periodic(line: str) -> bool:
