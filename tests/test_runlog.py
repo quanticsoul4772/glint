@@ -361,7 +361,8 @@ def test_endings_long_runs_and_the_heartbeat_are_reported(tmp_path, capsys):
     # left no line a watcher could miss
     results = tmp_path / "results.json"
     now = time.time()
-    clock = {("t1", "0"): (now - 3600, 150), ("t2", "0"): (now - 3600, 9), ("t3", "0"): (now - 60, 3)}
+    clock = {("t1", "0"): (now - 3600, 150, 90000, now), ("t2", "0"): (now - 3600, 9, 5000, now),
+             ("t3", "0"): (now - 60, 3, 1000, now)}
     results.write_text(json.dumps({"simulations": []}), encoding="utf-8")
     with RunEvents(results, tmp_path / "e.jsonl", label="tools banking", poll_s=60, running=lambda: clock,
                    activity=lambda: now - 5, heartbeat_s=0.0) as watch:
@@ -374,3 +375,24 @@ def test_endings_long_runs_and_the_heartbeat_are_reported(tmp_path, capsys):
     assert "t2 trial 0 has run" not in err and "t3 trial 0 has run" not in err  # t2 finished, t3 is young
     assert "ALIVE: 1 finished (fail 1); 2 running, oldest 60 min; last model call 5 s ago" in err
     assert "done: {'fail': 1}; endings {'max_steps': 1}" in err
+
+
+def test_a_run_tau_kept_nothing_of_gets_the_call_log_and_no_diff(tmp_path, capsys):
+    # 2026-10-30 review: overflows recorded 0 s, 0 messages and peak 0, and their diffs of an empty conversation fed
+    # the DIFFS line and the repeated-field warnings
+    results, events = tmp_path / "results.json", tmp_path / "e.jsonl"
+    now = time.time()
+    overflow = {"task_id": "t9", "trial": 1, "termination_reason": "infrastructure_error", "reward_info": None,
+                "info": {"error": "litellm.ContextWindowExceededError: maximum context length is 131072 tokens"},
+                "duration": None, "messages": []}
+    results.write_text(json.dumps({"simulations": [overflow]}), encoding="utf-8")
+    watch = RunEvents(results, events, label="base banking", poll_s=60,
+                      running=lambda: {("t9", "1"): (now - 600, 41, 121000, now - 30)})
+    diffed = []
+    watch.diff = lambda sim: diffed.append(sim) or {"text": "missing 7"}
+    watch.poll()
+    row = json.loads(events.read_text(encoding="utf-8"))
+    assert row["outcome"] == "context_overflow" and diffed == [] and "diff" not in row
+    assert row["from_calls"] == {"model_calls": 41, "seconds": 570.0, "peak_prompt_tokens": 121000}
+    assert ("τ² kept no messages or time; call log: 41 model calls over 570 s, peak prompt 121000 tokens"
+            in capsys.readouterr().err)
