@@ -208,6 +208,8 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
     others = " ".join(other_requests or []).lower()
     if "limit" in others or "cli" in others.split():
         out["sequencing"] = LIMIT_FIRST  # this dispute waits until the increase is approved or denied
+    if not out["card_last_4_digits"]:
+        out["card_last_4_digits_from"] = card_digits_how(credit_card_account_id)
     out["ready"] = not out["ask_user"] and "sequencing" not in out
     return out
 
@@ -264,8 +266,19 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str) -> dict | Non
 PLAN_TOOL = "plan_disputes"
 OVERCHARGE = "incorrect_amount"
 CARD_DIGITS_TOOL = "get_card_last_4_digits"
-CARD_DIGITS_HOW = (f"the customer's: give them {CARD_DIGITS_TOOL} (give_discoverable_user_tool) with the card's "
-                   "credit_card_account_id, and file the digits it reports")
+
+
+def card_digits_how(card: str = "") -> str:
+    """How to get a card's digits when the record has none. banking-plan-v9-gated 037 t2: the agent described
+    get_card_last_4_digits to the customer without giving it, the customer's call failed ("has not been given to you"),
+    and the agent concluded the customer could not use it and transferred instead of filing."""
+    which = f"credit_card_account_id '{card}'" if card else "the card's credit_card_account_id"
+    return (f"the customer's, through a tool only you can give: first call give_discoverable_user_tool yourself "
+            f"(discoverable_tool_name '{CARD_DIGITS_TOOL}'), then ask the customer to run it with {which} and file the "
+            "digits it reports. Describing the tool does not give it; the customer needs neither the card nor the app.")
+
+
+CARD_DIGITS_HOW = card_digits_how()
 DISPUTE_HISTORY_TOOL = "get_user_dispute_history_7291"
 # Glimmer filed without this lookup in 12 of the 37 failed banking-plan-v4-gated runs (039-041, 081; overflows count as
 # failures), and τ² logs a read its gold makes in the database it scores (the read log allowlist), so 8 of those 12
@@ -473,7 +486,7 @@ def plan_disputes(db, user_id: str, transactions: list[dict], other_requests: li
         else:
             # Glimmer filed card names or '0000' when it never gave the customer the digits tool (banking-plan-
             # v2-gated, the only difference in 6 runs, 2026-10-29); the digits are the customer's to look up
-            entry["card_last_4_digits_from"] = CARD_DIGITS_HOW
+            entry["card_last_4_digits_from"] = card_digits_how(card)
         questions = []
         if contacted is None:
             questions.append(f"Did you try to resolve the {tid} charge with the merchant first?")
