@@ -740,3 +740,28 @@ def test_a_ready_check_names_the_filing_call_with_the_plans_values():
         supplied = {k: g[k] for k in ("card_last_4_digits", "resolution_requested", "partial_refund_amount") if k in g}
         assert _ran(_file(env, f["arguments"] | supplied)), tid
     assert check(order[0])["filing"] == {"filed": True, "next_step": f"{order[0]} is already filed."}
+
+
+def test_a_filing_with_text_flags_is_refused_and_counted_as_differing_from_gold():
+    # τ² shows bools and numbers as text; a filing that copies "True" or "24.56" stores text, the database τ² compares
+    # differs from gold's, and the task fails with no refusal (code review of #153; checked with the database hash)
+    from glint import inspect
+
+    env, _, gold = _gated("task_037")
+    user = gold[0]["user_id"]
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold))
+    first = next(d for d in gold if d["transaction_id"] == env.tools.glint_plans[user]["order"][0]["transaction_id"])
+    for text in ({"eligible_for_provisional_credit": str(first["eligible_for_provisional_credit"])},
+                 {"contacted_merchant": str(first["contacted_merchant"])}, {"partial_refund_amount": "24.56"}):
+        reply = _file(env, first | text)
+        assert _denied(reply, "banking.dispute.types") and "is text" in reply.content, text
+    assert not env.tools.db.transaction_disputes.data.get(first["transaction_id"])
+    assert _ran(_file(env, first))
+    # inspect refusals: the refused write normalizes to gold's, but its stored record would not match: not judged
+    texted = first | {"contacted_merchant": str(first["contacted_merchant"])}
+    sim = {"task_id": "task_037", "trial": 0, "messages": [
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c0", "name": WRAPPER, "arguments": {
+            "agent_tool_name": rules.DISPUTE, "arguments": json.dumps(texted)}}]},
+        {"role": "tool", "id": "c0", "content": _file(_gated("task_037")[0], texted).content, "error": True}]}
+    assert [r["rule_id"] for r in inspect.live_refusals("banking_knowledge", sim)["differs_from_gold"]] == [
+        "banking.dispute.types"]
