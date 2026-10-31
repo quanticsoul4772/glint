@@ -17,9 +17,10 @@ ALERTS = (
     "FAILED", "METER FAILED", "SMOKE TEST FAILED", "MUSE CHECK FAILED", "COVERAGE GATE FAILED", "FAIL FAST", "ALERT",
     "WARNING", "CHECKPOINT LOCKED", "GPU CAP", "GPU CAP REACHED", "EMPTY REPLY", "TRUNCATED", "POOL WAIT",
     "UNFOLLOWED REDIRECT", "CLAIMED NOT DONE", "VERDICT NOT FILED",
+    "ALIVE",  # the 10-minute heartbeat: its absence while the job runs means the driver died (2026-10-30 review)
 )
 OUTCOMES = ("INFRASTRUCTURE_ERROR", "CONTEXT_OVERFLOW", "EMPTY_REPLY", "GLINT_ERROR", "BUDGET_STOP", "EVAL_ERROR",
-            "too_many_errors")
+            "too_many_errors", "max_steps")
 # the ends of a run and of an arm, and Python's own failures
 MARKERS = (r"BudgetExceeded", r"Traceback", r"SystemExit", r"still has", r"stopped, 0", r"this arm", r"\] done:",
            r"session start", r"/health -> (5|gave up)", r"^exit ")

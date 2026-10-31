@@ -354,3 +354,23 @@ def test_a_long_run_that_keeps_calling_the_model_is_not_a_stall(tmp_path, capsys
         last[0] = time.time() - 1500
         watch.poll()
     assert reasons == ["no run finished in 40 min and no model call in 25 min"]
+
+
+def test_endings_long_runs_and_the_heartbeat_are_reported(tmp_path, capsys):
+    # 2026-10-30 review: max_steps showed only as a fail, a 61-minute run (task_018) went unflagged, and a dead driver
+    # left no line a watcher could miss
+    results = tmp_path / "results.json"
+    now = time.time()
+    clock = {("t1", "0"): (now - 3600, 150), ("t2", "0"): (now - 3600, 9), ("t3", "0"): (now - 60, 3)}
+    results.write_text(json.dumps({"simulations": []}), encoding="utf-8")
+    with RunEvents(results, tmp_path / "e.jsonl", label="tools banking", poll_s=60, running=lambda: clock,
+                   activity=lambda: now - 5, heartbeat_s=0.0) as watch:
+        results.write_text(json.dumps({"simulations": [_sim("t2", 0, 0.0, term="max_steps")]}), encoding="utf-8")
+        watch.poll()
+        watch.poll()  # once per run
+        watch._beat()
+    err = capsys.readouterr().err
+    assert err.count("WARNING: t1 trial 0 has run 60 min (150 model calls) without finishing") == 1
+    assert "t2 trial 0 has run" not in err and "t3 trial 0 has run" not in err  # t2 finished, t3 is young
+    assert "ALIVE: 1 finished (fail 1); 2 running, oldest 60 min; last model call 5 s ago" in err
+    assert "done: {'fail': 1}; endings {'max_steps': 1}" in err
