@@ -203,33 +203,62 @@ class BankingDecisionTools(DisputePlanTools):
     def KB_search(self, query: str) -> str:
         """Search the knowledge base for relevant documents.
 
-        Returns the 5 best documents, each with its title, ID and the paragraph that best matches the query. Read a
-        whole document with KB_read(doc_id).
+        Returns the 5 best documents: the best one in full (its first 6,000 characters), the others with their title,
+        ID and the paragraph that best matches the query. Read any document with KB_read(doc_id). Repeating a search
+        returns a pointer to the documents it found the first time.
 
         Args:
             query: The search query to find relevant documents
 
         Returns:
-            The best documents' titles, IDs and best-matching paragraphs
+            The best document's text and the other documents' titles, IDs and best-matching paragraphs
         """
-        return kb.format_results(self._kb_pipeline, self._kb_pipeline.retrieve(query), kb.query_score(query),
-                                 "No relevant documents found.")
+        return self._search("KB_search", query, self._kb_pipeline.retrieve, lambda results: kb.format_results(
+            self._kb_pipeline, results, kb.query_score(query), "No relevant documents found."))
 
     @is_tool(ToolType.READ)
     def grep(self, pattern: str) -> str:
         """Search for a regex pattern in all knowledge base documents (case-insensitive).
 
-        Returns the 5 documents with the most matches, each with its title, ID and the paragraph with the most
-        matches. Read a whole document with KB_read(doc_id).
+        Returns the 5 documents with the most matches: the first in full (its first 6,000 characters), the others
+        with their title, ID and the paragraph with the most matches. Read any document with KB_read(doc_id).
+        Repeating a search returns a pointer to the documents it found the first time.
 
         Args:
             pattern: The regex pattern to search for (e.g., 'credit.*card', 'fee|charge')
 
         Returns:
-            Matching documents' titles, IDs and best-matching paragraphs, ranked by match count
+            The first document's text and the other matching documents' titles, IDs and best paragraphs
         """
-        return kb.format_results(self._grep_pipeline, self._grep_pipeline.retrieve(pattern), kb.pattern_score(pattern),
-                                 f"No matches found for pattern: {pattern}")
+        return self._search("grep", pattern, self._grep_pipeline.retrieve, lambda results: kb.format_results(
+            self._grep_pipeline, results, kb.pattern_score(pattern), f"No matches found for pattern: {pattern}"))
+
+    def _search(self, tool: str, query: str, retrieve, render) -> str:
+        """A search's answer, or for a repeat of an earlier search in this conversation a short pointer to what it
+        returned. A repeat is the same tool with the same text: for KB_search after trimming, case and spacing; for
+        grep after trimming only, since a regex's escapes are case-sensitive (\\d is not \\D) and its spaces count. In
+        banking-unseen-gated one search in five of the runs that ran out of τ²'s 200 steps repeated an earlier one
+        exactly (median 16 a run, up to 76; 2026-10-31). The toolkit lives for one conversation, so the record does
+        too. The pointer names the earlier call by its number among all of this conversation's KB_search and grep
+        calls, repeats included, so it matches the agent's own history."""
+        seen = self.__dict__.setdefault("_glint_searches", {})
+        calls = self.__dict__["_glint_search_calls"] = self.__dict__.get("_glint_search_calls", 0) + 1
+        text = str(query)
+        key = (tool, " ".join(text.lower().split()) if tool == "KB_search" else text.strip())
+        if key in seen:
+            call, ids, whole = seen[key]
+            if not ids:
+                return (f"Same {tool} as your search {call} in this conversation; it found no documents. Search with "
+                        "different words.")
+            shown = "shown whole" if whole else "shown up to its first page"
+            return (f"Same {tool} as your search {call} in this conversation; its documents were: {', '.join(ids)} "
+                    f"(the first {shown}). Read one with KB_read(doc_id), or search with different words.")
+        results = retrieve(query)
+        ids = [doc_id for doc_id, _ in results[:kb.TOP_DOCS]]
+        top = (self._kb_pipeline if tool == "KB_search" else self._grep_pipeline).get_document_content(ids[0]) if ids \
+            else ""
+        seen[key] = (calls, ids, len(top or "") <= kb.PAGE_CHARS)
+        return render(results)
 
     @is_tool(ToolType.READ)
     def KB_read(self, doc_id: str, offset: int = 0) -> str:
