@@ -333,12 +333,12 @@ class RunEvents:
             idle_s = time.time() - self.activity() if self.activity is not None else None
             if idle_s is not None and idle_s < self.stall_s:
                 self._stalls = 0
-                self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({len(self.seen)} so far); model "
+                self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({sum(self.counts.values())} so far); model "
                           f"calls are still being made (last {idle_s:.0f} s ago)")
             else:
                 self._stalls += 1
-                self._say(f"WARNING: no run finished in {self._stalls * self.stall_s / 60:.0f} min ({len(self.seen)} "
-                          "so far)" + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))
+                self._say(f"WARNING: no run finished in {self._stalls * self.stall_s / 60:.0f} min "
+                          f"({sum(self.counts.values())} so far)" + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))
                 if self._stalls >= HALT_STALLS:
                     self._halt(f"no run finished in {self._stalls * self.stall_s / 60:.0f} min"
                                + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))

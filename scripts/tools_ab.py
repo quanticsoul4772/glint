@@ -138,7 +138,7 @@ from glint.gates import summary as gate_summary
 from glint.gates.rules import REQUIRED_GATES
 from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
-from glint.runlog import RunEvents, outcome
+from glint.runlog import CONTEXT_OVERFLOW, RunEvents, outcome
 
 TOOL_NAMES = {"check_order_action", "find_user_items", "find_variants", "check_reservation_action",
               "get_upcoming_trips_cost", "check_credit_limit_increase", "check_card_dispute"}
@@ -472,7 +472,6 @@ QUIET_LINES = (re.compile(r"Skipping task \S+, trial \d+ because it has already 
 STATUS = re.compile(r"Status: \d+/\d+ complete\..*", re.DOTALL)
 STATUS_EVERY_S = 600.0
 # The (task id, trial) of the simulation the current thread runs, set around τ²'s run_with_retry
-OVERFLOW_PROMPT = re.compile(r"prompt contains at least (\d+) input tokens")
 CURRENT_RUN: ContextVar[tuple[str, int] | None] = ContextVar("glint_current_run", default=None)
 
 
@@ -765,10 +764,10 @@ def generate(cfg: dict) -> None:
         try:
             response = glimmer(*args, **kwargs)
         except Exception as e:
-            # the call that overflowed is the one that matters most in a context overflow: count it, with the prompt
-            # size its error names ("your prompt contains at least 122881 input tokens"; review, 2026-10-31)
-            sized = OVERFLOW_PROMPT.search(str(e))
-            _clock(int(sized.group(1)) if sized else 0, time.time())
+            # the call that overflowed is a model call too: count it (review, 2026-10-31). Not its size: vLLM's "at
+            # least N input tokens" is the context minus max_tokens plus 1 (122881 every time), not the prompt's
+            if CONTEXT_OVERFLOW in str(e):
+                _clock(0, time.time())
             raise
         last_call[0] = time.time()
         _clock(int(getattr(getattr(response, "usage", None), "prompt_tokens", 0) or 0), last_call[0])

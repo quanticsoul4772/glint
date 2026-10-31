@@ -416,9 +416,9 @@ def test_a_rerun_counts_as_running_and_alive_counts_agree(tmp_path, capsys):
     assert "ALIVE: 0 finished (none), 1 more resumed from the checkpoint; 1 running" in err
 
 
-def test_the_overflow_prompt_size_is_read_from_the_error():
+def test_tools_ab_counts_the_overflowing_call_by_the_runlog_marker():
+    # the call that overflowed raises before it returns; tools_ab counts it by the marker runlog classifies on
     import tools_ab
 
-    error = ("litellm.ContextWindowExceededError: ... However, you requested 8192 output tokens and your prompt "
-             "contains at least 122881 input tokens, for a total of at least 131073 tokens.")
-    assert tools_ab.OVERFLOW_PROMPT.search(error).group(1) == "122881"
+    error = "litellm.ContextWindowExceededError: This model's maximum context length is 131072 tokens."
+    assert tools_ab.CONTEXT_OVERFLOW in error and tools_ab.CONTEXT_OVERFLOW not in "APIConnectionError: 303"
