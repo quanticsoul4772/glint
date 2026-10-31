@@ -408,7 +408,7 @@ def check_facts(calls: list[dict]) -> dict:
     # the footer is on every reply that can carry it (not an error, not plan_disputes) while something is open, and
     # absent once nothing is: the last such reply says what was open at the end. The last reply that had a footer
     # did not: it flagged 45 of v9's 48 runs, 28 passes among them (review of #163, 2026-10-31)
-    last = next((c["content"] for c in reversed(calls) if c["tool"] and c["tool"] != "plan_disputes"
+    last = next((c["content"] for c in reversed(calls) if c["tool"] is not None and c["tool"] != "plan_disputes"
                  and not c["error"]), "")
     open_at_end = [line for line in last.splitlines() if line.startswith("[open] ")]
     return {"dispute_checks_ready": len(ready), "dispute_ready_not_unlocked": bool(ready) and not unlocked,

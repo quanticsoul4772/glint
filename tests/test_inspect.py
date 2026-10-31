@@ -487,7 +487,8 @@ def test_check_facts_name_a_ready_check_never_filed_and_a_verification_never_log
     assert f["open_items_at_end"] == 0
     # an error reply never carries the footer, so it does not end the open items either
     msgs += [call("log_verification", {"user_id": "u1"}, 4), reply(4, "Error: x" + footer, error=True),
-             call("get_current_time", {}, 5), reply(5, "now" + footer), call("x", {}, 6), reply(6, "Error", error=True)]
+             call("get_current_time", {}, 5), reply(5, "now" + footer), call("x", {}, 6), reply(6, "Error", error=True),
+             call("plan_disputes", {"user_id": "u1"}, 7), reply(7, json.dumps({"order": []}))]  # never footered
     assert inspect.check_facts(summary.run_calls({"messages": msgs}))["open_items_at_end"] == 1
     brief = inspect.facts_brief(inspect.run_facts({"messages": msgs[:4]}))
     assert "READY NEVER FILED: 1 ready checks" in brief and "VERIFIED NOT LOGGED" in brief and "OPEN AT END: 1" in brief
