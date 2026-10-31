@@ -1,46 +1,13 @@
 [
  {
-  "set": "banking-plan-v5-gated",
-  "title": "Banking, untuned tasks, write gates enforced",
+  "set": "banking-plan-v9-gated",
+  "title": "Banking, untuned tasks, write gates enforced (v9)",
   "role": "untuned",
-  "note": "Tasks 031 and 050-053, which no gate or plan change came from. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated versions are in docs/results.md; this is the latest, and also the best of the five on the untuned tasks, all against one baseline draw. k=4. Glimmer on Modal.",
+  "note": "Tasks 050 and 053, which no gate, plan or open-item change came from. 053's failures are likely the simulated customer's answers (not checked); two tasks cannot reach p < 0.05 by sign test. Glint's decision tools with every write gated (a denied write does not run), on the code at #147, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is compared with one baseline draw. Later changes (#148, #149: refusal wording and which requests count as a credit limit increase) are not in this run. k=4. Glimmer on Modal.",
   "tasks": [
-   {
-    "task": "banking_knowledge-task_031",
-    "alone": "3/4",
-    "tools": "3/4",
-    "change": "tied",
-    "overflows": 0,
-    "empty_replies": 0,
-    "infra_errors": 0,
-    "glint_errors": 0,
-    "no_data_reason": null
-   },
    {
     "task": "banking_knowledge-task_050",
     "alone": "2/4",
-    "tools": "4/4",
-    "change": "improved",
-    "overflows": 0,
-    "empty_replies": 0,
-    "infra_errors": 0,
-    "glint_errors": 0,
-    "no_data_reason": null
-   },
-   {
-    "task": "banking_knowledge-task_051",
-    "alone": "0/4",
-    "tools": "3/4",
-    "change": "improved",
-    "overflows": 1,
-    "empty_replies": 0,
-    "infra_errors": 0,
-    "glint_errors": 0,
-    "no_data_reason": null
-   },
-   {
-    "task": "banking_knowledge-task_052",
-    "alone": "0/4",
     "tools": "4/4",
     "change": "improved",
     "overflows": 0,
@@ -62,32 +29,43 @@
    }
   ],
   "by_task": {
-   "improved": 3,
-   "tied": 2,
+   "improved": 1,
+   "tied": 1,
    "worse": 0,
    "no data": 0
   },
   "runs": {
    "alone": [
-    5,
-    20
+    2,
+    8
    ],
    "tools": [
-    14,
-    20
+    4,
+    8
    ]
   }
  },
  {
-  "set": "banking-plan-v5-gated",
-  "title": "Banking, tuned tasks, write gates enforced",
+  "set": "banking-plan-v9-gated",
+  "title": "Banking, tuned tasks, write gates enforced (v9)",
   "role": "tuned",
-  "note": "Tasks 037-041, 054 and 081: the gates and the dispute plan were shaped by their runs and correct answers (040 and 041 went from 0/4 to 4/4 and 3/4 after #117, which came from their failures). Do not read as general evidence. Glint's decision tools with every write gated (a denied write does not run), on #117, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated versions are in docs/results.md; this is the latest, and also the best of the five on the untuned tasks, all against one baseline draw. k=4. Glimmer on Modal.",
+  "note": "Tasks 031, 037-041, 051, 052, 054 and 081: the gates, the dispute plan and the open items were shaped by their runs and correct answers (052 went from 0/4 in v7 and v8 to 3/4 after the open item for an unfiled increase verdict, which came from its failures). Do not read as general evidence. Glint's decision tools with every write gated (a denied write does not run), on the code at #147, against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is compared with one baseline draw. Later changes (#148, #149: refusal wording and which requests count as a credit limit increase) are not in this run. k=4. Glimmer on Modal.",
   "tasks": [
+   {
+    "task": "banking_knowledge-task_031",
+    "alone": "3/4",
+    "tools": "3/4",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
    {
     "task": "banking_knowledge-task_037",
     "alone": "4/4",
-    "tools": "3/4",
+    "tools": "2/4",
     "change": "worse",
     "overflows": 0,
     "empty_replies": 0,
@@ -109,8 +87,8 @@
    {
     "task": "banking_knowledge-task_039",
     "alone": "0/4",
-    "tools": "0/4",
-    "change": "tied",
+    "tools": "4/4",
+    "change": "improved",
     "overflows": 0,
     "empty_replies": 0,
     "infra_errors": 0,
@@ -120,7 +98,7 @@
    {
     "task": "banking_knowledge-task_040",
     "alone": "0/4",
-    "tools": "4/4",
+    "tools": "3/4",
     "change": "improved",
     "overflows": 0,
     "empty_replies": 0,
@@ -140,9 +118,31 @@
     "no_data_reason": null
    },
    {
+    "task": "banking_knowledge-task_051",
+    "alone": "0/4",
+    "tools": "3/4",
+    "change": "improved",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_052",
+    "alone": "0/4",
+    "tools": "3/4",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
     "task": "banking_knowledge-task_054",
     "alone": "0/4",
-    "tools": "1/4",
+    "tools": "4/4",
     "change": "improved",
     "overflows": 0,
     "empty_replies": 0,
@@ -155,7 +155,7 @@
     "alone": "0/4",
     "tools": "0/4",
     "change": "tied",
-    "overflows": 4,
+    "overflows": 1,
     "empty_replies": 0,
     "infra_errors": 0,
     "glint_errors": 0,
@@ -163,19 +163,19 @@
    }
   ],
   "by_task": {
-   "improved": 3,
+   "improved": 6,
    "tied": 3,
    "worse": 1,
    "no data": 0
   },
   "runs": {
    "alone": [
-    4,
-    28
+    7,
+    40
    ],
    "tools": [
-    11,
-    28
+    25,
+    40
    ]
   }
  },

@@ -15,24 +15,26 @@ All runs are on τ²-bench v1.0.1 with Muse Glimmer 30B at medium reasoning; bot
 - **Wrong writes did not fall on the untuned tasks.** Writes that Glint's own checks judge wrong (τ² does not label writes): 39 without the tools vs 43 with (039: 12 → 18, 041: 17 → 16, 040: 8 → 8, 053: 2 → 0, 051: 0 → 1). On the tuned tasks 038 and 054: 11 → 0.
 
 ## Banking, write gates enforced (design data, k=4)
-The same 12 banking tasks with Glint's decision tools, a dispute plan (`plan_disputes`) and every write gated: a denied write does not run and the agent gets the rule, the facts, why it matters and the next step. Each gated version was a change made after reading the previous one's runs, so all of them are design data. "Alone" is the ungated arm without tools of `banking-plan-gated`, with the same seeds. Tuned tasks are those whose runs or correct answers shaped the gates or the plan.
+The same 12 banking tasks with Glint's decision tools, a dispute plan (`plan_disputes`) and every write gated: a denied write does not run and the agent gets the rule, the facts, why it matters and the next step. Each gated version was a change made after reading the previous one's runs, so all of them are design data. "Alone" is the ungated arm without tools of `banking-plan-gated`, with the same seeds.
 
-| Task | Tuned | Alone | Plain | Terse | v2 | v4 | **v5** |
-|---|---|---|---|---|---|---|---|
-| 031 | | 3/4 | 4/4 | 3/4 | 3/4 | 2/4 | 3/4 |
-| 050 | | 2/4 | 4/4 | 3/4 | 3/4 | 4/4 | 4/4 |
-| 051 | | 0/4 | 2/4 | 3/4 | 2/4 | 0/4 | 3/4 |
-| 052 | | 0/4 | 0/4 | 3/4 | 0/4 | 1/4 | 4/4 |
-| 053 | | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 |
-| **Untuned (5)** | | **5/20** | **10/20** | **12/20** | **8/20** | **7/20** | **14/20** |
-| 037 | yes | 4/4 | 2/4 | 4/4 | 3/4 | 2/4 | 3/4 |
-| 038 | yes | 0/4 | 0/4 | 1/4 | 1/4 | 0/4 | 0/4 |
-| 039 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 |
-| 040 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 4/4 |
-| 041 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 3/4 |
-| 054 | yes | 0/4 | 4/4 | 3/4 | 3/4 | 2/4 | 1/4 |
-| 081 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 |
-| **Tuned (7)** | | **4/28** | **6/28** | **8/28** | **7/28** | **4/28** | **11/28** |
+Tuned tasks are those whose runs or correct answers shaped the gates, the plan or the open items. Since 2026-10-30 that includes 031 and 051 (v6 fixes came from their failures) and 052 (v9's open item came from its failures), so every version is shown on that split; earlier versions of this page used a 5/7 split, under which v5 read 14/20 untuned. Every cell is recomputed from the run data.
+
+| Task | Tuned | Alone | Plain | Terse | v2 | v4 | v5 | v6 | v7 | v8 | **v9** |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 050 |  | 2/4 | 4/4 | 3/4 | 3/4 | 4/4 | 4/4 | 4/4 | 4/4 | 4/4 | 4/4 |
+| 053 |  | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 |
+| **Untuned (2)** | | **2/8** | **4/8** | **3/8** | **3/8** | **4/8** | **4/8** | **4/8** | **4/8** | **4/8** | **4/8** |
+| 031 | yes | 3/4 | 4/4 | 3/4 | 3/4 | 2/4 | 3/4 | 3/4 | 2/4 | 2/4 | 3/4 |
+| 037 | yes | 4/4 | 2/4 | 4/4 | 3/4 | 2/4 | 3/4 | 1/4 | 4/4 | 2/4 | 2/4 |
+| 038 | yes | 0/4 | 0/4 | 1/4 | 1/4 | 0/4 | 0/4 | 0/4 | 1/4 | 2/4 | 0/4 |
+| 039 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 1/4 | 3/4 | 3/4 | 4/4 |
+| 040 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 4/4 | 3/4 | 4/4 | 4/4 | 3/4 |
+| 041 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 3/4 | 2/4 | 3/4 | 3/4 | 3/4 |
+| 051 | yes | 0/4 | 2/4 | 3/4 | 2/4 | 0/4 | 3/4 | 4/4 | 2/4 | 1/4 | 3/4 |
+| 052 | yes | 0/4 | 0/4 | 3/4 | 0/4 | 1/4 | 4/4 | 2/4 | 0/4 | 0/4 | 3/4 |
+| 054 | yes | 0/4 | 4/4 | 3/4 | 3/4 | 2/4 | 1/4 | 0/4 | 1/4 | 2/4 | 4/4 |
+| 081 | yes | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 0/4 | 1/4 | 0/4 | 0/4 |
+| **Tuned (10)** | | **7/40** | **12/40** | **17/40** | **12/40** | **7/40** | **21/40** | **16/40** | **21/40** | **19/40** | **25/40** |
 
 - **The versions:**
   - Plain: gates plus dispute planning, with plain-language deny messages (#87).
@@ -41,17 +43,25 @@ The same 12 banking tasks with Glint's decision tools, a dispute plan (`plan_dis
   - v3: the card-digits gate (#109); stopped at 3 of 48 runs and not reported.
   - v4: the digits gate checks only what the agent can see (#111).
   - v5: the plan tells the agent to look up the dispute history before filing (#117).
-- **v5 on the untuned tasks:** 3 improved (050, 051, 052), 2 tied, 0 worse against alone; sign test p = 0.25; runs 5/20 → 14/20.
-  - Across versions, the untuned totals ranged from 7/20 to 14/20 on code changes that do not touch those tasks; 051 and 052 are credit-limit tasks. The differences between gated versions are not established at k=4.
-  - v5 is reported because it is the latest version; it is also the best of the five on the untuned tasks, so its 14/20 is the top of five noisy draws. Every version is compared with one baseline draw (5/20, run beside plain), so a low draw there would flatter all of them.
-  - "Tuned" here means the gates' design tasks; 037 counts as untuned for the tools-only results above.
-- **v5 on the tuned tasks:** 3 improved, 3 tied and 1 worse (037: 4/4 → 3/4).
-  - 040 and 041 went from 0/4 in every earlier arm to 4/4 and 3/4. The change behind it came from their own failures: in 12 failed v4 runs the dispute-history lookup was the only read τ² requires that the agent did not make (18 failed runs lacked it in all), and τ² scores that read where its correct answer makes it. In v5, 2 failed runs lacked it.
-  - 081 overflowed the context in 3 of its 4 runs.
-- **Gates, v5:**
-  - 323 writes checked, 27 denied; 19 of 48 runs had at least one deny (from the gate log; the run's own summary said 17 because it reads the saved messages, which overflowed runs do not keep), and none ended on τ²'s error limit.
-  - Replaying τ²'s expected actions for all 77 banking training tasks through the gates: 272 expected writes, 0 false refusals, and the database matches the ungated replay. The 2 denied writes are task_005's: its expected actions change the email of a user verified with placeholder data.
-- **Scoring checked:** re-scoring every gated arm with τ²'s own evaluator, offline and with the same read log, gives the live result for every run.
+  - v6: seven fixes from v5's failures: card digits on file, a block on other changes while an increase is undecided, the noticed date and keep-or-replace per card in the plan, the dispute-history read required, open items on every reply, and shorter knowledge-base search results with KB_read (#122-#132).
+  - v7: v6 plus fixes for its two regressions: a noticed date after τ²'s today is refused, and the replacement step no longer says "first" (#134).
+  - v8: v7 plus an ask-once gate recommending expedited shipping for a fraud or theft replacement (#138).
+  - v9: v8 plus an open item for an increase verdict with no decision filed (#142), the card tier's expedited fee in that gate's message (#143), an ask-once confirmation before an order to the address on file (#144), and disputes held until a named credit limit increase is decided (#145). Code at #147.
+- **v9 on the tuned tasks:** 6 improved (039, 040, 041, 051, 052, 054), 3 tied (031, 038, 081), 1 worse (037: 4/4 → 2/4) against alone; sign test p = 0.0625 one-sided (0.125 two-sided); runs 7/40 → 25/40.
+  - Against v8 (19/40): 5 tasks better, 3 tied, 2 worse (038, 040); p = 0.23 one-sided (0.45 two-sided). No per-task change from v8 has Fisher p below 0.14.
+  - 052 went from 0/4 in v7 and v8 to 3/4. The open item for its unfiled increase verdict appeared in all four runs; the three runs that filed the submit and the deny passed, and the one that filed nothing failed.
+  - 054 went from 2/4 to 4/4 (Fisher p = 0.43). The gate holding disputes until the increase is decided never refused: in 3 runs the plan named the increase in other_requests (#145's path), and every run did the increase first. The address confirmation (#144) refused one order in each run. The gain is not credited to one change.
+  - 038 went from 2/4 to 0/4 (p = 0.43). In every v9 run the customer declined expedited shipping, which τ²'s expected actions include; in v8 one customer told the $10 fee still chose it. Chance-level.
+- **v9 on the untuned tasks:** 050 improved (2/4 → 4/4) and 053 tied at 0/4 (likely the simulated customer's answers, not checked; v9's four runs never filed the dispute, while alone's failures include wrong card digits); runs 2/8 → 4/8. Two tasks cannot reach p < 0.05, and untuned has been 4/8 since v4.
+- **Every version is compared with one baseline draw** (alone, run beside plain), so a low draw there would flatter all of them. v9's 25/40 is the highest of nine noisy draws.
+- **Gates, v9:**
+  - 362 writes checked and 59 refusals (55 of writes, 4 of transfers to a human agent). Of the 55 write refusals, 39 refused a write identical to one τ² expects: 0 were false (34 waited for a step the procedure requires first, 5 came in a state that differs from τ²'s path); the other 16 refused writes that differ from the expected ones (9 expedited-shipping asks, 5 address asks, 2 others) and are not judged (`python -m glint.inspect refusals`).
+  - 081 trial 0 ended on τ²'s error limit after 10 gate refusals, 2 of them address asks; 081 trials 2 and 3 ended on τ²'s step limit.
+  - The address confirmation (new in v9) refused 14 times; the agent followed its fix 9 times, and 3 of the runs it refused in failed. The 4 refusals of transfers to a human agent were all in failed runs.
+  - 2 runs overflowed the context (051, 081) and are counted as failures.
+  - Replaying τ²'s expected actions for all 77 banking training tasks through the gates: 289 expected writes, 0 false refusals, and the database matches the ungated replay, with the plan and ask-once steps an agent following the gates adds. The 2 denied writes are task_005's: its expected actions change the email of a user verified with placeholder data.
+- **Later code:** #148 and #149 changed refusal wording and which requests count as a credit limit increase after v9 ran; none of their cases occurred in v9's runs.
+- **Scoring checked:** re-scoring every gated arm with τ²'s own evaluator, offline and with the same read log, gives the live result for every run (checked through v5).
 
 ## Banking test split: no gain (read once, Oct 28)
 τ²'s untouched banking test split: all 20 tasks, k=4, both arms on Modal. The tools arm had the decision tools without gates. The run's 12 infrastructure errors were rerun with their own seeds, on a later commit (70af7d7; the main run was a2e9da7).
