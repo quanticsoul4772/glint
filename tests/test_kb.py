@@ -95,3 +95,19 @@ def test_the_best_search_result_is_whole_and_a_repeat_points_back():
                                                                    "words.") and "No matches" in nothing
     fresh = _env(True).tools  # a new conversation keeps no record
     assert not fresh.use_tool("KB_search", query="stolen card replacement").startswith("Same")
+
+
+def test_the_run_log_warns_once_when_a_conversation_reaches_the_search_limit(capsys, monkeypatch):
+    # banking-unseen-gated, 2026-10-31: every run that ran out of τ²'s 200 steps had made at least 72 searches, and
+    # nothing in the run log said so until it ended
+    from glint.assist import tau2_tools
+
+    monkeypatch.setattr(tau2_tools, "SEARCH_WARN", 3)
+    tools = _env(True).tools
+    tools.use_tool("KB_search", query="stolen card replacement")
+    tools.use_tool("grep", pattern="fraud")
+    assert "WARNING" not in capsys.readouterr().err
+    tools.use_tool("KB_read", doc_id="doc_credit_cards_credit_cards_(general)_018")
+    tools.use_tool("KB_search", query="stolen card replacement")  # a repeat still counts as a call
+    err = capsys.readouterr().err
+    assert err.count("WARNING: a conversation has made 3 knowledge-base searches") == 1
