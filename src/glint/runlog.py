@@ -104,7 +104,8 @@ class RunEvents:
                  domain: str | None = None, on_halt: Callable[[str], None] | None = None,
                  activity: Callable[[], float] | None = None,
                  running: Callable[[], dict[tuple[str, str], tuple[float, int, int, float]]] | None = None,
-                 long_run_s: float = LONG_RUN_S, heartbeat_s: float = HEARTBEAT_S):
+                 long_run_s: float = LONG_RUN_S, heartbeat_s: float = HEARTBEAT_S, tools: bool = True,
+                 gated: bool = True):
         self.results_path, self.events_path, self.label = Path(results_path), Path(events_path), label
         # called once, with the reason, when a fail-fast pattern is seen (HALT_SAME_CAUSE, HALT_STALLS); the caller
         # stops the arm. Without it the pattern is still printed as a FAIL FAST line.
@@ -115,6 +116,11 @@ class RunEvents:
         # (2026-10-30: task_018 ran 61 min, 151 messages, unflagged), and a run τ² kept nothing of (a context
         # overflow) gets its calls, time and peak from here
         self.running, self.long_run_s, self.heartbeat_s = running, long_run_s, heartbeat_s
+        # an arm without Glint's tools (Glimmer alone): its repeated wrong fields are the model's own, not a
+        # regression; an arm without gates has no gate refusals to audit. Separate: a tools arm of a set with gates
+        # off still has the tools (2026-10-31: the unseen base arm printed 10 "a regression would show this way"
+        # warnings and "0 of 22 passing runs went through a gate refusal")
+        self.tools, self.gated = tools, gated
         # (task_id, trial) -> when it last finished (resumed runs: when this arm resumed). A run whose clock started
         # after that is a rerun of the same (task, trial) and counts as running again (review, 2026-10-31)
         self.finished_runs: dict[tuple[str, str], float] = {}
@@ -179,9 +185,11 @@ class RunEvents:
 
             self._say(inspect.diffs_line(list(self.diffs.values())))
         if self.facts is not None and self.passes_audited:
-            self._say(f"PASS AUDIT: {len(self.passes_with_refusals)} of {self.passes_audited} passing runs went through "
-                      f"a gate refusal {self.passes_with_refusals or ''}; {len(self.passes_with_claims)} claimed a write "
-                      f"that never ran {self.passes_with_claims or ''}")
+            refusals = (f"{len(self.passes_with_refusals)} of {self.passes_audited} passing runs went through a gate "
+                        f"refusal {self.passes_with_refusals or ''}; " if self.gated else
+                        f"{self.passes_audited} passing runs (no gates in this arm); ")
+            self._say(f"PASS AUDIT: {refusals}{len(self.passes_with_claims)} claimed a write that never ran "
+                      f"{self.passes_with_claims or ''}")
 
     def _repeated_fields(self, e: dict) -> list[str]:
         """A WARNING the second time a field is wrong in a failed run of this arm (once per field): the v6 regression
@@ -192,8 +200,9 @@ class RunEvents:
             runs = self.field_runs.setdefault(field, [])
             runs.append(run)
             if len(runs) == 2:
-                out.append(f"WARNING: repeated wrong field: {field} in 2 failed runs ({', '.join(runs)}); a "
-                           "regression would show this way; check before the arm ends")
+                why = ("a regression would show this way; check before the arm ends" if self.tools else
+                       "the model's own repeated error (no Glint tools in this arm), not a regression")
+                out.append(f"WARNING: repeated wrong field: {field} in 2 failed runs ({', '.join(runs)}); {why}")
         return out
 
     def _audit_pass(self, e: dict) -> None:
@@ -298,7 +307,9 @@ class RunEvents:
                         except Exception as exc:  # noqa: BLE001  (recorded in the event and printed below)
                             e["diff_error"] = f"{type(exc).__name__}: {exc}"[:300]
                             loud += f"  WARNING: no diff ({e['diff_error'][:160]})"
-                    if self.facts is not None:
+                    # a run τ² kept no messages of has no facts: its line printed "searches 0, peak prompt 0k" beside
+                    # the call log's real peak (2026-10-31 review)
+                    if self.facts is not None and e["messages"]:
                         try:  # like the diff: a facts error is recorded and printed, and the event still lands
                             e["facts"], brief = self.facts(s)
                             loud += "  " + brief
