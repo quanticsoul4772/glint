@@ -798,3 +798,26 @@ def test_a_filing_with_text_flags_is_refused_and_counted_as_differing_from_gold(
         {"role": "tool", "id": "c0", "content": _file(_gated("task_037")[0], texted).content, "error": True}]}
     assert [r["rule_id"] for r in inspect.live_refusals("banking_knowledge", sim)["differs_from_gold"]] == [
         "banking.dispute.types"]
+
+
+def test_each_decision_tool_answer_is_logged_as_a_check_event():
+    task = _task("task_040")
+    enforcer = Enforcer("banking_knowledge", EventLog(":memory:"))
+    install("banking_knowledge", enforcer)
+    env = _env(task)
+    gold = _gold_disputes(task)
+    user = gold[0]["user_id"]
+    _verify(env, user)
+    _read_history(env, user)
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold))
+    tid = env.tools.glint_plans[user]["order"][0]["transaction_id"]
+    d = next(g for g in gold if g["transaction_id"] == tid)
+    card = banking.card_of_transaction(env.tools.db, user, env.tools.db.credit_card_transaction_history.data[tid])
+    _call(env, "check_card_dispute", user_id=user, credit_card_account_id=card, transaction_id=tid,
+          dispute_reason=d["dispute_reason"], contacted_merchant=d["contacted_merchant"])
+    u = env.tools.db.users.data[user]
+    _call(env, "check_verification", user_id=user, email=u["email"], phone_number=u["phone_number"])
+    checks = [e["payload"] for e in enforcer.events.events("check.recorded")]
+    assert [(c["tool"], c["ready"], c["filing"], c["verified"]) for c in checks] == [
+        ("check_card_dispute", "True", "arguments", None), ("check_verification", None, None, "True")]
+    assert checks[0]["transaction_id"] == tid and checks[0]["replay"] is False
