@@ -732,6 +732,8 @@ def generate(cfg: dict) -> None:
     truncated, truncated_lock = [0], threading.Lock()  # Glimmer responses cut at max_tokens in the current arm
 
     last_call = [time.time()]  # when Glimmer last answered: RunEvents tells a slow run from a stalled server by it
+    run_clock: dict[tuple[str, str], tuple[float, int]] = {}
+    clock_lock = threading.Lock()
 
     def route(*args, **kwargs):
         if "Muse-Glimmer" not in kwargs.get("model", ""):
@@ -742,6 +744,9 @@ def generate(cfg: dict) -> None:
             raise BudgetExceeded("the Modal session was halted (GPU cap reached or the GPU watcher failed)")
         response = glimmer(*args, **kwargs)
         last_call[0] = time.time()
+        with clock_lock:  # each run's first model call and call count, for RunEvents' long-run warning
+            first, calls = run_clock.get(current_run(), (last_call[0], 0))
+            run_clock[current_run()] = (first, calls + 1)
         if response.choices[0].finish_reason == "length":  # τ²'s own warning names no task
             task_id, trial = current_run()
             with truncated_lock:
@@ -776,8 +781,11 @@ def generate(cfg: dict) -> None:
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",
                                label=f"{arm} {domain}",
                                on_run=gate_summary.ErrorLimitAlerts() if enforcer is not None else None,
-                               domain=domain, on_halt=fail_fast, activity=lambda: last_call[0])
+                               domain=domain, on_halt=fail_fast, activity=lambda: last_call[0],
+                               running=lambda: dict(run_clock))
             truncated[0] = 0
+            with clock_lock:
+                run_clock.clear()  # the arms share (task, trial) keys: the last arm's runs are not this arm's
             glimmer_serve.reset_pool_stats()
             with events:
                 results = _run(cfg, domain, ids, arm, stamp, endpoint)

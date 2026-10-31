@@ -655,3 +655,26 @@ def test_crash_detection_reads_through_the_held_back_stats_lines(capsys):
     assert len(watch.lines) == 5 and watch.suppressed == 2  # the held-back lines are still in the log
     err = capsys.readouterr().err
     assert "Engine core initialization failed" in err and "throughput" not in err
+
+
+def test_pool_waits_are_printed_once_per_window_with_the_count(monkeypatch, capsys):
+    # 2026-10-30 review: 18 POOL WAIT lines in 17 min were half of the unseen run's alerts
+    import types
+
+    def hop(wait):
+        url = types.SimpleNamespace(host="h", path="/v1/chat/completions")
+        return types.SimpleNamespace(request=types.SimpleNamespace(method="POST", url=url, extensions={
+            "glint_sent": 0.0, "glint_marks": {"connected": wait, "answered": wait + 1.0}}))
+
+    clock = [1000.0]
+    monkeypatch.setattr(glimmer_serve.time, "monotonic", lambda: clock[0])
+    glimmer_serve.reset_pool_stats()
+    for wait in (40.0, 50.0, 70.0):
+        glimmer_serve._report_pool_wait(hop(wait))
+    clock[0] += glimmer_serve.POOL_WAIT_WINDOW_S + 1
+    glimmer_serve._report_pool_wait(hop(35.0))
+    lines = [line for line in capsys.readouterr().err.splitlines() if "POOL WAIT" in line]
+    assert len(lines) == 2 and "POOL WAIT 40.0 s" in lines[0] and "more" not in lines[0]
+    assert "POOL WAIT 35.0 s" in lines[1] and "(+2 more over 30 s in the window before, longest 70.0 s)" in lines[1]
+    assert glimmer_serve.pool_stats()["waited"] == 4  # every long wait is still counted
+    glimmer_serve.reset_pool_stats()
