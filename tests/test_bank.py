@@ -21,8 +21,7 @@ from glint.gates import rules
 logger.remove()
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "glint-bank"
-RUNS = Path(__file__).resolve().parent / "data" / "bank" / "wrong-write-runs.json"
-# the banking12 runs of task_040/041/051/054 from research/5-measurements/failure-review-2026-10-28/recs.json
+RUNS = ROOT / "data-public" / "wrong-write-runs.json"  # bank_replay.RECS: the recorded wrong-write runs
 SOFIA = {"user_id": "584f9c5d00", "credit_card_account_id": "cc_584f9c5d00_gold"}
 
 
@@ -341,7 +340,7 @@ def test_main_serves_stdio(monkeypatch):
 # ---- replays (design V1, V2) --------------------------------------------------------------------------------------
 
 def test_gold_replay_through_mcp_has_no_false_refusal_and_matches_the_ungated_twin():
-    """The 77 banking TRAIN tasks (pilot + rest); the 20 test_untouched tasks stay unread (research/00-decisions.md)."""
+    """The 77 banking TRAIN tasks (pilot + rest); the 20 test_untouched tasks stay unread (decision 2026-10-26)."""
     import bank_replay
     import gate_replay
 

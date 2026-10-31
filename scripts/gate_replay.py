@@ -23,14 +23,14 @@ from tau2.data_model.message import ToolCall
 from tau2.registry import registry
 from tau2.runner.build import _derive_read_log_allowlist
 
-from glint import paths
+import splits
 from glint.assist.banking import PLAN_TOOL
 from glint.gates import Enforcer, EventLog
 from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_plans
 from glint.gates.rules import ADDRESS_ASK
 
 DOMAINS = ("retail", "airline", "banking_knowledge")
-BANKING_SPLIT = paths.RESULTS / "split-partition-banking.json"
+BANKING_SPLIT = splits.BANKING
 # Gold data the gates deny by policy, listed and reported on its own, never silently: task_005's gold logs a
 # verification whose every field is the placeholder '9K2X7M4P1N8Q3R5T6A' (no such user) and then changes the email of
 # a user who was never verified (the user simulator is told to fail verification)
@@ -38,7 +38,7 @@ PLACEHOLDER_GOLD = {("banking_knowledge", "task_005"): "placeholder verification
 
 
 def tasks_of(domain: str) -> list:
-    """The TRAIN tasks only: τ²'s test splits stay unread (research/00-decisions.md). Retail and airline use τ²'s
+    """The TRAIN tasks only: τ²'s test splits stay unread (decision 2026-10-26). Retail and airline use τ²'s
     train split; banking_knowledge has none, so its test tasks are the `test_untouched` 20 of
     split-partition-banking.json and the rest (pilot + rest, 77 tasks) are replayed."""
     loader = registry.get_tasks_loader(domain)

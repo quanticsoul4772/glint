@@ -1,6 +1,6 @@
 """Decision tools for τ² banking_knowledge: credit limit increases and credit card disputes.
 
-Rules come from the knowledge base (research/3-project/banking-procedure-rules.md): `credit_card_account_logistics_005`
+Rules come from τ²'s banking knowledge base documents: `credit_card_account_logistics_005`
 to `_007` (CLI tiers, order of steps, the checks before a decision), `credit_cards_(general)_014` (`card_action`) and
 `_015` (provisional credit). Reads the live `TransactionalDB`; "today" is the domain's fixed date. No language model
 is used.
@@ -416,7 +416,7 @@ def plan_disputes(db, user_id: str, transactions: list[dict], other_requests: li
     non-qualifying reason, so a qualifying reason alone does not put a dispute first). Inside the first group the
     largest amount is filed first: τ²'s train gold files those disputes from the largest to the smallest amount in
     tasks 037, 038, 039, 040, 041 and 081. That is not in the policy text either, and those six tasks are tuned tasks
-    (research/00-decisions.md, 2026-10-28). The second group keeps the given order (no credit is at stake there); equal
+    (decision 2026-10-28). The second group keeps the given order (no credit is at stake there); equal
     amounts keep the given order too.
 
     An incorrect_amount dispute is filed as resolution_requested 'partial_refund' with partial_refund_amount = the

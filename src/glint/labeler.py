@@ -2,7 +2,7 @@
 
 Replays a trajectory in a live retail environment. Before each assistant tool call it reads the
 pre-call DB and the message history, assigns labels from glint.labels, then executes the call so the
-state stays faithful. Design: research/3-project/gap-G4G5-labels-data.md §G4.2–G4.3.
+state stays faithful.
 
 Input messages are plain dicts in τ²'s saved-simulation shape:
   {"role": "assistant"|"user"|"tool", "content": str|None, "tool_calls": [{"id","name","arguments"}],

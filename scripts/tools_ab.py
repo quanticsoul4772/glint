@@ -127,13 +127,14 @@ import quiet_logs  # noqa: F401  (must stay the first import that can load logur
 # isort: split
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
-from m2_pilot import GLIMMER, META, SPARK, glimmer_args
+from m2_pilot import GLIMMER, META, SPARK, glimmer_args, require_keys
 from tau2.data_model.simulation import TextRunConfig
 from tau2.data_model.tasks import Task
 from tau2.registry import registry
 from tau2.runner.batch import run_domain, run_tasks
 from tau2.utils import llm_utils
 
+import splits
 from glint import glimmer_serve, inspect, paths
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
@@ -152,7 +153,7 @@ DESIGN_TASKS = {"retail": {"20", "93", "82", "52", "98", "103", "104"}, "airline
 MEASURE = paths.MEASURE
 RESULTS = paths.RESULTS
 BANKING_TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.json"
-BANKING_SPLIT = RESULTS / "split-partition-banking.json"
+BANKING_SPLIT = splits.BANKING
 BANKING_WRITES = ("file_credit_card_transaction_dispute_4829", "submit_credit_limit_increase_request_7392")
 MODAL_CLI = str(Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "modal.exe")
 
@@ -957,9 +958,27 @@ def analyze(cfg: dict) -> None:
                   f"{glint or 'none'}", flush=True)
 
 
-if __name__ == "__main__":
-    args = sys.argv[1:]
-    cfg = for_backend(SETS[next((a for a in args if a in SETS), "design")], "--modal" in args)
-    if "--analyze" not in args:
+FLAGS = ("--modal", "--analyze", "--allow-mixed-code", "--rerun-infrastructure-errors")
+
+
+def main(argv: list[str]) -> int:
+    """Run (or with --analyze, only analyze) one set. Anything that is not a set name or a flag prints the usage
+    and starts nothing: an unknown argument used to fall through to a paid run of the design set."""
+    if "--help" in argv or "-h" in argv:
+        print(__doc__)
+        return 0
+    unknown = [a for a in argv if a not in SETS and a not in FLAGS]
+    if unknown:
+        print(f"unknown argument(s): {' '.join(unknown)}\n\n{__doc__}", file=sys.stderr)
+        return 2
+    cfg = for_backend(SETS[next((a for a in argv if a in SETS), "design")], "--modal" in argv)
+    if "--analyze" not in argv:
+        # the Spark customer and judge always; DeepInfra's key only when Glimmer is not served on Modal
+        require_keys(*(("MODEL_API_KEY",) if "--modal" in argv else ()))
         generate(cfg)
     analyze(cfg)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

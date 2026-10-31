@@ -12,12 +12,13 @@ from collections import Counter, defaultdict
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
-from m2_pilot import GLIMMER, META, SPARK, WONDER, glimmer_args
+from m2_pilot import GLIMMER, META, SPARK, WONDER, glimmer_args, require_keys
 from tau2.data_model.simulation import TextRunConfig
 from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
 from tau2.utils import llm_utils
 
+import splits
 from glint import paths
 from glint.atem import reparsing
 from glint.meter import Caps, Meter, guarded, litellm_callback
@@ -40,7 +41,7 @@ def select():
     order = _order(banking_ids, "banking")
     partition = {"seed": SEED, "tasks_sha256": hashlib.sha256(banking_raw).hexdigest(),
                  "test_untouched": order[:20], "pilot": order[20:40], "rest": order[40:]}
-    out = RESULTS / "split-partition-banking.json"
+    out = splits.BANKING
     if out.exists():
         assert json.loads(out.read_text()) == partition, "banking partition changed"
     else:
@@ -133,5 +134,6 @@ def analyze():
 
 if __name__ == "__main__":
     if sys.argv[1:] != ["--analyze"]:
+        require_keys()
         generate()
     analyze()

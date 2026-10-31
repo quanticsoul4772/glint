@@ -11,6 +11,7 @@ from tau2.data_model.message import AssistantMessage, ToolCall
 from tau2.data_model.tasks import Task
 from tau2.registry import registry
 
+import splits
 from glint import paths
 from glint.assist import banking
 from glint.assist.tau2_tools import BankingDecisionTools, DisputePlanTools, add_plan_tool, install
@@ -21,7 +22,7 @@ from glint.gates.replayplan import PLAN_FIELDS, filing, plan_arguments, with_pla
 logger.remove()
 TASKS = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
                                          "tasks.json").read_text(encoding="utf-8"))}
-TEST_SPLIT = set(json.loads((paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))
+TEST_SPLIT = set(json.loads(splits.BANKING.read_text(encoding="utf-8"))
                  ["test_untouched"])
 WRAPPER = "call_discoverable_agent_tool"
 FIELDS = PLAN_FIELDS

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from glint import paths
 
-# $ per 1M tokens (research/2-platform/platform-pricing-limits.md, Meta pricing page 2026-10-26).
+# $ per 1M tokens (Meta's pricing page, read 2026-10-26).
 META_PRICES = {
     "muse-spark-1.3": {"input": 1.25, "cached": 0.15, "output": 4.25},
     "muse-spark-1.2": {"input": 1.25, "cached": 0.15, "output": 4.25},

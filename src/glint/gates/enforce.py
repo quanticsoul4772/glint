@@ -40,7 +40,8 @@ reply, footer included, replays unchanged.
 
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-"permissionDecisionReason": GateResult.message()} } to block a call (research/5-measurements/M0-results.md, M6a).
+"permissionDecisionReason": GateResult.message()} } to block a call (a PreToolUse deny
+blocking the call was checked in Muse Code on 2026-10-26).
 """
 from __future__ import annotations
 

@@ -6,11 +6,12 @@ The test splits are never read. Deterministic: tasks are ordered by sha256(SEED 
 import hashlib
 import json
 
+import splits
 from glint import paths
 
 SEED = "glint-measurement-2026-10-26"
 DOMAINS = paths.tau2_data() / "tau2" / "domains"
-OUT = paths.RESULTS / "split-partition.json"
+OUT = splits.PARTITION
 
 
 def ordered(ids):

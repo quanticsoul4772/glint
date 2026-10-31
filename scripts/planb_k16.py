@@ -7,18 +7,20 @@ Usage: python planb_k16.py
 import json
 import time
 
-from m2_pilot import GLIMMER, META, SPARK, glimmer_args, install
+from m2_pilot import GLIMMER, META, SPARK, glimmer_args, install, require_keys
 from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 
+import splits
 from glint import paths
 from glint.meter import Caps, Meter
 
-PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
+PARTITION = json.loads(splits.PARTITION.read_text())
 DATA = paths.MEASURE / "planb"
 SPLITS = ("pilot", "fit", "cert_reserve")
 BATCHES, K = 4, 4
 
+require_keys()
 meter = Meter(Caps(meta_usd=20.0, gpu_usd=0.0), phase="planb-k16")
 install(meter)
 for split in SPLITS:

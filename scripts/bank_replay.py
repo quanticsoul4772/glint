@@ -1,4 +1,4 @@
-"""glint-bank replays through the MCP tool-call path (design V1 and V2, research/3-project/glint-bank-design.md §8).
+"""glint-bank replays through the MCP tool-call path (the glint-bank design's checks V1 and V2, 2026-10-28).
 
 - **gold** (V1, false refusals): for each of the 77 banking TRAIN tasks (pilot + rest; the 20 test_untouched stay unread), `load_scenario(task)` through an in-process MCP
   client, then every gold action: the assistant's through `call_tool` (the server's handler, so the session's gates),
@@ -8,8 +8,8 @@
   database hashes must equal the twin's. Gold never calls plan_disputes, which the plan gate requires before a credit
   card dispute: the call an agent following the gate's Fix makes (glint.gates.replayplan, gold's own filings) goes
   through `call_tool` before the first filing; the twin has no such tool and skips it.
-- **wrong** (V2): the recorded wrong writes of Glimmer's banking12 runs (research/5-measurements/
-  failure-review-2026-10-28/recs.json): task_054's over-maximum increase submit, task_051's approve with no prior deny,
+- **wrong** (V2): the recorded wrong writes of Glimmer's banking12 runs (the failure review of 2026-10-28, in
+  data-public/wrong-write-runs.json): task_054's over-maximum increase submit, task_051's approve with no prior deny,
   task_040/041's dispute with wrong arguments. A run recorded before plan_disputes existed gets the plan made from its
   own filings, in its order (glint.gates.replayplan), before its first dispute; a plan-gate deny then means the run
   left that plan. Each run's writes are sent in order through the server on a fresh
@@ -39,19 +39,20 @@ from loguru import logger
 from mcp.client.client import Client
 from tau2.data_model.message import ToolCall
 
-from glint import paths
 from glint.assist.banking import PLAN_TOOL
 from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
 from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, plan_arguments, with_address_asks, with_plans
 
-RECS = paths.RESULTS / "failure-review-2026-10-28" / "recs.json"
+# the recorded runs the wrong check reads: banking12's runs of task_040/041/051/054 from the failure review of
+# 2026-10-28, trimmed to the fields used and kept in the repo so a clean checkout can run it
+RECS = Path(__file__).resolve().parents[1] / "data-public" / "wrong-write-runs.json"
 DOMAIN = "banking_knowledge"
 
 
 def train_task_ids() -> list[str]:
     """The 77 banking train tasks (pilot + rest), as gate_replay replays them: the 20 test_untouched tasks of
-    split-partition-banking.json stay unread (research/00-decisions.md, 2026-10-28)."""
+    split-partition-banking.json stay unread (decision 2026-10-26)."""
     return sorted(t.id for t in gate_replay.tasks_of(DOMAIN))
 WRAPPER, UNLOCK = "call_discoverable_agent_tool", "unlock_discoverable_agent_tool"
 VISIBLE = {"log_verification", "change_user_email", "transfer_to_human_agents"}  # agent writes called by name

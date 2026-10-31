@@ -8,7 +8,7 @@ import time
 
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
-from m2_pilot import GLIMMER, META, SPARK, glimmer_args
+from m2_pilot import GLIMMER, META, SPARK, glimmer_args, require_keys
 from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
@@ -19,6 +19,7 @@ from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
 
 TASKS = ["20", "93"]
+require_keys()
 stamp = time.strftime("%Y%m%d-%H%M%S")
 glim = Meter(Caps(meta_usd=0.5, gpu_usd=0.0), phase=f"unedited-glimmer-{stamp}")
 meta = Meter(Caps(meta_usd=0.2, gpu_usd=0.0), phase=f"unedited-meta-{stamp}")

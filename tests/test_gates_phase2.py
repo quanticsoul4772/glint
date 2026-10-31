@@ -10,6 +10,7 @@ from tau2.data_model.message import AssistantMessage, ToolCall
 from tau2.data_model.tasks import Task
 from tau2.registry import registry
 
+import splits
 from glint import paths
 from glint.gates import Enforcer, EventLog, Gate, GateRegistry, allow, rules
 from glint.gates import procedure as proc
@@ -18,7 +19,7 @@ from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_p
 logger.remove()
 BANKING = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
                                            "tasks.json").read_text(encoding="utf-8"))}
-TEST_SPLIT = set(json.loads((paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))
+TEST_SPLIT = set(json.loads(splits.BANKING.read_text(encoding="utf-8"))
                  ["test_untouched"])
 
 
