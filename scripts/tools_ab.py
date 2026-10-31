@@ -694,6 +694,8 @@ def generate(cfg: dict) -> None:
     if not stamp_file.exists():
         stamp_file.write_text(time.strftime("%Y%m%d-%H%M%S"), encoding="utf-8")
         commit_file.write_text(commit, encoding="utf-8")
+    # this session's start, rewritten on every start or resume: status.py counts runs in flight from calls made since
+    (data / "session_start.txt").write_text(str(time.time()), encoding="utf-8")
     stamp = stamp_file.read_text(encoding="utf-8").strip()
     # A resume on different code would merge runs of two code versions into one comparison (the first held-out
     # arms span four commits)
