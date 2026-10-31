@@ -521,3 +521,47 @@ def plan_disputes(db, user_id: str, transactions: list[dict], other_requests: li
     if wants_increase(other_requests):
         plan |= {"increase_first": True, "sequencing": LIMIT_FIRST}
     return plan
+
+
+VERIFY_FIELDS = ("date_of_birth", "email", "phone_number", "address")
+# The agent instructions (additional_instructions): the customer must give correctly "any 2 out of" date of birth,
+# email, phone number and address; full name or user id is not enough. banking-plan-v9-gated 037 t3: the customer gave
+# email and phone, and the agent asked 6 times for a date of birth or an address and never compared them.
+VERIFY_RULE = ("Verified when the customer gives any 2 of date of birth, email, phone number and address and they match "
+               "the record; full name or user id is not enough (additional_instructions).")
+
+
+def _same(field: str, given, on_file) -> bool:
+    if not given or not on_file:
+        return False
+    if field == "date_of_birth":
+        try:
+            return _date(str(given).strip()) == _date(str(on_file))
+        except ValueError:
+            return False
+    if field == "phone_number":
+        return re.sub(r"\D", "", str(given))[-10:] == re.sub(r"\D", "", str(on_file))[-10:]
+    pattern = r"[a-z0-9@.]+" if field == "email" else r"[a-z0-9]+"  # case, spacing and punctuation differ
+    return re.findall(pattern, str(given).lower()) == re.findall(pattern, str(on_file).lower())
+
+
+def check_verification(db, user_id: str, given: dict) -> dict:
+    """Whether the values the customer gave verify them: each of the four fields matched against the record
+    (formats normalized), and when 2 match, the log_verification arguments from the record. Record values are returned
+    only once verified."""
+    user = db.users.data.get(user_id)
+    if user is None:
+        return {"verified": False, "reasons": [f"user {user_id} does not exist"]}
+    given = {f: given.get(f) for f in VERIFY_FIELDS if given.get(f)}
+    matched = [f for f in given if _same(f, given[f], user.get(f))]
+    out = {"verified": len(matched) >= 2, "matched": matched,
+           "did_not_match": [f for f in given if f not in matched], "rule": VERIFY_RULE}
+    if out["verified"]:
+        out["next_step"] = ("Call log_verification with these values from the record and time_verified from "
+                            "get_current_time. Do not ask the customer for more.")
+        out["log_verification"] = {k: user.get(k) for k in ("name", "user_id", "address", "email", "phone_number",
+                                                             "date_of_birth")}
+    else:
+        out["next_step"] = (f"{2 - len(matched)} more matching value(s) needed: ask for any of "
+                            f"{', '.join(f for f in VERIFY_FIELDS if f not in matched)}.")
+    return out

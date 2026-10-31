@@ -793,3 +793,31 @@ def test_retail_find_variants_unknown_item_and_nothing_available(rdb):
         var.available = False
     res = retail.find_variants(db, "1763705424", require={"brand": "Brand C"})
     assert res["count"] == 0 and res["closest"] == {"variants": [], "note": "no available variant of this product"}
+
+
+def test_banking_verification_check_needs_two_matching_fields_and_gives_golds_log_arguments():
+    # banking-plan-v9-gated 037 t3: the customer gave email and phone (2 of the 4 fields the agent instructions
+    # accept), and the agent asked 6 times for a date of birth or an address and never compared them
+    import json
+
+    from glint.assist import banking
+
+    tools, _ = _banking_episode("task_037")
+    tasks = json.loads((DOMAINS / "banking_knowledge" / "tasks.json").read_text(encoding="utf-8"))
+    gold = next(a["arguments"] for a in next(t for t in tasks if t["id"] == "task_037")["evaluation_criteria"]["actions"]
+                if a["name"] == "log_verification")
+    user = tools.db.users.data[gold["user_id"]]
+    digits = "".join(c for c in user["phone_number"] if c.isdigit())
+    given = {"email": f"  {user['email'].upper()} ", "phone_number": f"({digits[:3]}) {digits[3:6]}.{digits[6:]}"}
+    out = banking.check_verification(tools.db, gold["user_id"], given)
+    assert out["verified"] and out["matched"] == ["email", "phone_number"] and "Do not ask" in out["next_step"]
+    assert out["log_verification"] == {k: v for k, v in gold.items() if k != "time_verified"}
+    month, day, year = user["date_of_birth"].split("/")
+    assert banking.check_verification(tools.db, gold["user_id"], {"date_of_birth": f"{year}-{month}-{day}",
+                                                                  "address": user["address"].lower()})["verified"]
+    one = banking.check_verification(tools.db, gold["user_id"], given | {"phone_number": "000-000-0000"})
+    assert not one["verified"] and one["did_not_match"] == ["phone_number"] and "log_verification" not in one
+    assert "1 more matching value(s) needed" in one["next_step"]
+    assert banking.check_verification(tools.db, gold["user_id"], {"date_of_birth": "not a date"})["matched"] == []
+    assert banking.check_verification(tools.db, "nobody", given) == {"verified": False,
+                                                                    "reasons": ["user nobody does not exist"]}
