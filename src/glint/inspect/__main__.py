@@ -3,6 +3,7 @@
 Usage: python -m glint.inspect diff DATA_FOLDER [--task T] [--arm tools]
        python -m glint.inspect sequence DATA_FOLDER --task T [--trial N] [--arm tools]
        python -m glint.inspect messages DATA_FOLDER --task T --grep REGEX [--trial N] [--arm tools]
+       python -m glint.inspect refusals DATA_FOLDER [--arm tools]
 """
 from __future__ import annotations
 
