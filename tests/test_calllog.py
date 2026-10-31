@@ -72,3 +72,18 @@ def test_load_keeps_the_last_call_of_a_retried_request(tmp_path, capsys):
     assert len(rows) == 2
     assert [r["completion_tokens"] for r in rows.values()] == [3, 9]  # the last retry wins
     assert "2 of 4 recorded calls repeat an earlier request" in capsys.readouterr().err
+
+
+def test_a_call_record_carries_the_attempts_simulation_id(tmp_path):
+    # 2026-10-30 review: a resumed rerun keeps (task, trial); its records are told apart by τ²'s simulation id
+    import types
+
+    def answer(**kwargs):
+        return types.SimpleNamespace(model_dump=lambda: {"choices": [{"message": {"content": "ok"}}],
+                                                         "usage": {"prompt_tokens": 3, "completion_tokens": 2}})
+
+    path = tmp_path / "calls.jsonl"
+    call = recording(answer, path, context=lambda: ("task_041", 2, "sim-uuid"))
+    call(model="Muse-Glimmer", messages=[{"role": "user", "content": "hi"}])
+    row = json.loads(path.read_text(encoding="utf-8"))
+    assert (row["task_id"], row["trial"], row["simulation_id"]) == ("task_041", 2, "sim-uuid")
