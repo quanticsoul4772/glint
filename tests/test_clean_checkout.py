@@ -13,8 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_the_split_files_are_in_the_repo_and_every_reader_uses_them():
     import gate_replay
-    import splits
     import tools_ab
+
+    import splits
 
     assert splits.DIR == ROOT / "splits"
     assert len(json.loads(splits.BANKING.read_text(encoding="utf-8"))["test_untouched"]) == 20
@@ -37,7 +38,7 @@ def test_the_replays_and_tools_ab_import_with_an_empty_workspace_and_no_keys(tmp
     env |= {"GLINT_HOME": str(tmp_path), "PYTHONPATH": os.pathsep.join([str(ROOT / "src"), str(ROOT / "scripts")])}
     code = "import gate_replay, bank_replay, tools_ab, m2_pilot; print(m2_pilot.META['api_key'])"
     r = subprocess.run([sys.executable, "-X", "utf8", "-c", code], env=env, capture_output=True, text=True,
-                       encoding="utf-8", timeout=300)
+                       encoding="utf-8", timeout=300, check=False)  # the assert below shows stderr on failure
     assert r.returncode == 0, r.stderr[-2000:]
     assert r.stdout.strip().splitlines()[-1] == "None"
     assert list(tmp_path.iterdir()) == []  # nothing was written into the workspace either
