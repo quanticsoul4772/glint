@@ -179,6 +179,27 @@ class BankingDecisionTools(DisputePlanTools):
     keep τ²'s."""
 
     @is_tool(ToolType.READ)
+    def check_verification(self, user_id: str, date_of_birth: str = "", email: str = "", phone_number: str = "",
+                           address: str = "") -> dict:
+        """Identity verification decision tool. After finding the user (get_user_information_by_name or similar),
+        pass the values the CUSTOMER gave, exactly as they gave them; leave the others empty. The customer is verified
+        when any 2 of date of birth, email, phone number and address match the record. When verified, it returns the
+        log_verification arguments.
+
+        Args:
+            user_id: The user's id from the lookup.
+            date_of_birth: The date of birth the customer gave, if any.
+            email: The email the customer gave, if any.
+            phone_number: The phone number the customer gave, if any.
+            address: The address the customer gave, if any.
+
+        Returns:
+            dict: verified, matched, did_not_match, next_step, and log_verification when verified.
+        """
+        return banking.check_verification(self.db, user_id, {"date_of_birth": date_of_birth, "email": email,
+                                                             "phone_number": phone_number, "address": address})
+
+    @is_tool(ToolType.READ)
     def KB_search(self, query: str) -> str:
         """Search the knowledge base for relevant documents.
 

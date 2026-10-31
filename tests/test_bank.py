@@ -85,7 +85,7 @@ def test_decision_tools_are_published_only_with_the_flag(tmp_path):
     off = {t.name for t in bank.BankServer(tmp_path, sid="a").tool_list()}
     listed = {t.name: t for t in bank.BankServer(tmp_path, decision_tools=True, sid="b").tool_list()}
     on = set(listed)
-    assert on - off == {"check_credit_limit_increase", "check_card_dispute", "KB_read"}
+    assert on - off == {"check_credit_limit_increase", "check_card_dispute", "check_verification", "KB_read"}
     # GENERIC with mutates_state=True only so τ²'s replay rebuilds the verdict record: it never writes the bank
     check = listed["check_credit_limit_increase"].annotations
     assert check.read_only_hint and not check.destructive_hint
