@@ -132,4 +132,30 @@ def test_the_eta_names_the_runs_in_flight_from_the_call_log(tmp_path, monkeypatc
     text = "\n".join(status.report("x", {"data": data, "trials": 1, "save": "x", "concurrency": 2, "arms": ("tools",)}))
     # 2 and 3 are running; 4's last call is over 15 min old (finished and unsaved, or stuck); 1 finished
     assert ("2 running (oldest 60 min, newest 20 min), 1 with no model call for over 15 min (finished and not yet "
-            "saved, or stuck; longest 67 min), 0 not started: at least ~0 min after the running ones end") in text
+            "saved, or stuck; longest 67 min), none left to start: done when the running ones end") in text
+
+
+def test_the_eta_ignores_an_earlier_sessions_calls_and_a_stopped_arm(tmp_path, monkeypatch):
+    # review 2026-10-31: the first arm counted every call ever written; an arm stopped early took the next arm's
+    import status
+
+    data = tmp_path / "set"
+    data.mkdir()
+    (data / "tasks.json").write_text(json.dumps({"retail": ["1", "2", "3"]}), encoding="utf-8")
+    now = time.time()
+    (data / "session_start.txt").write_text(str(now - 1000), encoding="utf-8")
+    rows = [{"ts": now - 50, "label": "tools retail", "task_id": "1", "trial": 0, "outcome": "pass",
+             "duration_s": 600.0, "error": None}]
+    (data / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    calls = [{"ts": now - 90000, "task_id": "3", "trial": "0"},  # an earlier session's dead run
+             {"ts": now - 600, "task_id": "2", "trial": "0"}, {"ts": now - 10, "task_id": "2", "trial": "0"}]
+    (data / "calls.jsonl").write_text("\n".join(json.dumps(c) for c in calls), encoding="utf-8")
+    monkeypatch.setattr(status, "LEDGER", tmp_path / "ledger.jsonl")
+    cfg = {"data": data, "trials": 1, "save": "x", "concurrency": 1, "arms": ("tools",)}
+    text = "\n".join(status.report("x", cfg))
+    assert "1 running (oldest 10 min, newest 10 min), 1 not started" in text and "no model call" not in text
+    # a stopped arm (its last event older than another arm's) keeps the mean-based estimate
+    rows.append({"ts": now - 5, "label": "base retail", "task_id": "1", "trial": 0, "outcome": "pass",
+                 "duration_s": 600.0, "error": None})
+    (data / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    assert "~20 min left" in "\n".join(status.report("x", cfg))

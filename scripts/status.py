@@ -64,9 +64,19 @@ def _eta(data: Path, evs: list[dict], by_arm: dict, label: str, expected: int, m
     running ones; the running ones are named by count and age, since a long run's end cannot be told in advance."""
     calls_path = data / "calls.jsonl"
     left_new = max(0, expected - len(evs))
-    if not calls_path.exists():
+    others = [e["ts"] for other, rows in by_arm.items() if other != label for e in rows]
+    # only the arm running now has runs in flight: an arm stopped early would take the next arm's calls as its own
+    # (review, 2026-10-31); a stopped arm keeps the mean-based estimate
+    if not calls_path.exists() or (others and evs and max(others) > evs[-1]["ts"]):
         return f"~{left_new * mean / max(1, concurrency) / 60:.0f} min left"
-    began = max((e["ts"] for other, rows in by_arm.items() if other != label for e in rows), default=0.0)
+    # the arm began after the other arms' latest event and after this session started (tools_ab writes
+    # session_start.txt at every start and resume): calls of an earlier session would otherwise count as runs in flight
+    session = data / "session_start.txt"
+    try:
+        started = float(session.read_text(encoding="utf-8")) if session.exists() else 0.0
+    except ValueError:
+        started = 0.0
+    began = max([*others, started])
     done = {(str(e["task_id"]), str(e["trial"])) for e in evs}
     first, last = {}, {}
     for row in calls_path.read_text(encoding="utf-8").splitlines():
@@ -90,9 +100,10 @@ def _eta(data: Path, evs: list[dict], by_arm: dict, label: str, expected: int, m
              f"or stuck; longest {max(quiet) / 60:.0f} min)" if quiet else "")
     if not running:
         return f"~{tail / 60:.0f} min left{stuck}"
+    after = (f"{not_started} not started: at least ~{tail / 60:.0f} min after the running ones end (a run averages "
+             f"{mean / 60:.0f} min)" if not_started else "none left to start: done when the running ones end")
     return (f"{len(running)} running (oldest {max(running) / 60:.0f} min, newest {min(running) / 60:.0f} min){stuck}, "
-            f"{not_started} not started: at least ~{tail / 60:.0f} min after the running ones end (a run averages "
-            f"{mean / 60:.0f} min)")
+            f"{after}")
 
 
 def report(name: str, cfg: dict) -> list[str]:
