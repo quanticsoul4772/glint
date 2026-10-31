@@ -64,6 +64,7 @@ with quiet_stdout():
 
 DOMAIN = "banking_knowledge"
 RETRIEVAL = "bm25_grep"
+READ_ONLY_GENERIC = (PLAN_TOOL, "check_credit_limit_increase")
 LOAD, POLICY = "load_scenario", "get_bank_policy"
 SERVER_NAME = "glint-bank"
 INSTRUCTIONS = ("A live bank (τ²-bench banking_knowledge). You are the bank's agent; the user is the customer. Call "
@@ -192,7 +193,10 @@ class BankServer:
                 schema = tool.openai_schema["function"]
                 out.append(types.Tool(name=name, description=schema.get("description") or "",
                                       input_schema=schema["parameters"], annotations=types.ToolAnnotations(
-                                          read_only_hint=name == PLAN_TOOL or not toolkit.tool_mutates_state(name),
+                                          # both are GENERIC with mutates_state=True only so τ²'s replay rebuilds
+                                          # the enforcer's records; neither writes the database
+                                          read_only_hint=name in READ_ONLY_GENERIC
+                                          or not toolkit.tool_mutates_state(name),
                                           destructive_hint=toolkit.tool_type(name) == ToolType.WRITE)))
         return out + [
             types.Tool(name=LOAD, description=(

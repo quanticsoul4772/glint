@@ -7,6 +7,7 @@ is used.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 
 from glint.assist import as_flag
@@ -314,9 +315,15 @@ def card_of_transaction(db, user_id: str, txn: dict) -> str:
 
 
 def wants_increase(other_requests: list[str] | None) -> bool:
-    """Whether the customer's other requests name a credit limit increase."""
-    others = " ".join(str(r) for r in other_requests or []).lower()
-    return "limit" in others or "increase" in others or "cli" in others.split()
+    """Whether one of the customer's other requests names a credit limit increase: 'cli', or 'credit' with 'limit' or
+    'line' and a raise ('increase', 'raise', 'higher'). A debit card or ATM limit, a savings rate or a lower limit is
+    not one (it would hold the disputes for a decision that never comes)."""
+    for request in other_requests or []:
+        words = re.findall(r"[a-z]+", str(request).lower())
+        if "cli" in words or ("credit" in words and {"limit", "line"} & set(words)
+                              and {"increase", "raise", "higher"} & set(words)):
+            return True
+    return False
 
 
 def plan_disputes(db, user_id: str, transactions: list[dict], other_requests: list[str] | None = None) -> dict:

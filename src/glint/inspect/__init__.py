@@ -114,7 +114,7 @@ PRECONDITION_RULES = ("procedure.verified", "procedure.lookups", "procedure.disp
                       "procedure.dispute_plan.increase_first", "procedure.dispute_plan.not_planned",
                       "procedure.increase_first", "procedure.increase_undecided", "procedure.transfer.increase_undecided",
                       "procedure.card_digits.give", "banking.replacement.increase_first",
-                      "banking.replacement.expedite_ask")
+                      "banking.replacement.expedite_ask", "banking.replacement.address_ask")
 # Rules that judge the write against the database at that moment (a policy check, a card's status): the gold
 # replays show each allows gold's write in gold's state, so refusing the same arguments in another state (051's
 # approve before the payment, 081's close of a still-frozen card) is the state differing, not a false refusal.
