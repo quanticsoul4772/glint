@@ -26,7 +26,8 @@ def test_search_results_stay_within_the_budget_and_name_their_documents(query, p
     tools, base = _env(True).tools, _env(False).tools
     for name, args in (("KB_search", {"query": query}), ("grep", {"pattern": pattern})):
         out, full = tools.use_tool(name, **args), base.use_tool(name, **args)
-        assert len(out) <= kb.RESULT_CHARS and kb.READ_HINT in out
+        # the best document whole (up to PAGE_CHARS) plus the others' excerpts within RESULT_CHARS (2026-10-31)
+        assert len(out) <= kb.PAGE_CHARS + kb.RESULT_CHARS + 400 and kb.READ_HINT in out
         ids = re.findall(r"   ID: (\S+)", out)
         assert 1 <= len(ids) <= kb.TOP_DOCS and ids == re.findall(r"   ID: (\S+)", full)[:len(ids)]  # τ²'s ranking
         assert all(len(e) <= kb.EXCERPT_CHARS for e in re.findall(r"   Excerpt: (.*)\n", out))
@@ -36,7 +37,7 @@ def test_search_results_stay_within_the_budget_and_name_their_documents(query, p
 def test_grep_excerpt_is_the_paragraph_with_the_most_matches():
     tools = _env(True).tools
     out = tools.use_tool("grep", pattern="card_last_4_digits")
-    doc = re.search(r"   ID: (\S+)", out)[1]
+    doc = re.findall(r"   ID: (\S+)", out)[1]  # the first document is shown whole; the second has the first excerpt
     content = tools._grep_pipeline.get_document_content(doc)
     excerpt = re.search(r"   Excerpt: (.*)\n", out)[1]
     best = max(kb.paragraphs(content), key=kb.pattern_score("card_last_4_digits"))
@@ -67,3 +68,30 @@ def test_only_the_tools_arm_gets_the_budgeted_search():
     assert isinstance(assisted, BankingDecisionTools) and not isinstance(base, BankingDecisionTools)
     assert "KB_read" in assisted.get_tools() and "KB_read" not in base.get_tools()
     assert "Content: " in base.use_tool("KB_search", query="stolen card replacement")  # τ²'s whole documents
+
+
+def test_the_best_search_result_is_whole_and_a_repeat_points_back():
+    # banking-unseen-gated, 2026-10-31: the tools-arm runs that ran out of τ²'s 200 steps made 93 KB_search calls a
+    # run on one-paragraph excerpts, one in five repeating an earlier search exactly
+    tools = _env(True).tools
+    first = tools.use_tool("KB_search", query="stolen card replacement")
+    top = first.split("   ID: ", 1)[1].split("\n", 1)[0]
+    content = tools._kb_pipeline.get_document_content(top)
+    assert content[:kb.PAGE_CHARS] in first  # the best document's text, not a paragraph of it
+    if len(content) > kb.PAGE_CHARS:
+        assert f"KB_read(doc_id={top!r}, offset={kb.PAGE_CHARS})" in first
+    again = tools.use_tool("KB_search", query="  Stolen   CARD replacement ")
+    assert again.startswith("Same KB_search as your search 1 in this conversation") and top in again
+    assert len(again) < 600
+    other = tools.use_tool("grep", pattern="stolen card replacement")  # another tool: not a repeat
+    # numbered by call, repeats included: KB_search 1, its repeat 2, this grep 3
+    assert not other.startswith("Same") and tools.use_tool("grep", pattern="stolen card replacement").startswith(
+        "Same grep as your search 3")
+    # a regex's case and spacing matter (review: \D and \d were one search); a repeat that found nothing says so
+    assert not tools.use_tool("grep", pattern=r"\D{3}").startswith("Same")
+    assert not tools.use_tool("grep", pattern=r"\d{3}").startswith("Same")
+    nothing = tools.use_tool("grep", pattern="zzqxnomatchzz")
+    assert tools.use_tool("grep", pattern="zzqxnomatchzz").endswith("it found no documents. Search with different "
+                                                                   "words.") and "No matches" in nothing
+    fresh = _env(True).tools  # a new conversation keeps no record
+    assert not fresh.use_tool("KB_search", query="stolen card replacement").startswith("Same")

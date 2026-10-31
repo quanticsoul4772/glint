@@ -3,9 +3,10 @@
 
 τ²'s bm25_grep tools return whole documents: KB_search its 10 best, grep every match ranked by match count. In
 banking-plan-v5-gated task_081 trial 0 made 16 KB_search/grep calls that returned 327,401 characters (one 29,860),
-and trials 1-3 ended on Glimmer's 131,072-token context limit. Here each result keeps the 5 best documents, each as
-its title, id and the one paragraph that best matches (at most 600 characters), at most 4,000 characters in all;
-KB_read pages through a whole document 6,000 characters at a time. A context budget, not a policy rule.
+and trials 1-3 ended on Glimmer's 131,072-token context limit. Here each result keeps the 5 best documents: the best
+one whole up to 6,000 characters (since 2026-10-31; see format_results), the others as title, id and the one
+paragraph that best matches (at most 600 characters), at most 4,000 characters for those; KB_read pages through a
+whole document 6,000 characters at a time. A context budget, not a policy rule.
 Deterministic: same documents, same query, same text.
 """
 from __future__ import annotations
@@ -42,15 +43,26 @@ def pattern_score(pattern: str):
 
 
 def format_results(pipeline, results: list[tuple[str, float]], score, empty: str) -> str:
-    """The best TOP_DOCS documents of `results` (doc id, score; best first), each as title, id and best paragraph,
-    within RESULT_CHARS; documents that do not fit are counted, not shown."""
+    """The best TOP_DOCS documents of `results` (doc id, score; best first): the best one whole, up to PAGE_CHARS
+    (KB_read pages the rest), and the others as title, id and best paragraph within RESULT_CHARS; documents that do
+    not fit are counted, not shown.
+
+    The best document is whole because excerpts alone left the agent searching again: in banking-unseen-gated the 41
+    tools-arm runs that ran out of τ²'s 200 steps made 93 KB_search calls a run, nearly all reading only one
+    paragraph per document, where Glimmer alone (10 whole documents a search) searched 18 times (2026-10-31)."""
     if not results:
         return empty
     out, shown = [], 0
     for i, (doc_id, _) in enumerate(results[:TOP_DOCS], 1):
-        entry = (f"{i}. {pipeline.get_document_title(doc_id) or 'Untitled'}\n   ID: {doc_id}\n"
-                 f"   Excerpt: {best_paragraph(pipeline.get_document_content(doc_id) or '', score)}\n")
-        if len("\n".join(out + [entry])) + len(READ_HINT) + 80 > RESULT_CHARS:
+        title, content = pipeline.get_document_title(doc_id) or "Untitled", pipeline.get_document_content(doc_id) or ""
+        if i == 1:
+            more = (f"\n   [continues: KB_read(doc_id={doc_id!r}, offset={PAGE_CHARS})]" if len(content) > PAGE_CHARS
+                    else "")
+            out.append(f"1. {title}\n   ID: {doc_id}\n   Document:\n{content[:PAGE_CHARS]}{more}\n")
+            shown += 1
+            continue
+        entry = f"{i}. {title}\n   ID: {doc_id}\n   Excerpt: {best_paragraph(content, score)}\n"
+        if len("\n".join(out[1:] + [entry])) + len(READ_HINT) + 80 > RESULT_CHARS:
             break
         out.append(entry)
         shown += 1
