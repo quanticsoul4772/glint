@@ -349,8 +349,9 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
         return deny("procedure.dispute_plan.increase_first", PLAN_SOURCE, "the customer also asked for a credit limit "
                     "increase, and no increase was approved or denied for them in this conversation yet",
                     "Do the credit limit increase first: submit it, the required lookups, then approve or deny. Then "
-                    f"file the disputes. If the customer no longer wants the increase, or it cannot be decided "
-                    "(check_credit_limit_increase gives no approve or deny verdict), call "
+                    "file the disputes. If check_credit_limit_increase says reduce_amount or ask_amount, ask the "
+                    "customer for the amount and keep the increase. Only if the customer no longer wants the "
+                    "increase, or check_credit_limit_increase says unknown or error (it cannot be decided), call "
                     f"{PLAN_TOOL} again with other_requests without it.", {"user_id": user, "transaction_id": tid},
                     consequence="A pending dispute fails the increase (credit_card_account_logistics_005 criterion "
                     "3), so the increase is decided first.",
