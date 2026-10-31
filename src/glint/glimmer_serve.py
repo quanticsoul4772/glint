@@ -94,8 +94,11 @@ _wait_window = {"start": float("-inf"), "more": 0, "longest_s": 0.0}
 
 
 def pool_stats() -> dict:
+    """The counts since the last reset, and the long waits of the current window not yet named on a POOL WAIT line
+    (`unreported`, with the longest): the arm's POOL line prints them, so the last window is never lost (review,
+    2026-10-31)."""
     with _pool_lock:
-        return dict(_pool)
+        return dict(_pool) | {"unreported": _wait_window["more"], "unreported_longest_s": _wait_window["longest_s"]}
 
 
 def reset_pool_stats() -> None:

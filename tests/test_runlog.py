@@ -396,3 +396,29 @@ def test_a_run_tau_kept_nothing_of_gets_the_call_log_and_no_diff(tmp_path, capsy
     assert row["from_calls"] == {"model_calls": 41, "seconds": 570.0, "peak_prompt_tokens": 121000}
     assert ("τ² kept no messages or time; call log: 41 model calls over 570 s, peak prompt 121000 tokens"
             in capsys.readouterr().err)
+
+
+def test_a_rerun_counts_as_running_and_alive_counts_agree(tmp_path, capsys):
+    # review 2026-10-31: on resume every checkpointed (task, trial) was "finished" forever, hiding its rerun from the
+    # long-run warning; ALIVE counted resumed runs in its total but not in its tally
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({"simulations": [{**_sim("t1", 0, 0.0), "id": "a"}]}), encoding="utf-8")
+    now = time.time()
+    clock = {}
+    with RunEvents(results, tmp_path / "e.jsonl", label="tools banking", poll_s=60, running=lambda: clock,
+                   heartbeat_s=0.0, long_run_s=60) as watch:
+        clock[("t1", "0")] = (now - 600, 40, 1000, now)  # began before the resume: the checkpointed attempt
+        assert watch._open_runs() == {}
+        clock[("t1", "0")] = (time.time() + 1, 3, 1000, time.time() + 1)  # a rerun of t1 trial 0 started after it
+        assert list(watch._open_runs()) == [("t1", "0")]
+        watch._beat()
+    err = capsys.readouterr().err
+    assert "ALIVE: 0 finished (none), 1 more resumed from the checkpoint; 1 running" in err
+
+
+def test_the_overflow_prompt_size_is_read_from_the_error():
+    import tools_ab
+
+    error = ("litellm.ContextWindowExceededError: ... However, you requested 8192 output tokens and your prompt "
+             "contains at least 122881 input tokens, for a total of at least 131073 tokens.")
+    assert tools_ab.OVERFLOW_PROMPT.search(error).group(1) == "122881"

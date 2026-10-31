@@ -472,6 +472,7 @@ QUIET_LINES = (re.compile(r"Skipping task \S+, trial \d+ because it has already 
 STATUS = re.compile(r"Status: \d+/\d+ complete\..*", re.DOTALL)
 STATUS_EVERY_S = 600.0
 # The (task id, trial) of the simulation the current thread runs, set around τ²'s run_with_retry
+OVERFLOW_PROMPT = re.compile(r"prompt contains at least (\d+) input tokens")
 CURRENT_RUN: ContextVar[tuple[str, int] | None] = ContextVar("glint_current_run", default=None)
 
 
@@ -747,6 +748,13 @@ def generate(cfg: dict) -> None:
     run_clock: dict[tuple[str, str], tuple[float, int, int, float]] = {}
     clock_lock = threading.Lock()
 
+    def _clock(prompt: int, at: float) -> None:
+        """Each run's first call, call count, peak prompt tokens and latest call, for RunEvents: the long-run warning,
+        and the record of a run τ² keeps nothing of (a context overflow)."""
+        with clock_lock:
+            first, calls, peak, _ = run_clock.get(current_run(), (at, 0, 0, 0.0))
+            run_clock[current_run()] = (first, calls + 1, max(peak, prompt), at)
+
     def route(*args, **kwargs):
         if "Muse-Glimmer" not in kwargs.get("model", ""):
             return base(*args, **kwargs)
@@ -754,14 +762,16 @@ def generate(cfg: dict) -> None:
             raise BudgetExceeded(f"stopped early (fail fast): {stopped['reason']}")
         if halt.is_set():
             raise BudgetExceeded("the Modal session was halted (GPU cap reached or the GPU watcher failed)")
-        response = glimmer(*args, **kwargs)
+        try:
+            response = glimmer(*args, **kwargs)
+        except Exception as e:
+            # the call that overflowed is the one that matters most in a context overflow: count it, with the prompt
+            # size its error names ("your prompt contains at least 122881 input tokens"; review, 2026-10-31)
+            sized = OVERFLOW_PROMPT.search(str(e))
+            _clock(int(sized.group(1)) if sized else 0, time.time())
+            raise
         last_call[0] = time.time()
-        # each run's first call, call count, peak prompt tokens and latest call, for RunEvents: the long-run warning,
-        # and the record of a run τ² keeps nothing of (a context overflow)
-        prompt = int(getattr(getattr(response, "usage", None), "prompt_tokens", 0) or 0)
-        with clock_lock:
-            first, calls, peak, _ = run_clock.get(current_run(), (last_call[0], 0, 0, 0.0))
-            run_clock[current_run()] = (first, calls + 1, max(peak, prompt), last_call[0])
+        _clock(int(getattr(getattr(response, "usage", None), "prompt_tokens", 0) or 0), last_call[0])
         if response.choices[0].finish_reason == "length":  # τ²'s own warning names no task
             task_id, trial = current_run()
             with truncated_lock:
@@ -806,8 +816,10 @@ def generate(cfg: dict) -> None:
                 results = _run(cfg, domain, ids, arm, stamp, endpoint)
             pool = glimmer_serve.pool_stats()
             print(f"TRUNCATIONS: {arm} {domain}: {truncated[0]} Glimmer responses stopped at max_tokens", flush=True)
+            unreported = (f"; {pool['unreported']} of them after the last POOL WAIT line (longest "
+                          f"{pool['unreported_longest_s']:.1f} s)" if pool["unreported"] else "")
             print(f"POOL: {pool['requests']} requests, {pool['waited']} waited over "
-                  f"{glimmer_serve.POOL_WAIT_WARN_S:.0f} s, longest {pool['longest_s']:.1f} s", flush=True)
+                  f"{glimmer_serve.POOL_WAIT_WARN_S:.0f} s, longest {pool['longest_s']:.1f} s{unreported}", flush=True)
             if enforcer is not None:  # the gate decisions live only in the gate log; one line puts them in the run log
                 sims = [s.model_dump(mode="json") for s in results.simulations]
                 gate_events = enforcer.events.events()
