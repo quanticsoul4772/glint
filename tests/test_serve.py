@@ -534,7 +534,8 @@ def test_a_request_queued_for_a_connection_is_reported_with_its_wait_and_server_
     stats = glimmer_serve.pool_stats()
     assert stats["requests"] == 2 and stats["waited"] == 1 and stats["longest_s"] == pytest.approx(wait, abs=0.1)
     glimmer_serve.reset_pool_stats()
-    assert glimmer_serve.pool_stats() == {"requests": 0, "waited": 0, "longest_s": 0.0}
+    assert glimmer_serve.pool_stats() == {"requests": 0, "waited": 0, "longest_s": 0.0, "unreported": 0,
+                                          "unreported_longest_s": 0.0}
 
 
 def test_the_pool_wait_log_never_raises_into_the_call(capsys):
@@ -677,4 +678,7 @@ def test_pool_waits_are_printed_once_per_window_with_the_count(monkeypatch, caps
     assert len(lines) == 2 and "POOL WAIT 40.0 s" in lines[0] and "more" not in lines[0]
     assert "POOL WAIT 35.0 s" in lines[1] and "(+2 more over 30 s in the window before, longest 70.0 s)" in lines[1]
     assert glimmer_serve.pool_stats()["waited"] == 4  # every long wait is still counted
+    # a wait after the last printed line is held for the arm's POOL line (review, 2026-10-31)
+    glimmer_serve._report_pool_wait(hop(45.0))
+    assert glimmer_serve.pool_stats()["unreported"] == 1 and glimmer_serve.pool_stats()["unreported_longest_s"] == 45.0
     glimmer_serve.reset_pool_stats()

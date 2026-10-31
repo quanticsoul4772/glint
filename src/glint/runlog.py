@@ -121,7 +121,10 @@ class RunEvents:
         # off still has the tools (2026-10-31: the unseen base arm printed 10 "a regression would show this way"
         # warnings and "0 of 22 passing runs went through a gate refusal")
         self.tools, self.gated = tools, gated
-        self.finished_runs: set[tuple[str, str]] = set()
+        # (task_id, trial) -> when it last finished (resumed runs: when this arm resumed). A run whose clock started
+        # after that is a rerun of the same (task, trial) and counts as running again (review, 2026-10-31)
+        self.finished_runs: dict[tuple[str, str], float] = {}
+        self.resumed_n = 0
         self._long_warned: set[tuple[str, str]] = set()
         self._last_beat = time.time()
         self.endings: dict[str, int] = {}  # τ²'s termination reason -> runs (max_steps was counted only as a fail)
@@ -160,7 +163,9 @@ class RunEvents:
     def __enter__(self):
         resumed = self._read()
         self.seen = {run_key(s) for s in resumed}  # resumed runs are not re-reported; their reruns are
-        self.finished_runs |= {(str(s.get("task_id")), str(s.get("trial"))) for s in resumed}
+        self.finished_runs |= dict.fromkeys(((str(s.get("task_id")), str(s.get("trial"))) for s in resumed),
+                                            time.time())
+        self.resumed_n = len(self.seen)
         if self.seen:
             self._say(f"{len(self.seen)} runs already in the checkpoint (resumed)")
         self._thread.start()
@@ -313,7 +318,7 @@ class RunEvents:
                             loud += f"  WARNING: no facts ({e['facts_error'][:160]})"
                     self.counts[e["outcome"]] = self.counts.get(e["outcome"], 0) + 1
                     self.endings[e["termination"]] = self.endings.get(e["termination"], 0) + 1
-                    self.finished_runs.add((str(e["task_id"]), str(e["trial"])))
+                    self.finished_runs[(str(e["task_id"]), str(e["trial"]))] = time.time()
                     self._track_streak(e)
                     by_task = self.tasks_by_outcome.setdefault(e["outcome"], {})
                     by_task[str(e["task_id"])] = by_task.get(str(e["task_id"]), 0) + 1
@@ -339,12 +344,12 @@ class RunEvents:
             idle_s = time.time() - self.activity() if self.activity is not None else None
             if idle_s is not None and idle_s < self.stall_s:
                 self._stalls = 0
-                self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({len(self.seen)} so far); model "
+                self._say(f"WARNING: no run finished in {self.stall_s / 60:.0f} min ({sum(self.counts.values())} so far); model "
                           f"calls are still being made (last {idle_s:.0f} s ago)")
             else:
                 self._stalls += 1
-                self._say(f"WARNING: no run finished in {self._stalls * self.stall_s / 60:.0f} min ({len(self.seen)} "
-                          "so far)" + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))
+                self._say(f"WARNING: no run finished in {self._stalls * self.stall_s / 60:.0f} min "
+                          f"({sum(self.counts.values())} so far)" + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))
                 if self._stalls >= HALT_STALLS:
                     self._halt(f"no run finished in {self._stalls * self.stall_s / 60:.0f} min"
                                + ("" if idle_s is None else f" and no model call in {idle_s / 60:.0f} min"))
@@ -357,7 +362,7 @@ class RunEvents:
     def _open_runs(self) -> dict[tuple[str, str], tuple[float, int, int, float]]:
         if self.running is None:
             return {}
-        return {k: v for k, v in self.running().items() if k not in self.finished_runs}
+        return {k: v for k, v in self.running().items() if v[0] > self.finished_runs.get(k, float("-inf"))}
 
     def _long_runs(self) -> None:
         """One WARNING per run that has gone past long_run_s since its first model call without finishing: τ²'s
@@ -379,7 +384,11 @@ class RunEvents:
         oldest = (f", oldest {(time.time() - min(v[0] for v in open_runs.values())) / 60:.0f} min" if open_runs
                   else "")
         idle = f"; last model call {time.time() - self.activity():.0f} s ago" if self.activity is not None else ""
-        self._say(f"ALIVE: {len(self.seen)} finished ({tally}); {len(open_runs)} running{oldest}{idle}")
+        resumed = f", {self.resumed_n} more resumed from the checkpoint" if self.resumed_n else ""
+        # the finished count and its tally come from the same runs (review, 2026-10-31: a resumed arm printed
+        # "40 finished (pass 2, fail 1)")
+        self._say(f"ALIVE: {sum(self.counts.values())} finished ({tally}){resumed}; {len(open_runs)} running{oldest}"
+                  f"{idle}")
 
     def _watch(self):
         # An exception here would end the thread and every later event without a word (2026-10-27: a PermissionError
