@@ -715,9 +715,12 @@ def test_a_ready_check_names_the_filing_call_with_the_plans_values():
     by_id = {d["transaction_id"]: d for d in gold}
 
     def check(tid):
+        """The check as the agent reads it: through τ²'s reply, which turns bools and numbers into strings."""
         d = by_id[tid]
         card = banking.card_of_transaction(env.tools.db, user, env.tools.db.credit_card_transaction_history.data[tid])
-        return env.tools.check_card_dispute(user, card, tid, d["dispute_reason"], d["contacted_merchant"])
+        reply = _call(env, "check_card_dispute", user_id=user, credit_card_account_id=card, transaction_id=tid,
+                      dispute_reason=d["dispute_reason"], contacted_merchant=d["contacted_merchant"])
+        return json.loads(reply.content.split("\n\n[open]")[0])
 
     _verify(env, user)
     _read_history(env, user)
@@ -726,20 +729,50 @@ def test_a_ready_check_names_the_filing_call_with_the_plans_values():
     _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=_items(gold))
     order = [e["transaction_id"] for e in env.tools.glint_plans[user]["order"]]
     later = check(order[1])["filing"]
-    assert later == {"filed": False, "next_step": f"The plan files {order[0]} before {order[1]}: check and file "
+    assert later == {"filed": "False", "next_step": f"The plan files {order[0]} before {order[1]}: check and file "
                      f"{order[0]} first."}
     for tid in order:
         out = check(tid)
         f = out["filing"]
-        assert f["filed"] is False and f["tool"] == rules.DISPUTE and "Nothing is filed yet" in f["next_step"]
+        assert f["filed"] == "False" and f["tool"] == rules.DISPUTE and "Nothing is filed yet" in f["next_step"]
         assert any(s.startswith("card_last_4_digits: the customer's") for s in f["you_supply"])  # 040 has none on file
-        g = by_id[tid]
-        # every value the tool gives is gold's; the customer's card digits and requested resolution come from them
-        assert f["arguments"] == {k: v for k, v in g.items() if k in f["arguments"]}
-        assert set(g) - set(f["arguments"]) <= {"card_last_4_digits", "resolution_requested", "partial_refund_amount"}
+        assert f["arguments"]["eligible_for_provisional_credit"] in ("True", "False")  # τ²'s strings, not for filing
+        g, args = by_id[tid], json.loads(f["arguments_json"])
+        # every value the tool gives is gold's, types included; the card digits and resolution come from the customer
+        assert args == {k: v for k, v in g.items() if k in args}
+        assert set(g) - set(args) <= {"card_last_4_digits", "resolution_requested", "partial_refund_amount"}
         supplied = {k: g[k] for k in ("card_last_4_digits", "resolution_requested", "partial_refund_amount") if k in g}
-        assert _ran(_file(env, f["arguments"] | supplied)), tid
-    assert check(order[0])["filing"] == {"filed": True, "next_step": f"{order[0]} is already filed."}
+        assert _ran(_file(env, args | supplied)), tid
+    stored = [r for r in env.tools.db.transaction_disputes.data.values() if r.get("transaction_id") in by_id]
+    assert len(stored) == len(order) and all(isinstance(r["eligible_for_provisional_credit"], bool)
+                                             and isinstance(r["contacted_merchant"], bool) for r in stored)
+    assert check(order[0])["filing"] == {"filed": "True", "next_step": f"{order[0]} is already filed."}
+
+
+def test_a_ready_check_gives_no_filing_the_plan_gate_would_refuse():
+    # code review of #153: a plan entry with questions open, or a plan holding disputes for an undecided increase,
+    # got filing arguments that procedure.dispute_plan then refused
+    env, _, gold = _gated("task_040")
+    user = gold[0]["user_id"]
+    first = _items(gold)
+    unanswered = [{k: v for k, v in d.items() if k != "contacted_merchant"} for d in first]
+    _call(env, "plan_disputes", other_requests=[], user_id=user, transactions=unanswered)
+    plan = env.tools.glint_plans[user]
+    tid = plan["order"][0]["transaction_id"]
+    step = banking.filing_call(env.tools.db, user, plan, tid)
+    assert step["filed"] is False and "Did you try to resolve" in step["next_step"] and "arguments" not in step
+    _call(env, "plan_disputes", other_requests=["credit limit increase"], user_id=user, transactions=first)
+    plan = env.tools.glint_plans[user]
+    tid = plan["order"][0]["transaction_id"]
+    assert banking.filing_call(env.tools.db, user, plan, tid) == {"filed": False, "next_step": banking.LIMIT_FIRST}
+    assert "arguments" in banking.filing_call(env.tools.db, user, plan, tid, increase_decided=True)
+    # a replacement ordered after the plan sets cancel_and_reissue, as the plan gate does
+    txn = env.tools.db.credit_card_transaction_history.data[tid]
+    card = banking.card_of_transaction(env.tools.db, user, txn)
+    env.tools.db.credit_card_orders.data["ccord_test"] = {"order_id": "ccord_test", "credit_card_account_id": card,
+                                                          "order_date": banking.TODAY.strftime("%m/%d/%Y")}
+    f = banking.filing_call(env.tools.db, user, plan, tid, increase_decided=True)
+    assert json.loads(f["arguments_json"])["card_action"] == "cancel_and_reissue"
 
 
 def test_a_filing_with_text_flags_is_refused_and_counted_as_differing_from_gold():

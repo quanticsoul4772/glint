@@ -7,6 +7,7 @@ is used.
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import date, datetime
 
@@ -220,15 +221,22 @@ FILING_TOOL = "file_credit_card_transaction_dispute_4829"
 # the customer a dispute was filed. A ready check names the call that files it.
 NOT_FILED = (f"Nothing is filed yet: this check files nothing. To file it, unlock {FILING_TOOL} "
              "(unlock_discoverable_agent_tool, once per conversation), then call it (call_discoverable_agent_tool) with "
-             "these arguments. The dispute is filed only when that call returns a dispute id; until then, do not tell "
-             "the customer it is filed.")
+             "arguments set to arguments_json exactly (a JSON string with real true/false values; add any you_supply "
+             "field to it). The dispute is filed only when that call returns a dispute id; until then, do not tell the "
+             "customer it is filed.")
 
 
-def filing_call(db, user_id: str, plan: dict, transaction_id: str) -> dict | None:
+def filing_call(db, user_id: str, plan: dict, transaction_id: str, increase_decided: bool = False) -> dict | None:
     """The filing of one planned dispute: the plan's values and the customer's record, with what the agent still
     supplies named; None when the plan does not have the transaction. `eligible_for_provisional_credit` is the plan's,
-    which counts the disputes filed ahead of it (check_dispute alone does not know the plan's order). A dispute the
-    plan files later names the one to file first, as the plan gate (procedure.dispute_plan.order) would."""
+    which counts the disputes filed ahead of it (check_dispute alone does not know the plan's order). Where the plan
+    gate (procedure.dispute_plan) would refuse the filing, the next step instead: a dispute the plan files later names
+    the one to file first, an entry with questions still open says to ask and plan again, and a plan holding disputes
+    for a credit limit increase says to decide it first (`increase_decided`: the enforcer's record).
+
+    `arguments_json` carries the arguments as a JSON string: τ² turns every bool and number in a tool result into a
+    string, and the filing tool stores what it is given, so a copy of `arguments` would file "True" where gold has
+    true and fail the task with no refusal (code review of #153, 2026-10-30)."""
     entry = next((e for e in plan.get("order", []) if e["transaction_id"] == transaction_id), None)
     if entry is None:
         return None
@@ -237,6 +245,11 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str) -> dict | Non
     if first != transaction_id:
         return {"filed": transaction_id in filed, "next_step": f"The plan files {first} before {transaction_id}: "
                 f"check and file {first} first." if first else f"{transaction_id} is already filed."}
+    if entry.get("ask_user"):
+        return {"filed": False, "next_step": f"The plan still needs the customer's answers: {entry['ask_user']} Ask "
+                f"them, then call {PLAN_TOOL} again with the answers and check this dispute again."}
+    if as_flag(plan.get("increase_first")) and not increase_decided:
+        return {"filed": False, "next_step": LIMIT_FIRST}
     user = db.users.data.get(user_id) or {}
     args = {"transaction_id": entry["transaction_id"], "user_id": user_id, "full_name": user.get("name"),
             "phone": user.get("phone_number"), "email": user.get("email"), "address": user.get("address"),
@@ -257,7 +270,8 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str) -> dict | Non
         still.append(f"card_last_4_digits: {entry.get('card_last_4_digits_from', CARD_DIGITS_HOW)}")
     if "resolution_requested" not in args:
         still.append("resolution_requested: what the customer asks for")
-    out = {"filed": False, "next_step": NOT_FILED, "tool": FILING_TOOL, "arguments": args}
+    out = {"filed": False, "next_step": NOT_FILED, "tool": FILING_TOOL, "arguments": args,
+           "arguments_json": json.dumps(args)}
     if still:
         out["you_supply"] = still
     return out
@@ -532,17 +546,21 @@ VERIFY_RULE = ("Verified when the customer gives any 2 of date of birth, email, 
 
 
 def _same(field: str, given, on_file) -> bool:
+    """Whether a value the customer gave is the record's: dates in either format, phone digits, an email exactly
+    (case and outer spaces aside: `_`, `-` and `+` tell addresses apart), an address word for word (case and
+    punctuation aside; an abbreviation does not match, the safe direction)."""
     if not given or not on_file:
         return False
     if field == "date_of_birth":
         try:
             return _date(str(given).strip()) == _date(str(on_file))
-        except ValueError:
+        except (ValueError, IndexError):  # "1990" or "5/3": _date reads value[4] (code review of #156)
             return False
     if field == "phone_number":
         return re.sub(r"\D", "", str(given))[-10:] == re.sub(r"\D", "", str(on_file))[-10:]
-    pattern = r"[a-z0-9@.]+" if field == "email" else r"[a-z0-9]+"  # case, spacing and punctuation differ
-    return re.findall(pattern, str(given).lower()) == re.findall(pattern, str(on_file).lower())
+    if field == "email":
+        return str(given).strip().lower() == str(on_file).strip().lower()
+    return re.findall(r"[a-z0-9]+", str(given).lower()) == re.findall(r"[a-z0-9]+", str(on_file).lower())
 
 
 def check_verification(db, user_id: str, given: dict) -> dict:
