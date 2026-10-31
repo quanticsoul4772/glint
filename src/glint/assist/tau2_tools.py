@@ -273,10 +273,14 @@ class BankingDecisionTools(DisputePlanTools):
 
         Returns:
             dict: card_action, eligible_for_provisional_credit, provisional_credit_criteria, purchase_date,
-            card_last_4_digits, amount, ask_user, ready.
+            card_last_4_digits, amount, ask_user, ready; when ready and planned, filing (the call that files it).
         """
-        return banking.check_dispute(self.db, user_id, credit_card_account_id, transaction_id, dispute_reason,
-                                     contacted_merchant, replacement_requested, other_requests)
+        out = banking.check_dispute(self.db, user_id, credit_card_account_id, transaction_id, dispute_reason,
+                                    contacted_merchant, replacement_requested, other_requests)
+        plan = getattr(self, "glint_plans", {}).get(user_id)
+        if out.get("ready") and plan and (filing := banking.filing_call(self.db, user_id, plan, transaction_id)):
+            out["filing"] = filing
+        return out
 
 
 _ASSISTED = {"retail": AssistedRetailTools, "airline": AssistedAirlineTools}
