@@ -629,6 +629,15 @@ def test_a_dispute_needs_the_customer_given_the_digits_tool_and_no_block_names_a
     _call(env, "plan_disputes", other_requests=[], user_id=gold[0]["user_id"], transactions=_items(gold))
     first = env.tools.glint_plans[gold[0]["user_id"]]["order"][0]
     assert banking.CARD_DIGITS_TOOL in first["card_last_4_digits_from"] and "card_last_4_digits" not in first
+    # v9 037 t2 described the tool without giving it: the text names the give call and the card it is for
+    txn = env.tools.db.credit_card_transaction_history.data[first["transaction_id"]]
+    card = banking.card_of_transaction(env.tools.db, gold[0]["user_id"], txn)
+    assert first["card_last_4_digits_from"] == banking.card_digits_how(card)
+    assert "first call give_discoverable_user_tool yourself" in first["card_last_4_digits_from"] and card in \
+        first["card_last_4_digits_from"]
+    check = banking.check_dispute(env.tools.db, gold[0]["user_id"], card, first["transaction_id"],
+                                  first["dispute_reason"])
+    assert check["card_last_4_digits"] is None and check["card_last_4_digits_from"] == banking.card_digits_how(card)
     filing = next(d for d in gold if d["transaction_id"] == first["transaction_id"])
     flag = {"eligible_for_provisional_credit": first["eligible_for_provisional_credit"] == "True"}
     not_given = _file(env, filing | flag)
