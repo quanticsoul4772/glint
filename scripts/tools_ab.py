@@ -132,7 +132,7 @@ from tau2.utils import llm_utils
 from glint import glimmer_serve, inspect, paths
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
-from glint.calllog import recording
+from glint.calllog import lean_saved, recording
 from glint.gates import Enforcer, EventLog
 from glint.gates import summary as gate_summary
 from glint.gates.rules import REQUIRED_GATES
@@ -774,8 +774,10 @@ def generate(cfg: dict) -> None:
 
     # every Glimmer call's token counts and timing, tied to its task and trial (the gate log's run context)
     recorded = recording(route, data / "calls.jsonl", context=lambda: tuple(run_context().values()))
-    llm_utils.completion = guarded(guarded(recorded, glim, only=("Muse-Glimmer",)), meta, RateLimiter(per_minute=120),
-                                   only=("muse-spark", "muse-wonder"))
+    # τ²'s checkpoint keeps each response's to_dict(): lean_saved leaves out the token ids and logprobs atem and the
+    # call log have already read (5.4 GB checkpoint, 2026-10-31)
+    llm_utils.completion = guarded(guarded(lean_saved(recorded), glim, only=("Muse-Glimmer",)), meta,
+                                   RateLimiter(per_minute=120), only=("muse-spark", "muse-wonder"))
     nl.DEFAULT_LLM_NL_ASSERTIONS, nl.DEFAULT_LLM_NL_ASSERTIONS_ARGS = SPARK, {**META, "temperature": 0.0}
     with ExitStack() as stack:
         endpoint = None

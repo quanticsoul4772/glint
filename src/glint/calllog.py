@@ -67,6 +67,44 @@ def call_record(response, messages: list[dict], model: str, context: Callable[[]
             "n_messages": len(messages), "prompt_tokens": int(prompt), "completion_tokens": int(completion)}
 
 
+# What a Glimmer response carries for atem and the call log but τ² need not keep: τ² saves every assistant message's
+# raw response (`raw_data=response.to_dict()`) in its checkpoint and rewrites the whole file after each run. On
+# 2026-10-31 the unseen tools arm's checkpoint reached 5.4 GB for 100 runs (about 54 MB a run; in six v9 runs these
+# fields were 24 of 25 MB): each save took minutes, finished runs queued behind it for over an hour, the GPU idled and
+# scaled down, and the driver held 28 GB of memory.
+BULKY_TOP = ("prompt_token_ids",)
+BULKY_CHOICE = ("logprobs",)
+BULKY_CHOICE_FIELDS = ("token_ids",)  # inside a choice's provider_specific_fields
+
+
+def lean_saved(completion_fn, only: str = "Muse-Glimmer"):
+    """Wrap a completion function so the saved copy of each response (its `to_dict()`, what τ² stores as raw_data)
+    leaves out the prompt's token ids, the per-token logprobs and the generated token ids. The response object keeps
+    them, so anything reading it live (atem's re-parse, the call log) is unchanged. Wrap outside both."""
+    def _call(*args, **kwargs):
+        response = completion_fn(*args, **kwargs)
+        if only in kwargs.get("model", "") and callable(getattr(response, "to_dict", None)):
+            full = response.to_dict
+
+            def lean(*a, **k):
+                d = full(*a, **k)
+                for key in BULKY_TOP:
+                    d.pop(key, None)
+                for choice in d.get("choices") or []:
+                    for key in BULKY_CHOICE:
+                        choice.pop(key, None)
+                    fields = choice.get("provider_specific_fields")
+                    if isinstance(fields, dict):
+                        for key in BULKY_CHOICE_FIELDS:
+                            fields.pop(key, None)
+                return d
+
+            object.__setattr__(response, "to_dict", lean)  # the instance's own to_dict; the class is untouched
+        return response
+
+    return _call
+
+
 def recording(completion_fn, path: Path, only: str = "Muse-Glimmer", context: Callable[[], tuple] | None = None):
     """Wrap a completion function so every call to a model whose name contains `only` is appended to `path`, with the
     task and trial `context()` names (tools_ab's current_run)."""
