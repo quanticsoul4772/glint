@@ -104,7 +104,8 @@ class RunEvents:
                  domain: str | None = None, on_halt: Callable[[str], None] | None = None,
                  activity: Callable[[], float] | None = None,
                  running: Callable[[], dict[tuple[str, str], tuple[float, int, int, float]]] | None = None,
-                 long_run_s: float = LONG_RUN_S, heartbeat_s: float = HEARTBEAT_S, gated: bool = True):
+                 long_run_s: float = LONG_RUN_S, heartbeat_s: float = HEARTBEAT_S, tools: bool = True,
+                 gated: bool = True):
         self.results_path, self.events_path, self.label = Path(results_path), Path(events_path), label
         # called once, with the reason, when a fail-fast pattern is seen (HALT_SAME_CAUSE, HALT_STALLS); the caller
         # stops the arm. Without it the pattern is still printed as a FAIL FAST line.
@@ -115,10 +116,11 @@ class RunEvents:
         # (2026-10-30: task_018 ran 61 min, 151 messages, unflagged), and a run τ² kept nothing of (a context
         # overflow) gets its calls, time and peak from here
         self.running, self.long_run_s, self.heartbeat_s = running, long_run_s, heartbeat_s
-        # an arm without Glint's gates and tools (Glimmer alone): its repeated wrong fields are the model's own, not a
-        # regression, and it has no gate refusals to audit (2026-10-31: the unseen base arm printed 10 "a regression
-        # would show this way" warnings and "0 of 22 passing runs went through a gate refusal")
-        self.gated = gated
+        # an arm without Glint's tools (Glimmer alone): its repeated wrong fields are the model's own, not a
+        # regression; an arm without gates has no gate refusals to audit. Separate: a tools arm of a set with gates
+        # off still has the tools (2026-10-31: the unseen base arm printed 10 "a regression would show this way"
+        # warnings and "0 of 22 passing runs went through a gate refusal")
+        self.tools, self.gated = tools, gated
         self.finished_runs: set[tuple[str, str]] = set()
         self._long_warned: set[tuple[str, str]] = set()
         self._last_beat = time.time()
@@ -193,7 +195,7 @@ class RunEvents:
             runs = self.field_runs.setdefault(field, [])
             runs.append(run)
             if len(runs) == 2:
-                why = ("a regression would show this way; check before the arm ends" if self.gated else
+                why = ("a regression would show this way; check before the arm ends" if self.tools else
                        "the model's own repeated error (no Glint tools in this arm), not a regression")
                 out.append(f"WARNING: repeated wrong field: {field} in 2 failed runs ({', '.join(runs)}); {why}")
         return out
