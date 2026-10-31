@@ -495,8 +495,8 @@ def test_an_increase_verdict_stays_open_until_its_decision_and_replays_unchanged
 
 def test_only_a_credit_limit_increase_holds_the_disputes():
     from glint.assist.banking import wants_increase
-    for named in (["credit limit increase"], ["raise my credit line"], ["CLI"], ["replacement card", "Credit-limit "
-                                                                                 "increase to $9,000"]):
+    for named in (["credit limit increase"], ["raise my credit line"], ["CLI"],
+                  ["replacement card", "Credit-limit increase to $9,000"]):
         assert wants_increase(named), named
     for other in (["temporary debit card limit increase"], ["raise my ATM withdrawal limit"],
                   ["increase my savings interest"], ["lower my credit limit"], ["replacement card"], [], None):
