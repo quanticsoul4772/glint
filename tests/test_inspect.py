@@ -509,3 +509,10 @@ def test_claims_count_debit_and_given_tools_and_skip_questions_and_conditionals(
                    "I will check if a replacement card has been ordered for you.",
                    "Once the dispute has been filed, you will get an email."):
         assert inspect.claims_not_done({"messages": [{"role": "assistant", "content": hedged}]}, []) == [], hedged
+    # still claims (review of the fix): a hedge in an earlier clause, a closing question, "e.g." inside the sentence
+    for claimed in ("I have not been able to reach billing, but your dispute has been filed successfully.",
+                    "No problem, your dispute has been filed successfully.",
+                    "There is no fee, and your replacement card has been ordered.",
+                    "Your dispute has been filed successfully, is there anything else?",
+                    "Your dispute (e.g. the $50 charge) has been filed successfully. Thanks!"):
+        assert inspect.claims_not_done({"messages": [{"role": "assistant", "content": claimed}]}, []), claimed
