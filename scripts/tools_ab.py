@@ -797,7 +797,7 @@ def generate(cfg: dict) -> None:
                                label=f"{arm} {domain}",
                                on_run=gate_summary.ErrorLimitAlerts() if enforcer is not None else None,
                                domain=domain, on_halt=fail_fast, activity=lambda: last_call[0],
-                               running=lambda: dict(run_clock))
+                               running=lambda: dict(run_clock), gated=enforcer is not None)
             truncated[0] = 0
             with clock_lock:
                 run_clock.clear()  # the arms share (task, trial) keys: the last arm's runs are not this arm's
