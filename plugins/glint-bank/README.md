@@ -4,7 +4,7 @@ A live τ²-bench bank (banking_knowledge) as MCP tools, with every write checke
 
 ## Launcher
 
-The plugin's server command is `uv run --script mcp/glint_bank.py`. The launcher installs the pinned dependencies through uv (Glint from its git tag, τ² from one commit) and runs `glint.bank.server` over stdio.
+The plugin's server command is `uv run --script mcp/glint_bank.py --decision-tools`. The launcher installs the pinned dependencies through uv (Glint from its git tag, τ² from one commit) and runs `glint.bank.server` over stdio. `--decision-tools` adds Glint's banking decision tools to the gated τ² tools: the budgeted `KB_search`, `KB_read`, `check_verification`, `check_credit_limit_increase` and `check_card_dispute`.
 
 Muse treats a plugin server as optional: when it does not start, Muse logs `transport_closed` and carries on without the tools. The launcher therefore writes why it stopped (uv missing, a failed install, a missing dependency, an exception, a nonzero exit) to stderr and to `$GLINT_BANK_HOME/launcher.log`, and exits nonzero. `scripts/muse_check.py` reads Muse's bootstrap log for a run and fails when an expected server did not reach `ready`.
 
@@ -17,7 +17,7 @@ Muse treats a plugin server as optional: when it does not start, Muse logs `tran
 Check an install without Muse or a model:
 
 ```
-GLINT_BANK_SOURCE=/path/to/glint uv run --script mcp/glint_bank.py --selftest
+GLINT_BANK_SOURCE=/path/to/glint uv run --script mcp/glint_bank.py --decision-tools --selftest
 ```
 
-It prints `{"ok": true, ...}` on stderr and exits 0 when the server lists its tools, loads task_054, reads the policy and runs one lookup.
+It prints `{"ok": true, ...}` on stderr and exits 0 when the server lists its tools (the decision tools among them), loads task_054, reads the policy and runs one lookup.

@@ -2,7 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = []
 # ///
-"""glint-bank launcher: `uv run --script mcp/glint_bank.py [--selftest | --decision-tools | brief TASK | log SID]`.
+"""glint-bank launcher: `uv run --script mcp/glint_bank.py [--decision-tools] [--selftest | brief TASK | log SID]`.
 
 Two stages, so that every failure is reported:
 1. This script, run by the plugin's command with no dependencies, writes the server stage as a uv script into
@@ -32,7 +32,7 @@ from collections import deque
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-GLINT_REQUIREMENT = "glint @ git+https://github.com/quanticsoul4772/glint@glint-bank-v0.2.0"
+GLINT_REQUIREMENT = "glint @ git+https://github.com/quanticsoul4772/glint@glint-bank-v0.2.1"
 TAU2_REQUIREMENT = ("tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench"
                     "@fc0055dc4e0a316c3f83133267fbd6faaa770992")
 PYTHON = ">=3.12,<3.13"
