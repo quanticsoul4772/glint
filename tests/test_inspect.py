@@ -492,3 +492,34 @@ def test_check_facts_name_a_ready_check_never_filed_and_a_verification_never_log
     assert inspect.check_facts(summary.run_calls({"messages": msgs}))["open_items_at_end"] == 1
     brief = inspect.facts_brief(inspect.run_facts({"messages": msgs[:4]}))
     assert "READY NEVER FILED: 1 ready checks" in brief and "VERIFIED NOT LOGGED" in brief and "OPEN AT END: 1" in brief
+
+
+def test_claims_count_debit_and_given_tools_and_skip_questions_and_conditionals():
+    # review 2026-10-31: all 9 claims flagged in the unseen base arm were false: debit-card tools ran (084, 086, 090),
+    # the cash-back dispute was given to the customer (017), and a question (046) and a conditional (048) matched
+    said = "Your dispute has been filed successfully. The replacement card has been ordered."
+
+    def sim(*extra):
+        return {"messages": [*extra, {"role": "assistant", "content": said}]}
+
+    assert inspect.claims_not_done(sim(), []) == ["dispute filed", "replacement ordered"]
+    debit = [call("call_discoverable_agent_tool", {"agent_tool_name": "file_debit_card_transaction_dispute_6281",
+                                                   "arguments": "{}"}, 0), reply(0, "Dispute filed"),
+             call("call_discoverable_agent_tool", {"agent_tool_name": "order_debit_card_5739", "arguments": "{}"}, 1),
+             reply(1, "Ordered")]
+    assert inspect.claims_not_done(sim(*debit), summary.run_calls({"messages": debit})) == []
+    given = [call("give_discoverable_user_tool", {"discoverable_tool_name": "submit_cash_back_dispute_0589"}, 0),
+             reply(0, "Tool given to user")]
+    calls = summary.run_calls({"messages": given})
+    assert inspect.claims_not_done(sim(*given), calls) == ["replacement ordered"]
+    for hedged in ("Can you confirm that no replacement card has been ordered?",
+                   "I will check if a replacement card has been ordered for you.",
+                   "Once the dispute has been filed, you will get an email."):
+        assert inspect.claims_not_done({"messages": [{"role": "assistant", "content": hedged}]}, []) == [], hedged
+    # still claims (review of the fix): a hedge in an earlier clause, a closing question, "e.g." inside the sentence
+    for claimed in ("I have not been able to reach billing, but your dispute has been filed successfully.",
+                    "No problem, your dispute has been filed successfully.",
+                    "There is no fee, and your replacement card has been ordered.",
+                    "Your dispute has been filed successfully, is there anything else?",
+                    "Your dispute (e.g. the $50 charge) has been filed successfully. Thanks!"):
+        assert inspect.claims_not_done({"messages": [{"role": "assistant", "content": claimed}]}, []), claimed

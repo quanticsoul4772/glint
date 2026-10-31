@@ -326,11 +326,16 @@ def run_facts(sim: dict) -> dict:
 # false success (completion asserted, the record shows otherwise) is 45-48% of failures in single-control domains
 # (arXiv 2606.09863); v6 039 t0/t1 and v7 031 t0/t1 said a dispute was filed and filed none, v7 051 t3 said the
 # increase was denied and filed no deny (2026-10-30).
+# Every banking tool that does what a claim names: the debit-card dispute and order and the cash-back dispute (a user
+# tool the agent gives) beside the credit-card ones; with the credit-card tools alone, all 9 claims flagged in the unseen
+# base arm were false (review, 2026-10-31)
+DISPUTE_TOOLS = (DISPUTE, "file_debit_card_transaction_dispute_6281", "submit_cash_back_dispute_0589")
+ORDER_TOOLS = (ORDER, "order_debit_card_5739")
 CLAIMS = (
-    ("dispute filed", (DISPUTE,), re.compile(
+    ("dispute filed", DISPUTE_TOOLS, re.compile(
         r"\bdisputes?\b[^\n]{0,120}?\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:filed|submitted)"
         r"|\bdisputes?\b[^\n]{0,120}?\b(?:filed|submitted)\s+successfully", re.IGNORECASE)),
-    ("replacement ordered", (ORDER,), re.compile(
+    ("replacement ordered", ORDER_TOOLS, re.compile(
         r"\b(?:replacement|new card)\b[^\n]{0,80}?\b(?:has|have)\s+been\s+(?:successfully\s+)?(?:ordered|placed)",
         re.IGNORECASE)),
     ("increase decided", (APPROVE, DENY_CLI), re.compile(
@@ -359,10 +364,41 @@ def _verdict(content: str) -> str | None:
 
 def claims_not_done(sim: dict, calls: list[dict]) -> list[str]:
     """The agent's claims of a write that never ran in the whole run (one entry per kind): a false success. A claim
-    made a turn before the write it announces is not counted (passing runs do that; tried on v6 and v7, 2026-10-30)."""
+    made a turn before the write it announces is not counted (passing runs do that; tried on v6 and v7, 2026-10-30).
+    A tool the agent gave the customer (give_discoverable_user_tool) counts as run: the customer runs it, and their
+    calls are not the agent's. A question or a conditional is not a claim: a sentence ending in "?", or with if,
+    whether, once, when, no, not or never before the match ("...that no replacement card has been ordered?", "if a
+    replacement card has been ordered")."""
     ran = {c["tool"] for c in calls if c["tool"] and not c["error"]}
+    ran |= {str(c["named"]) for c in calls if c["tool"] == "give_discoverable_user_tool" and c["named"]
+            and not c["error"]}
     texts = [str(m["content"]) for m in sim.get("messages") or [] if m.get("role") == "assistant" and m.get("content")]
-    return [name for name, tools, rx in CLAIMS if not ran & set(tools) and any(rx.search(t) for t in texts)]
+    # a sentence ends at . ! or ? before a space and a capital (or a quote or markdown), never inside "$167.34" or
+    # after "e.g." mid-sentence
+    sentences = [s for t in texts for s in re.split(r"(?<=[.!?])\s+(?=[A-Z\"'*])|\n+", t) if s.strip()]
+    return [name for name, tools, rx in CLAIMS if not ran & set(tools) and any(_claims(rx, s) for s in sentences)]
+
+
+HEDGE = re.compile(r"\b(?:if|whether|once|when|no|not|never)\b", re.IGNORECASE)
+CLAUSE_BREAK = re.compile(r"[,;:]|\b(?:but|and)\b", re.IGNORECASE)
+QUESTION_START = re.compile(r"^\W*(?:can|could|would|will|did|do|does|has|have|is|are|was|were|should)\b", re.IGNORECASE)
+
+
+def _claims(rx: re.Pattern, sentence: str) -> bool:
+    """Whether the sentence asserts what `rx` matches. Not a claim: a hedge word within the 6 words before the match
+    in its own clause ("if a replacement card has been ordered", "that no replacement card has been ordered"; "No
+    problem, your dispute has been filed" stays a claim), or a question: a sentence that opens with an auxiliary
+    verb, or ends in "?" with no clause break after the match ("..., is there anything else?" keeps the claim).
+    Review of the claim fix, 2026-10-31."""
+    m = rx.search(sentence)
+    if not m:
+        return False
+    clause = CLAUSE_BREAK.split(sentence[:m.start()])[-1]
+    if HEDGE.search(" ".join(clause.split()[-6:])):
+        return False
+    tail = sentence[m.end():].rstrip()
+    question = QUESTION_START.match(sentence) or (tail.endswith("?") and not re.search(r"[,;]", tail))
+    return not question
 
 
 def exposure_and_verdict(calls: list[dict]) -> dict:
