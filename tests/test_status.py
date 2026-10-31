@@ -110,3 +110,26 @@ def test_the_eta_leaves_out_runs_tau_kept_no_time_for(tmp_path, monkeypatch):
     monkeypatch.setattr(status, "LEDGER", tmp_path / "ledger.jsonl")
     text = "\n".join(status.report("x", {"data": data, "trials": 2, "save": "x", "concurrency": 2}))
     assert "~10 min left" in text  # 2 runs left x 600 s / 2 at a time
+
+
+def test_the_eta_names_the_runs_in_flight_from_the_call_log(tmp_path, monkeypatch):
+    # 2026-10-31: "~28 min left" from the finished runs' mean while 12 runs were 25-110 min old, 7 of them stuck
+    import status
+
+    data = tmp_path / "set"
+    data.mkdir()
+    (data / "tasks.json").write_text(json.dumps({"retail": ["1", "2", "3", "4"]}), encoding="utf-8")
+    now = time.time()
+    rows = [{"ts": now - 100, "label": "tools retail", "task_id": "1", "trial": 0, "outcome": "pass",
+             "duration_s": 600.0, "error": None}]
+    (data / "events.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    calls = [{"ts": now - 3600, "task_id": "2", "trial": "0"}, {"ts": now - 60, "task_id": "2", "trial": "0"},
+             {"ts": now - 1200, "task_id": "3", "trial": "0"}, {"ts": now - 30, "task_id": "3", "trial": "0"},
+             {"ts": now - 5000, "task_id": "4", "trial": "0"}, {"ts": now - 4000, "task_id": "4", "trial": "0"},
+             {"ts": now - 700, "task_id": "1", "trial": "0"}]
+    (data / "calls.jsonl").write_text("\n".join(json.dumps(c) for c in calls) + "\n{ half", encoding="utf-8")
+    monkeypatch.setattr(status, "LEDGER", tmp_path / "ledger.jsonl")
+    text = "\n".join(status.report("x", {"data": data, "trials": 1, "save": "x", "concurrency": 2, "arms": ("tools",)}))
+    # 2 and 3 are running; 4's last call is over 15 min old (finished and unsaved, or stuck); 1 finished
+    assert ("2 running (oldest 60 min, newest 20 min), 1 with no model call for over 15 min (finished and not yet "
+            "saved, or stuck; longest 67 min), 0 not started: at least ~0 min after the running ones end") in text

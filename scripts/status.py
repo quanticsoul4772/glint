@@ -53,6 +53,48 @@ def _modal_state() -> str:
     return ", ".join(f"{a['state']} ({a['tasks']} containers)" for a in live) or "stopped (0 containers)"
 
 
+RUNNING_IDLE_S = 900.0  # a run whose latest model call is older than this is not counted as running
+
+
+def _eta(data: Path, evs: list[dict], by_arm: dict, label: str, expected: int, mean: float, concurrency: int) -> str:
+    """Time left in an arm from the runs in flight, not only the finished runs' mean: on 2026-10-31 the mean said
+    "~28 min left" while the 12 runs in flight were 25-110 min old. A run in flight is a (task, trial) with a model
+    call in calls.jsonl since the arm began (the latest event of the other arms) and none of this arm's events, its
+    latest call within RUNNING_IDLE_S. The runs not started take the mean at the set's concurrency, after the
+    running ones; the running ones are named by count and age, since a long run's end cannot be told in advance."""
+    calls_path = data / "calls.jsonl"
+    left_new = max(0, expected - len(evs))
+    if not calls_path.exists():
+        return f"~{left_new * mean / max(1, concurrency) / 60:.0f} min left"
+    began = max((e["ts"] for other, rows in by_arm.items() if other != label for e in rows), default=0.0)
+    done = {(str(e["task_id"]), str(e["trial"])) for e in evs}
+    first, last = {}, {}
+    for row in calls_path.read_text(encoding="utf-8").splitlines():
+        try:
+            c = json.loads(row)
+        except json.JSONDecodeError:
+            continue  # a line being written
+        key = (str(c.get("task_id")), str(c.get("trial")))
+        if c.get("ts", 0) < began or key in done:
+            continue
+        first.setdefault(key, c["ts"])
+        last[key] = c["ts"]
+    now = time.time()
+    running = [now - first[k] for k in first if now - last[k] < RUNNING_IDLE_S]
+    # began and quiet since: finished but its save not yet in the checkpoint, or stuck (2026-10-31: 8 finished runs
+    # waited over an hour behind 5 GB checkpoint saves)
+    quiet = [now - last[k] for k in first if now - last[k] >= RUNNING_IDLE_S]
+    not_started = max(0, left_new - len(running) - len(quiet))
+    tail = not_started * mean / max(1, concurrency)
+    stuck = (f", {len(quiet)} with no model call for over {RUNNING_IDLE_S / 60:.0f} min (finished and not yet saved, "
+             f"or stuck; longest {max(quiet) / 60:.0f} min)" if quiet else "")
+    if not running:
+        return f"~{tail / 60:.0f} min left{stuck}"
+    return (f"{len(running)} running (oldest {max(running) / 60:.0f} min, newest {min(running) / 60:.0f} min){stuck}, "
+            f"{not_started} not started: at least ~{tail / 60:.0f} min after the running ones end (a run averages "
+            f"{mean / 60:.0f} min)")
+
+
 def report(name: str, cfg: dict) -> list[str]:
     data, lines = cfg["data"], []
     stamp_dir = cfg.get("stamp_dir", data)
@@ -80,8 +122,8 @@ def report(name: str, cfg: dict) -> list[str]:
                 # (2026-10-30 review); runs with a time give the mean, the rest are still counted as done
                 timed = [e["duration_s"] for e in evs if e.get("duration_s")] or [0.0]
                 mean = sum(timed) / len(timed)
-                left = (expected - len(evs)) * mean / max(1, cfg.get("concurrency", 8))
-                line += f"  last {time.strftime('%H:%M', time.localtime(evs[-1]['ts']))}, ~{left / 60:.0f} min left"
+                line += f"  last {time.strftime('%H:%M', time.localtime(evs[-1]['ts']))}, " + _eta(
+                    data, evs, by_arm, f"{arm} {domain}", expected, mean, cfg.get("concurrency", 8))
                 quiet = time.time() - evs[-1]["ts"]
                 if quiet > max(1200.0, 3 * mean):  # far longer than a run takes: stalled, or the event watch died
                     line += (f"  WARNING: no event for {quiet / 60:.0f} min: the run is stalled or its event watch "
