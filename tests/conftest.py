@@ -2,7 +2,7 @@
 
 Every test run gets its own empty workspace (GLINT_HOME), set before any glint module is imported: glint.paths reads
 it at import, so the spend ledger, the desk's pair log and run data all land in a temporary folder, never in the real
-<workspace> workspace. (2026-10-27: the desk tests had written 12 live-run start rows into the real
+workspace. (2026-10-27: the desk tests had written 12 live-run start rows into the real
 desk_sessions.jsonl, which then tripped the daily pair limit.)
 
 Fixtures build τ² results the way runs save them, so the analysis and export code is tested on known inputs.

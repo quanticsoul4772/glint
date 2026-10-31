@@ -32,30 +32,30 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   set's `strength` (low, medium or high; default medium) sets Glimmer's reasoning for every arm of that set.
 - `banking-p2-gated`: `banking-gated` again on the phase-1 + phase-2 gates, in its own folder (`banking-gated` ran
   on phase 1 only).
-- `banking-plan-gated`: `banking-p2-gated` again after dispute planning (#85, #86) and the plain-language deny
-  messages (#87), in its own folder. It measures the two changes together, not either one alone.
+- `banking-plan-gated`: `banking-p2-gated` again after dispute planning (PR 85, PR 86) and the plain-language deny
+  messages (PR 87), in its own folder. It measures the two changes together, not either one alone.
 - `banking-plan-terse-gated`: the tools arm of `banking-plan-gated` only, with `deny_wording` "terse": the same gates
-  and dispute planning, with each deny in #86's layout (Reason, Purpose, Fix, Verdict; the facts joined into the
+  and dispute planning, with each deny in PR 86's layout (Reason, Purpose, Fix, Verdict; the facts joined into the
   Reason line, no consequence line).
   Against `banking-plan-gated`'s tools arm it separates the messages from the planning (decision 2026-10-29). Set
   key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS).
 - `banking-plan-v2-gated`: the tools arm of `banking-plan-gated` only, after the incorrect_amount dispute became a
-  planned partial refund of the overcharge with the customer's choice winning and neutral asking (#101, #102). It is
+  planned partial refund of the overcharge with the customer's choice winning and neutral asking (PR 101, PR 102). It is
   compared with `banking-plan-gated`'s arms from the same day (its base arm runs no gates, so these changes cannot
   touch it).
-- `banking-plan-v3-gated`: the same tools arm after the card-digits gate (#109): a credit card dispute carries the
+- `banking-plan-v3-gated`: the same tools arm after the card-digits gate (PR 109): a credit card dispute carries the
   card's real last 4 digits, from the account or from the customer's own tool after it was given. Stopped at 3 of 48
-  runs: #109 checked the customer-side digits with a copy of τ²'s tool code and printed them in its block.
-- `banking-plan-v4-gated`: the same tools arm on #111: the card-digits gate checks only what the agent can see (the
+  runs: PR 109 checked the customer-side digits with a copy of τ²'s tool code and printed them in its block.
+- `banking-plan-v4-gated`: the same tools arm on PR 111: the card-digits gate checks only what the agent can see (the
   customer was given the tool; the digits on the account record), and no block names a digit.
-- `banking-plan-v5-gated`: the same tools arm on #117: plan_disputes tells the agent to look up the dispute history
+- `banking-plan-v5-gated`: the same tools arm on PR 117: plan_disputes tells the agent to look up the dispute history
   before filing (τ² scores that read where its gold makes it; 12 failed v4 runs skipped only it).
-- `banking-plan-v6-gated`: the same tools arm on the v6 fixes from the 23 failed v5 runs (#121-#129, research/
+- `banking-plan-v6-gated`: the same tools arm on the v6 fixes from the 23 failed v5 runs (PR 121-PR 129, research/
   v6-plan.md): card digits as 4 numerals and from the record when on file; other changes wait for an undecided
   increase; the plan asks the noticed date and keep-or-replace per card; the dispute-history read is required;
   replies list the open items; and KB_search/grep return excerpts within a context budget, with KB_read. The
   shorter search results reach this arm only (the compared base arm keeps τ²'s whole documents).
-- `banking-plan-v7-gated`: the same tools arm on v6 plus the two fixes for v6's regressions (#134): the plan refuses
+- `banking-plan-v7-gated`: the same tools arm on v6 plus the two fixes for v6's regressions (PR 134): the plan refuses
   a noticed date after τ²'s today and names today in its question, and its replacement step no longer says "first"
   (research/5-measurements/v6-diagnosis-2026-10-30.md).
 - `banking-plan-v8-gated`: the v7 tools arm plus the ask-first gate on expedited shipping (a fraud or theft
@@ -63,20 +63,20 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   from v7's largest remaining cause (research/5-measurements/v7-diagnosis-2026-10-30.md).
 - `banking-plan-v9-gated`: the v8 tools arm plus four fixes from v8's failures
   (research/5-measurements/v8-diagnosis-2026-10-30.md): an open item for an increase verdict with no decision filed
-  (#142), the card tier's fee in the expedite refusal (#143), an ask-once confirmation before an order to the address
-  on file (#144), and plan_disputes' other_requests holding disputes until a named increase is decided (#145). 052 is
+  (PR 142), the card tier's fee in the expedite refusal (PR 143), an ask-once confirmation before an order to the address
+  on file (PR 144), and plan_disputes' other_requests holding disputes until a named increase is decided (PR 145). 052 is
   tuned from here on (the open item came from its runs), leaving 050 and 053 untuned.
-- `banking-plan-v10-gated`: the v9 tools arm plus #148, #149 and four fixes from v9's failures
+- `banking-plan-v10-gated`: the v9 tools arm plus PR 148, PR 149 and four fixes from v9's failures
   (research/5-measurements/v9-next-causes-2026-10-30.md): a ready check_card_dispute names the filing call
-  (#153), the open-items footer names the filing tool (#154), the card-digits text names the give call (#155),
-  and check_verification (#156). 053 is tuned from here on (fix A came partly from its runs), leaving 050
+  (PR 153), the open-items footer names the filing tool (PR 154), the card-digits text names the give call (PR 155),
+  and check_verification (PR 156). 053 is tuned from here on (fix A came partly from its runs), leaving 050
   untuned.
 - `banking-unseen-gated`: the 59 banking train tasks outside banking12 whose gold makes a gated write, k=2, Glimmer
   alone (base, ungated) against the gated tools arm, Modal only. No live run of these tasks drove a fix, so this is
   the evidence on tasks the loop did not tune (their gold is in the gold replays and some gate tests).
-- `banking-unseen-v10-gated`: the same 59 tasks, k=2, the gated tools arm only, on the code after #158-#174: the
-  v10 fixes, the search that returns its best document whole and points back on a repeat (#171), and the lean
-  checkpoint (#170). Its "alone" column is `banking-unseen-gated`'s base arm (Glimmer alone is unchanged). It tests
+- `banking-unseen-v10-gated`: the same 59 tasks, k=2, the gated tools arm only, on the code after PR 158-PR 174: the
+  v10 fixes, the search that returns its best document whole and points back on a repeat (PR 171), and the lean
+  checkpoint (PR 170). Its "alone" column is `banking-unseen-gated`'s base arm (Glimmer alone is unchanged). It tests
   whether the search fix ends the step-limit losses of the unseen tools arm (41 of 108 runs; research note
   unseen-step-limit-2026-10-31.md).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
@@ -274,37 +274,37 @@ SETS = {
                                  "data": MEASURE / "tools_ab_banking12_plan_terse_gated",
                                  "out": RESULTS / "tools-ab-banking12-gated-plan-terse.json",
                                  "save": "tools-ab-banking12-gated-plan-terse"},
-    # The overcharge partial refund with customer choice and neutral asking (#101, #102; decision 2026-10-29)
+    # The overcharge partial refund with customer choice and neutral asking (PR 101, PR 102; decision 2026-10-29)
     "banking-plan-v2-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v2_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v2.json",
                               "save": "tools-ab-banking12-gated-plan-v2"},
-    # The card-digits gate (#109; decision 2026-10-29)
+    # The card-digits gate (PR 109; decision 2026-10-29)
     "banking-plan-v3-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v3_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v3.json",
                               "save": "tools-ab-banking12-gated-plan-v3"},
-    # The card-digits gate without the hidden check (#111; decision 2026-10-29)
+    # The card-digits gate without the hidden check (PR 111; decision 2026-10-29)
     "banking-plan-v4-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v4_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v4.json",
                               "save": "tools-ab-banking12-gated-plan-v4"},
-    # The plan's dispute-history hint (#117; decision 2026-10-29)
+    # The plan's dispute-history hint (PR 117; decision 2026-10-29)
     "banking-plan-v5-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v5_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v5.json",
                               "save": "tools-ab-banking12-gated-plan-v5"},
-    # The v6 fixes from the v5 failure diagnosis (#121-#129; decision 2026-10-30)
+    # The v6 fixes from the v5 failure diagnosis (PR 121-PR 129; decision 2026-10-30)
     "banking-plan-v6-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v6_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v6.json",
                               "save": "tools-ab-banking12-gated-plan-v6"},
-    # v6 plus the fixes for its two regressions (#134; decision 2026-10-30)
+    # v6 plus the fixes for its two regressions (PR 134; decision 2026-10-30)
     "banking-plan-v7-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v7_gated",
@@ -316,13 +316,13 @@ SETS = {
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v8_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v8.json",
                               "save": "tools-ab-banking12-gated-plan-v8"},
-    # v8 plus the four fixes from its failures (#142-#145; decision 2026-10-30)
+    # v8 plus the four fixes from its failures (PR 142-PR 145; decision 2026-10-30)
     "banking-plan-v9-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v9_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v9.json",
                               "save": "tools-ab-banking12-gated-plan-v9"},
-    # v9 plus #148, #149 and the four fixes from its failures (#153-#156; decision 2026-10-30)
+    # v9 plus PR 148, PR 149 and the four fixes from its failures (PR 153-PR 156; decision 2026-10-30)
     "banking-plan-v10-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
                                "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
                                "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v10_gated",
@@ -335,7 +335,7 @@ SETS = {
                              "data": MEASURE / "tools_ab_banking_unseen_gated",
                              "out": RESULTS / "tools-ab-banking-unseen-gated.json",
                              "save": "tools-ab-banking-unseen-gated"},
-    # the tools arm again on the code after #158-#174, against banking-unseen-gated's alone arm (decision 2026-10-31)
+    # the tools arm again on the code after PR 158-PR 174, against banking-unseen-gated's alone arm (decision 2026-10-31)
     "banking-unseen-v10-gated": {"tasks": banking_unseen_tasks, "trials": 2, "arms": ("tools",), "concurrency": 12,
                                  "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 15.0, "gates": True,
                                  "requires_modal": True, "data": MEASURE / "tools_ab_banking_unseen_v10_gated",

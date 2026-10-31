@@ -52,12 +52,12 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
     ("heldout", False, "Retail and airline, first held-out draw (now design data)", "design",
      ("Tasks drawn at random, excluding the tasks the tools were built from. The draw missed part of the failure "
       "inventory, so retail task 21 (already in it) is included. The two arms span four code commits (resumed runs). "
-      "The retail and airline tools were changed afterwards from these tasks' failures (commits aa1dadc and "
-      "ce7b242), so this draw is now design data and does not measure the shipped tools. Retail k=4, airline k=2. "
+      "The retail and airline tools were changed afterwards from these tasks' failures (commits b9abde9 and "
+      "7789817), so this draw is now design data and does not measure the shipped tools. Retail k=4, airline k=2. "
       "Glimmer on DeepInfra.")),
     ("banking", True, "Banking, untuned tasks (current tools)", "untuned",
      ("The 10 banking tasks with a dispute or credit-limit step that no tool change came from, on the current tools "
-      "(after commit ce7b242). The tools' rules were checked against these tasks' correct answers, so they are not "
+      "(after commit 7789817). The tools' rules were checked against these tasks' correct answers, so they are not "
       "fully held-out. By task: 3 improved, 7 tied, 0 worse (sign test p = 0.25). k=4. Glimmer on Modal."),
      lambda task: task not in TUNED_BANKING),
     ("banking", True, "Banking, tuned tasks (current tools)", "tuned",
@@ -67,11 +67,11 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
     ("banking-other", True, "Banking, untuned tasks (earlier tools)", "untuned",
      ("The banking tasks with a dispute or credit-limit step that no tool change came from. The tools' rules were "
       "checked against these tasks' correct answers, so they are not fully held-out. These runs predate the verdict "
-      "fixes of commit ce7b242 (2026-10-27 16:59). 2 improved vs 0 worse is a sign test of p = 0.5. k=2. Glimmer "
+      "fixes of commit 7789817 (2026-10-27 16:59). 2 improved vs 0 worse is a sign test of p = 0.5. k=2. Glimmer "
       "on Modal.")),
     ("banking-failures", True, "Banking, tuned tasks (earlier tools)", "tuned",
      ("Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their "
-      "runs. Do not read as general evidence. These runs predate the verdict fixes of commit ce7b242. k=4. Glimmer "
+      "runs. Do not read as general evidence. These runs predate the verdict fixes of commit 7789817. k=4. Glimmer "
       "on Modal.")),
     ("design", False, "Retail and airline, design tasks", "design",
      "The tasks the tools were built from. k=8. Glimmer on DeepInfra."),
