@@ -15,6 +15,8 @@ from tau2.registry import registry
 
 from glint.assist import airline, banking, kb, retail
 
+SEARCH_WARN = 60  # knowledge-base calls in one conversation before the run log warns (see _count_search)
+
 
 class AssistedRetailTools(RetailTools):
     @is_tool(ToolType.READ)
@@ -241,6 +243,7 @@ class BankingDecisionTools(DisputePlanTools):
         exactly (median 16 a run, up to 76; 2026-10-31). The toolkit lives for one conversation, so the record does
         too. The pointer names the earlier call by its number among all of this conversation's KB_search and grep
         calls, repeats included, so it matches the agent's own history."""
+        self._count_search()
         seen = self.__dict__.setdefault("_glint_searches", {})
         calls = self.__dict__["_glint_search_calls"] = self.__dict__.get("_glint_search_calls", 0) + 1
         text = str(query)
@@ -271,7 +274,25 @@ class BankingDecisionTools(DisputePlanTools):
         Returns:
             The document's title and the requested characters, with where the next page starts
         """
+        self._count_search()
         return kb.read_page(self._kb_pipeline, doc_id, offset)
+
+    def _count_search(self) -> None:
+        """One WARNING line, to stderr (the run log), when this conversation reaches SEARCH_WARN knowledge-base calls:
+        in banking-unseen-gated every tools-arm run that ran out of τ²'s 200 steps had made at least 72 (2026-10-31),
+        and the run log said nothing until each one ended. Named by τ²'s per-run log folder (task_<id>/sim_<id>)."""
+        n = self.__dict__["_glint_search_n"] = self.__dict__.get("_glint_search_n", 0) + 1
+        if n == SEARCH_WARN:
+            import sys
+
+            from tau2.utils import llm_utils
+
+            log_dir = llm_utils.llm_log_dir.get()
+            run = (f"{log_dir.parent.parent.name} {log_dir.parent.name}" if log_dir is not None
+                   else "a conversation")
+            print(f"WARNING: {run} has made {n} knowledge-base calls (KB_search, grep, KB_read); in "
+                  "banking-unseen-gated every run that ran out of τ²'s 200 steps had made at least 72",
+                  file=sys.stderr, flush=True)
 
     # GENERIC with mutates_state=True, like plan_disputes: τ²'s strict replay skips READ tools, and the enforcer records
     # this verdict for the open-items footer, so the replay must rebuild it. It never writes the database.
