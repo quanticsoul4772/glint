@@ -472,7 +472,7 @@ def test_manifest_names_files_that_exist_and_the_launcher_pins_its_dependencies(
     for cap in caps["commands"] + caps["reminders"]:
         assert (PLUGIN / cap["path"]).is_file()
     assert {t.removeprefix("mcp__plugin_glint_bank_b__") for t in caps["reminders"][0]["tools"]} <= {
-        t.name for t in bank.BankServer(tmp_path, sid="m").tool_list()}
+        t.name for t in bank.BankServer(tmp_path, decision_tools=True, sid="m").tool_list()}  # as the plugin starts it
     start = (PLUGIN / "commands" / "start.md").read_text(encoding="utf-8")
     assert "$ARGUMENTS" in start and bank.LOAD in start and bank.POLICY in start
     launcher = (PLUGIN / "mcp" / "glint_bank.py").read_text(encoding="utf-8")

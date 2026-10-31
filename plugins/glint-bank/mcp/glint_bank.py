@@ -2,7 +2,7 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = []
 # ///
-"""glint-bank launcher: `uv run --script mcp/glint_bank.py [--selftest | --decision-tools | brief TASK | log SID]`.
+"""glint-bank launcher: `uv run --script mcp/glint_bank.py [--decision-tools] [--selftest | brief TASK | log SID]`.
 
 Two stages, so that every failure is reported:
 1. This script, run by the plugin's command with no dependencies, writes the server stage as a uv script into
