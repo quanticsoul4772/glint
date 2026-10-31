@@ -546,17 +546,21 @@ VERIFY_RULE = ("Verified when the customer gives any 2 of date of birth, email, 
 
 
 def _same(field: str, given, on_file) -> bool:
+    """Whether a value the customer gave is the record's: dates in either format, phone digits, an email exactly
+    (case and outer spaces aside: `_`, `-` and `+` tell addresses apart), an address word for word (case and
+    punctuation aside; an abbreviation does not match, the safe direction)."""
     if not given or not on_file:
         return False
     if field == "date_of_birth":
         try:
             return _date(str(given).strip()) == _date(str(on_file))
-        except ValueError:
+        except (ValueError, IndexError):  # "1990" or "5/3": _date reads value[4] (code review of #156)
             return False
     if field == "phone_number":
         return re.sub(r"\D", "", str(given))[-10:] == re.sub(r"\D", "", str(on_file))[-10:]
-    pattern = r"[a-z0-9@.]+" if field == "email" else r"[a-z0-9]+"  # case, spacing and punctuation differ
-    return re.findall(pattern, str(given).lower()) == re.findall(pattern, str(on_file).lower())
+    if field == "email":
+        return str(given).strip().lower() == str(on_file).strip().lower()
+    return re.findall(r"[a-z0-9]+", str(given).lower()) == re.findall(r"[a-z0-9]+", str(on_file).lower())
 
 
 def check_verification(db, user_id: str, given: dict) -> dict:
