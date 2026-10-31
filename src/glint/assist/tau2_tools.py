@@ -290,8 +290,9 @@ class BankingDecisionTools(DisputePlanTools):
             log_dir = llm_utils.llm_log_dir.get()
             run = (f"{log_dir.parent.parent.name} {log_dir.parent.name}" if log_dir is not None
                    else "a conversation")
-            print(f"WARNING: {run} has made {n} knowledge-base searches; runs past about 70 ran out of τ²'s "
-                  "200 steps in banking-unseen-gated", file=sys.stderr, flush=True)
+            print(f"WARNING: {run} has made {n} knowledge-base calls (KB_search, grep, KB_read); in "
+                  "banking-unseen-gated every run that ran out of τ²'s 200 steps had made at least 72",
+                  file=sys.stderr, flush=True)
 
     # GENERIC with mutates_state=True, like plan_disputes: τ²'s strict replay skips READ tools, and the enforcer records
     # this verdict for the open-items footer, so the replay must rebuild it. It never writes the database.

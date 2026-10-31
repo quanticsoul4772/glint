@@ -110,4 +110,17 @@ def test_the_run_log_warns_once_when_a_conversation_reaches_the_search_limit(cap
     tools.use_tool("KB_read", doc_id="doc_credit_cards_credit_cards_(general)_018")
     tools.use_tool("KB_search", query="stolen card replacement")  # a repeat still counts as a call
     err = capsys.readouterr().err
-    assert err.count("WARNING: a conversation has made 3 knowledge-base searches") == 1
+    assert err.count("WARNING: a conversation has made 3 knowledge-base calls (KB_search, grep, KB_read)") == 1
+    # inside a τ² run the line names it by τ²'s per-run log folder
+    from pathlib import Path
+
+    from tau2.utils import llm_utils
+
+    token = llm_utils.llm_log_dir.set(Path("artifacts") / "task_task_050" / "sim_ab12" / "llm_debug")
+    try:
+        named = _env(True).tools
+        for _ in range(3):
+            named.use_tool("grep", pattern="fraud")
+    finally:
+        llm_utils.llm_log_dir.reset(token)
+    assert "WARNING: task_task_050 sim_ab12 has made 3 knowledge-base calls" in capsys.readouterr().err
