@@ -25,6 +25,7 @@ from pathlib import Path
 from glint import paths
 from glint.gates import summary as gate_summary
 from glint.gates import write_tools
+from glint.gates.rules import GATED_GENERIC
 from glint.runlog import FAILED_RUNS, outcome
 
 WRAPPER = gate_summary.WRAPPER
@@ -124,8 +125,10 @@ STATE_RULES = ("banking.cli.", "debit.", "banking.replacement", "banking.dispute
 # The plan gate holds a filing to the plan's values: a gold-identical filing refused there means the plan itself
 # differed from gold (v6 041 t1: the disputes were planned in batches), a refusal the plan caused.
 PLAN_RULES = ("procedure.dispute_plan.values",)
+# A refused call of a gated tool that is not a write (rules.GATED_GENERIC: transfer_to_human_agents): gold's writes
+# cannot judge it, so it is counted apart, never judged.
 KINDS = ("live_false_refusals", "plan_differs_from_gold", "state_differs", "held_for_precondition",
-         "differs_from_gold")
+         "differs_from_gold", "gated_tool")
 
 
 def live_refusals(domain: str, sim: dict) -> dict:
@@ -133,7 +136,8 @@ def live_refusals(domain: str, sim: dict) -> dict:
     write: differs_from_gold. A write identical to a gold write refused on: an order rule, held_for_precondition (gold
     takes that step first); a state rule, state_differs (the same arguments are wrong in this state); the plan's
     values, plan_differs_from_gold (the plan was wrong); any other rule, which judges the write's values against the
-    record, live_false_refusals. Train tasks only (gold is read)."""
+    record, live_false_refusals. A refused gated tool that is not a write: gated_tool, unjudged. Train tasks only
+    (gold is read)."""
     gold = gold_writes(domain, str(sim["task_id"]))
     out = {"refused": 0} | {kind: [] for kind in KINDS}
     for w in run_writes(sim, domain)["rejected"]:
@@ -153,6 +157,10 @@ def live_refusals(domain: str, sim: dict) -> dict:
         else:
             kind = "live_false_refusals"
         out[kind].append(row)
+    for c in gate_summary.run_calls(sim):
+        if c["tool"] in GATED_GENERIC.get(domain, ()) and c["deny"] is not None:
+            out["refused"] += 1
+            out["gated_tool"].append({"rule_id": c["deny"]["rule_id"], "tool": c["tool"], "index": c["index"]})
     return out
 
 
