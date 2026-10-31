@@ -10,6 +10,7 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+import splits
 from glint import paths
 from glint.atem import reparsing
 from glint.meter import Caps, Meter, guarded, litellm_callback
@@ -22,7 +23,7 @@ GLIMMER_ARGS = {"api_base": "https://api.deepinfra.com/v1/openai", "api_key": EN
                 "extra_body": {"top_k": 64, "chat_template_kwargs": {"reasoning_strength": "medium"}}}
 USER = "openai/muse-spark-1.3-contributor"
 USER_ARGS = {"api_base": "https://api.meta.ai/v1", "api_key": ENV["MODEL_API_KEY"], "temperature": 1.0}
-PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
+PARTITION = json.loads(splits.PARTITION.read_text())
 TASKS = PARTITION["retail"]["pilot"][:3]
 
 meter = Meter(Caps(meta_usd=0.5, gpu_usd=0.0), phase="m1-c2-rerun")

@@ -1,6 +1,6 @@
 """Gate labels: for every write Glimmer made in a recorded τ² run, would the decision tool have overruled it?
 
-research/3-project/activation-gate-design.md §2. Each run is replayed call by call in a fresh environment set to the
+Each run is replayed call by call in a fresh environment set to the
 task's initial state; just before each write, the matching decision tool (glint.assist) gives its verdict on the
 database at that moment. A write the verdict contradicts is a positive. Deterministic, no model.
 

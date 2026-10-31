@@ -1,7 +1,7 @@
 """The single label taxonomy for Glint (one-enum rule).
 
 Probe targets, gate decisions, eval metrics and dashboard tiles all read their label names from here.
-Rule numbering follows research/3-project/gap-G4G5-labels-data.md §G4.2 (retail policy).
+Rule numbering follows the order of τ²'s retail policy.
 """
 from enum import StrEnum
 

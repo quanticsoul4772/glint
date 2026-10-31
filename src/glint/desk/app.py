@@ -1,5 +1,5 @@
 """Glint Bank Desk: the same banking customer request, handled by Glimmer alone and by Glimmer with the Glint
-decision tools, side by side (research/3-project/demo-spec.md).
+decision tools, side by side.
 
 Replay mode: plays recorded runs from scenarios.json, so the page works with no GPU.
 Live mode (glint.desk.live): runs a task now, both panes at once, on the Glimmer endpoint (GLINT_GLIMMER_URL);

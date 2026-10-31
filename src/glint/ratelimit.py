@@ -1,4 +1,4 @@
-"""Shared token-bucket rate limiter (research/3-project/R4R9-rates-modal.md: one team-wide limiter at
+"""Shared token-bucket rate limiter (one team-wide limiter at
 120 RPM for Spark contributor, whose hard limit is 150 RPM per team, not per key)."""
 from __future__ import annotations
 

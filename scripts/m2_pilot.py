@@ -19,6 +19,7 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+import splits
 from glint import paths
 from glint.atem import generated_text, reparsing
 from glint.labeler import Labeler
@@ -29,17 +30,26 @@ from glint.ratelimit import RateLimiter
 ENV = dotenv_values(str(paths.ENV_FILE))
 DATA = paths.MEASURE / "m2"
 OUT = paths.RESULTS / "M2-pilot.json"
-PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
+PARTITION = json.loads(splits.PARTITION.read_text())
 RETAIL, AIRLINE = PARTITION["retail"]["pilot"], PARTITION["airline"]["pilot"]
 
 GLIMMER = "openai/meta-models/Muse-Glimmer-30B"
-META = {"api_base": "https://api.meta.ai/v1", "api_key": ENV["MODEL_API_KEY"], "temperature": 1.0}
+# keys are read without failing here, so importing this module (the analyses, the tests, --help) needs no secrets
+# file; every script that starts a run calls require_keys() first
+META = {"api_base": "https://api.meta.ai/v1", "api_key": ENV.get("MODEL_API_KEY"), "temperature": 1.0}
 SPARK = "openai/muse-spark-1.3-contributor"
 WONDER = "openai/muse-wonder-1.0"
 
 
+def require_keys(*names: str) -> None:
+    """Stop before a run that would call an API without its key (default: both keys these runs use)."""
+    missing = [n for n in names or ("MODEL_API_KEY", "DEEPINFRA_API_KEY") if not ENV.get(n)]
+    if missing:
+        raise SystemExit(f"a run needs {', '.join(missing)} in {paths.ENV_FILE}")
+
+
 def glimmer_args(strength):
-    return {"api_base": "https://api.deepinfra.com/v1/openai", "api_key": ENV["DEEPINFRA_API_KEY"],
+    return {"api_base": "https://api.deepinfra.com/v1/openai", "api_key": ENV.get("DEEPINFRA_API_KEY"),
             "temperature": 1.0, "top_p": 0.95, "logprobs": True, "top_logprobs": 5,
             "extra_body": {"top_k": 64, "chat_template_kwargs": {"reasoning_strength": strength}}}
 
@@ -149,5 +159,6 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--analyze"]:
         analyze()
     else:
+        require_keys()
         generate(sys.argv[1:] or list(RUNS))
         analyze()

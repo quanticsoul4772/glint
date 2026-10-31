@@ -12,6 +12,7 @@ from tau2.data_model.simulation import TextRunConfig
 from tau2.runner.batch import run_domain
 from tau2.utils import llm_utils
 
+import splits
 from glint import paths
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
@@ -21,7 +22,7 @@ AGENT = "openai/muse-spark-1.3-contributor"
 AGENT_ARGS = {"api_base": "https://api.meta.ai/v1", "api_key": ENV["MODEL_API_KEY"], "temperature": 1.0}
 USER = "openai/meta-models/muse-spark-open-1026"
 USER_ARGS = {"api_base": "https://inference.baseten.co/v1", "api_key": ENV["BASETEN_API_KEY"], "temperature": 1.0}
-PARTITION = json.loads((paths.RESULTS / "split-partition.json").read_text())
+PARTITION = json.loads(splits.PARTITION.read_text())
 TASKS = PARTITION["retail"]["pilot"][:2]
 
 meter = Meter(Caps(meta_usd=2.0, gpu_usd=0.0), phase="pre-m2-usersim")

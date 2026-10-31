@@ -10,6 +10,7 @@ from tau2.data_model.tasks import Task
 from tau2.environment.toolkit import ToolType
 from tau2.registry import registry
 
+import splits
 from glint import paths
 from glint.assist import banking
 from glint.gates import (
@@ -632,7 +633,7 @@ def test_no_gold_write_is_refused():
     assert sorted(f["task_id"] for r in reports for f in r["also_rejected"]) == ["105"]
     assert [r["tasks"] for r in reports] == [74, 30, 77]
     assert not {t.id for t in gate_replay.tasks_of("banking_knowledge")} & set(json.loads(
-        (paths.RESULTS / "split-partition-banking.json").read_text(encoding="utf-8"))["test_untouched"])
+        splits.BANKING.read_text(encoding="utf-8"))["test_untouched"])
     # task_005's gold verifies a placeholder user and changes an unverified user's email: denied by policy, listed
     assert sorted((f["task_id"], f["tool"]) for r in reports for f in r["placeholder_gold"]) == [
         ("task_005", "change_user_email"), ("task_005", "log_verification")]

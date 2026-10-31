@@ -1,12 +1,14 @@
 """Glimmer generation on Modal: an OpenAI-compatible vLLM endpoint on one A100-80GB, bf16, inside Modal's free credit.
 
-Research: research/3-project/modal-glimmer-generation.md. The weights are the ones the capture uses (Volume
+The weights are the ones the capture uses (Volume
 `glint-glimmer`, pinned revision); vLLM's compile cache lives in Volume `glint-vllm-cache`. The endpoint scales to zero
 after 2 idle minutes, never runs more than one container, and requires Modal proxy auth.
 
 Deploy (no GPU runs until a request arrives):  MODAL_CONFIG_PATH=... modal deploy src/glint/glimmer_serve.py
 Every GPU session goes through `session()`, which records container time in the meter and stops the app at the end.
-Inside a session, call `wait_ready()` before any model request (research/3-project/modal-serving-diagnosis.md).
+Inside a session, call `wait_ready()` before any model request: a request
+sent while vLLM still boots waits on the boot, and Modal answers a web request longer than 150 s with a
+redirect the client must follow (smoke test, 2026-10-27).
 """
 from __future__ import annotations
 

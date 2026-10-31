@@ -11,7 +11,7 @@ import time
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
 from headroom_pilot import DATA, DOMAINS, GLIMMER_MODELS, META_MODELS, RESULTS, select
-from m2_pilot import GLIMMER, META, SPARK, glimmer_args
+from m2_pilot import GLIMMER, META, SPARK, glimmer_args, require_keys
 from tau2.data_model.simulation import TextRunConfig
 from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
@@ -72,5 +72,6 @@ def analyze():
 
 if __name__ == "__main__":
     if sys.argv[1:] != ["--analyze"]:
+        require_keys()
         generate()
     analyze()

@@ -11,7 +11,7 @@ import time
 import litellm
 import tau2.evaluator.evaluator_nl_assertions as nl
 from headroom_pilot import DOMAINS, GLIMMER_MODELS, META_MODELS, select
-from m2_pilot import GLIMMER, META, SPARK, glimmer_args
+from m2_pilot import GLIMMER, META, SPARK, glimmer_args, require_keys
 from tau2.data_model.simulation import TextRunConfig
 from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
@@ -22,6 +22,7 @@ from glint.atem import reparsing
 from glint.meter import Caps, Meter, guarded, litellm_callback
 from glint.ratelimit import RateLimiter
 
+require_keys()
 task_id = sys.argv[1] if len(sys.argv) > 1 else select()["banking_knowledge"][0]
 stamp = time.strftime("%Y%m%d-%H%M%S")  # a fresh phase per run, so earlier runs are not summed in
 glim = Meter(Caps(meta_usd=1.0, gpu_usd=0.0), phase=f"costcheck-glimmer-{task_id}-{stamp}")

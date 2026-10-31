@@ -9,11 +9,12 @@ import json
 import sys
 from collections import Counter
 
-from m2_pilot import GLIMMER, META, SPARK, glimmer_args, install
+from m2_pilot import GLIMMER, META, SPARK, glimmer_args, install, require_keys
 from tau2.data_model.simulation import TextRunConfig
 from tau2.data_model.tasks import Task
 from tau2.runner.batch import run_tasks
 
+import splits
 from glint import paths
 from glint.meter import Caps, Meter
 from glint.twins import (
@@ -34,7 +35,7 @@ EARLY = " State this preference in your very first message, before anything else
 def build():
     db = json.loads((RETAIL / "db.json").read_text(encoding="utf-8"))
     tasks = {str(t["id"]): t for t in json.loads((RETAIL / "tasks.json").read_text(encoding="utf-8"))}
-    part = json.loads((paths.RESULTS / "split-partition.json").read_text())["retail"]
+    part = json.loads(splits.PARTITION.read_text())["retail"]
     order = sorted(part["pilot"] + part["fit"], key=lambda t: hashlib.sha256(f"twin-pilot:{t}".encode()).hexdigest())
     chosen, n_pay = [], 0
     for tid in order:
@@ -127,5 +128,6 @@ def analyze():
 
 if __name__ == "__main__":
     if sys.argv[1:] != ["--analyze"]:
+        require_keys()
         generate()
     analyze()

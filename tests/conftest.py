@@ -16,15 +16,13 @@ import tempfile
 from pathlib import Path
 
 # The workspace lives in the repo (on D:, gitignored), not in the system temp folder on C:, and is deleted when the
-# test session ends. It starts with the fixed inputs the run scripts read at import (the task split partitions).
+# test session ends.
 _ROOT = Path(__file__).resolve().parents[1]
 (_ROOT / ".pytest_home").mkdir(exist_ok=True)
 _HOME = Path(tempfile.mkdtemp(prefix="home-", dir=_ROOT / ".pytest_home"))
 atexit.register(shutil.rmtree, _HOME, ignore_errors=True)
-shutil.copytree(Path(__file__).resolve().parent / "data" / "home", _HOME, dirs_exist_ok=True)
-# m2_pilot reads its key from the workspace's secrets file at import; tests never call an API, so a placeholder
-(_HOME / ".env").write_text("MODEL_API_KEY=test-placeholder-not-a-key\nDEEPINFRA_API_KEY=test-placeholder-not-a-key\n",
-                            encoding="utf-8")
+# the split files live in the repo (splits/) and keys are read only when a run starts, so the workspace starts empty
+(_HOME / "research" / "5-measurements").mkdir(parents=True)
 os.environ["GLINT_HOME"] = str(_HOME)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 

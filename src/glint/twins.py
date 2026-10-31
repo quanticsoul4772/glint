@@ -7,7 +7,6 @@ two twins are built that differ in one decisive fact, the preference the user st
 A write contradicts the stated preference when its value differs from it. The label counts only if every stated
 phrase appeared, as a whole word, in a user turn before the call (the user simulator really said it), so no LLM
 decides a label. Alternatives that a gift card could not pay for are never offered (policy).
-Design and evidence: research/5-measurements/M2-twin-label-design.md.
 """
 from __future__ import annotations
 
