@@ -596,6 +596,7 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
                  "banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
                  "banking-plan-v5-gated", "banking-plan-v6-gated", "banking-plan-v7-gated",
                  "banking-plan-v8-gated", "banking-plan-v9-gated", "heldout2-gated"):
+        # banking-unseen-gated is k=2: tested in its own test below
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
@@ -751,3 +752,17 @@ def test_the_v2_and_v3_sets_are_the_plan_gated_tools_arm_again_in_their_own_fold
         k: plan[k] for k in ("tasks", "trials", "gates", "glimmer_usd", "requires_modal")}
     others = [cfg for n, cfg in tools_ab.SETS.items() if n != name]
     assert all(v2[k] != cfg.get(k) for cfg in others for k in ("data", "out", "save"))
+
+
+def test_the_unseen_set_is_the_59_gated_train_tasks_outside_banking12_with_both_arms():
+    import tools_ab
+
+    cfg = tools_ab.SETS["banking-unseen-gated"]
+    unseen = cfg["tasks"]()["banking_knowledge"]
+    split = set(json.loads(tools_ab.BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
+    assert len(unseen) == 59 and not set(unseen) & (split | set(tools_ab.banking_tasks()["banking_knowledge"]))
+    assert cfg["gates"] and cfg["trials"] == 2 and "arms" not in cfg  # base (alone, ungated) and tools (gated)
+    with pytest.raises(SystemExit, match="Modal only"):
+        tools_ab.for_backend(cfg, False)
+    others = [c for n, c in tools_ab.SETS.items() if n != "banking-unseen-gated"]
+    assert all(cfg[k] != c.get(k) for c in others for k in ("data", "out", "save"))
