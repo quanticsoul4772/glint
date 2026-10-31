@@ -595,7 +595,7 @@ def test_tools_ab_gates_only_where_the_set_says_so(tmp_path):
     for name in ("banking-gated", "banking-p2-gated", "banking-plan-gated", "banking-plan-terse-gated",
                  "banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
                  "banking-plan-v5-gated", "banking-plan-v6-gated", "banking-plan-v7-gated",
-                 "banking-plan-v8-gated", "heldout2-gated"):
+                 "banking-plan-v8-gated", "banking-plan-v9-gated", "heldout2-gated"):
         cfg = tools_ab.SETS[name]
         assert cfg["gates"] and cfg["trials"] == 4
         with pytest.raises(SystemExit, match="Modal only"):
@@ -741,7 +741,7 @@ def test_no_gate_message_carries_a_doubled_brace_from_a_plain_string_joined_to_a
 
 @pytest.mark.parametrize("name", ["banking-plan-v2-gated", "banking-plan-v3-gated", "banking-plan-v4-gated",
                                   "banking-plan-v5-gated", "banking-plan-v6-gated",
-                                  "banking-plan-v7-gated", "banking-plan-v8-gated"])
+                                  "banking-plan-v7-gated", "banking-plan-v8-gated", "banking-plan-v9-gated"])
 def test_the_v2_and_v3_sets_are_the_plan_gated_tools_arm_again_in_their_own_folders(name):
     import tools_ab
 
