@@ -85,7 +85,8 @@ def test_decision_tools_are_published_only_with_the_flag(tmp_path):
     off = {t.name for t in bank.BankServer(tmp_path, sid="a").tool_list()}
     listed = {t.name: t for t in bank.BankServer(tmp_path, decision_tools=True, sid="b").tool_list()}
     on = set(listed)
-    assert on - off == {"check_credit_limit_increase", "check_card_dispute", "check_verification", "KB_read"}
+    assert on - off == bank.DECISION_TOOLS == {"check_credit_limit_increase", "check_card_dispute",
+                                               "check_verification", "KB_read"}
     # GENERIC with mutates_state=True only so τ²'s replay rebuilds the verdict record: it never writes the bank
     check = listed["check_credit_limit_increase"].annotations
     assert check.read_only_hint and not check.destructive_hint
@@ -247,6 +248,23 @@ def test_selftest_round_trips_over_stdio_with_a_clean_stdout(capsys):
     assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 19  # 16 τ², plan_disputes, 2 server
 
 
+def test_selftest_with_the_decision_tools_lists_them(capsys):
+    """The plugin's server command passes --decision-tools; its self-test starts the server the same way."""
+    assert bank.main(["--decision-tools", "--selftest"]) == 0
+    report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
+    assert report["ok"] and bank.DECISION_TOOLS <= set(report["tools"]) and len(report["tools"]) == 23
+
+
+def test_selftest_with_the_decision_tools_fails_when_they_are_missing(monkeypatch, capsys):
+    async def gates_only(env, decision_tools):
+        return {"tools": [f"t{i}" for i in range(17)] + [bank.LOAD, bank.POLICY], "load_error": False,
+                "policy_error": False, "policy_chars": 1, "lookup_error": False}
+
+    monkeypatch.setattr(bank, "_selftest_round_trip", gates_only)
+    assert bank.selftest(decision_tools=False) == 0
+    assert bank.selftest(decision_tools=True) == 1
+
+
 def test_every_stdout_line_of_the_stdio_server_is_json_rpc(tmp_path):
     """The raw stdout of a stdio session: initialize, tools/list, load_scenario. The SDK client skips a line it cannot
     parse, so a round trip alone does not show a clean stdout; every line here must be a JSON-RPC message."""
@@ -282,7 +300,7 @@ def test_every_stdout_line_of_the_stdio_server_is_json_rpc(tmp_path):
 
 
 def test_selftest_fails_when_the_round_trip_does(monkeypatch, capsys):
-    async def broken(env):
+    async def broken(env, decision_tools):
         return {"tools": [], "load_error": True, "policy_error": False, "policy_chars": 0, "lookup_error": False}
 
     monkeypatch.setattr(bank, "_selftest_round_trip", broken)
@@ -450,7 +468,7 @@ def test_manifest_names_files_that_exist_and_the_launcher_pins_its_dependencies(
     manifest = json.loads((PLUGIN / ".muse-plugin" / "plugin.json").read_text(encoding="utf-8"))
     caps = manifest["capabilities"]
     assert manifest["name"] == "glint-bank" and caps["mcpServers"] == [
-        {"id": "b", "transport": "stdio", "command": ["uv", "run", "--script", "mcp/glint_bank.py"]}]
+        {"id": "b", "transport": "stdio", "command": ["uv", "run", "--script", "mcp/glint_bank.py", "--decision-tools"]}]
     for cap in caps["commands"] + caps["reminders"]:
         assert (PLUGIN / cap["path"]).is_file()
     assert {t.removeprefix("mcp__plugin_glint_bank_b__") for t in caps["reminders"][0]["tools"]} <= {

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "glint-bank",
   "displayName": "Glint Bank",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A live τ²-bench bank as MCP tools, with every write checked by Glint's policy gates before it runs.",
   "compat": {
     "source": "native",
@@ -26,7 +26,8 @@
           "uv",
           "run",
           "--script",
-          "mcp/glint_bank.py"
+          "mcp/glint_bank.py",
+          "--decision-tools"
         ]
       }
     ],

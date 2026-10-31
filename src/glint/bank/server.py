@@ -14,8 +14,8 @@ Run: python -m glint.bank.server [--decision-tools]    (stdio MCP server)
 - **Tools.** Generated from the toolkit: every visible τ² agent tool with its name, docstring and JSON schema, a
   read-only annotation on each tool that does not mutate state, and a destructive one on each WRITE tool. Plus the
   server's `load_scenario(task_id)` (fresh environment at the task's initial state) and `get_bank_policy`. Glint's
-  banking decision tools are left out unless `--decision-tools` is given: with them, the agent may check first and
-  never make the wrong write the demo shows being denied. `plan_disputes` is always published: the plan gate denies
+  banking decision tools (the search fix, KB_read and the check tools) are published with `--decision-tools`, which
+  the Muse plugin's server command passes; without the flag the server has the gates only. `plan_disputes` is always published: the plan gate denies
   every credit card dispute filed without its plan, so a client without the tool could file none. It is annotated
   read-only (it never changes the bank) although τ² types it as mutating so its evaluator replays it.
 - **Results.** A gate deny and a τ² tool error both return `is_error=true` with the message text (a deny carries the
@@ -66,6 +66,8 @@ DOMAIN = "banking_knowledge"
 RETRIEVAL = "bm25_grep"
 READ_ONLY_GENERIC = (PLAN_TOOL, "check_credit_limit_increase")
 LOAD, POLICY = "load_scenario", "get_bank_policy"
+# published only with --decision-tools (the search fix replaces KB_search's body; it adds no name)
+DECISION_TOOLS = frozenset({"check_credit_limit_increase", "check_card_dispute", "check_verification", "KB_read"})
 SERVER_NAME = "glint-bank"
 INSTRUCTIONS = ("A live bank (τ²-bench banking_knowledge). You are the bank's agent; the user is the customer. Call "
                 "get_bank_policy first and follow it. Every write is checked by a policy gate before it runs: a "
@@ -287,11 +289,13 @@ def show_log(sid: str, home: Path | None = None) -> str:
         events.close()
 
 
-async def _selftest_round_trip(env: dict) -> dict:
+async def _selftest_round_trip(env: dict, decision_tools: bool = False) -> dict:
     from mcp.client.client import Client
     from mcp.client.stdio import StdioServerParameters
 
-    params = StdioServerParameters(command=sys.executable, args=["-X", "utf8", "-m", "glint.bank.server"], env=env)
+    flags = ["--decision-tools"] if decision_tools else []
+    params = StdioServerParameters(command=sys.executable, args=["-X", "utf8", "-m", "glint.bank.server", *flags],
+                                   env=env)
     async with Client(params, read_timeout_seconds=120) as client:
         listed = await client.list_tools()
         loaded = await client.call_tool(LOAD, {"task_id": "task_054"})
@@ -301,15 +305,17 @@ async def _selftest_round_trip(env: dict) -> dict:
             "policy_chars": len(policy.content[0].text), "lookup_error": found.is_error}
 
 
-def selftest() -> int:
-    """Warm up (imports, the tasks, an environment), then start this server as a stdio subprocess and list its
-    tools, load task_054, read the policy and run one read. Its gate log goes to a temporary folder."""
+def selftest(decision_tools: bool = False) -> int:
+    """Warm up (imports, the tasks, an environment), then start this server as a stdio subprocess (with
+    --decision-tools when given) and list its tools, load task_054, read the policy and run one read. With the flag
+    the listing must hold the decision tools. Its gate log goes to a temporary folder."""
     n_tasks = len(tasks())
     build_environment(tasks()["task_054"])
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         env = dict(os.environ) | {"GLINT_BANK_HOME": tmp, "MUSE_SESSION_ID": "selftest"}
-        report = anyio.run(_selftest_round_trip, env)
-    ok = (n_tasks == 97 and len(report["tools"]) >= 18 and {LOAD, POLICY} <= set(report["tools"])
+        report = anyio.run(_selftest_round_trip, env, decision_tools)
+    expected = {LOAD, POLICY} | (DECISION_TOOLS if decision_tools else set())
+    ok = (n_tasks == 97 and len(report["tools"]) >= 18 and expected <= set(report["tools"])
           and not (report["load_error"] or report["policy_error"] or report["lookup_error"]))
     print(json.dumps({"ok": ok, "tasks": n_tasks} | report), file=sys.stderr)
     return 0 if ok else 1
@@ -327,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
     if args.selftest:
-        return selftest()
+        return selftest(args.decision_tools)
     if args.command in ("brief", "log"):
         if not args.target:
             parser.error(f"{args.command} needs a {'task id' if args.command == 'brief' else 'session id'}")
