@@ -87,3 +87,35 @@ def test_a_call_record_carries_the_attempts_simulation_id(tmp_path):
     call(model="Muse-Glimmer", messages=[{"role": "user", "content": "hi"}])
     row = json.loads(path.read_text(encoding="utf-8"))
     assert (row["task_id"], row["trial"], row["simulation_id"]) == ("task_041", 2, "sim-uuid")
+
+
+def test_the_saved_copy_of_a_glimmer_response_is_lean_and_the_live_one_is_whole(tmp_path):
+    # 2026-10-31: τ² saves each response's to_dict() in its checkpoint; prompt token ids and logprobs made the unseen
+    # tools arm's checkpoint 5.4 GB for 100 runs, and every save rewrote it
+    import litellm
+
+    from glint.calllog import lean_saved
+
+    def answer(**kwargs):
+        r = litellm.ModelResponse(choices=[{
+            "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop",
+            "logprobs": {"content": [{"token": "o", "logprob": -0.1, "top_logprobs": []}]},
+            "provider_specific_fields": {"token_ids": [5, 6], "other": 1}}])
+        r.prompt_token_ids = list(range(1000))  # vLLM's return_token_ids extra, as on the live response
+        return r
+
+    path = tmp_path / "calls.jsonl"
+    call = lean_saved(recording(answer, path, context=lambda: ("task_041", 2)))
+    r = call(model="openai/Muse-Glimmer-30B-modal", messages=[{"role": "user", "content": "hi"}])
+    saved = r.to_dict()
+    assert "prompt_token_ids" not in saved
+    assert saved["choices"][0]["logprobs"] == {"content": [{"token": "o"}]}  # the text stays for build_jobs.py
+    assert saved["choices"][0]["provider_specific_fields"] == {"other": 1}
+    assert saved["choices"][0]["message"]["content"] == "ok"
+    assert r.choices[0].logprobs is not None and len(r.prompt_token_ids) == 1000  # the live object is whole
+    assert json.loads(path.read_text(encoding="utf-8"))["prompt_tokens"] == 1000  # the call log read it first
+    # τ²'s message keeps the lean copy
+    message = AssistantMessage(role="assistant", content="ok", raw_data=r.to_dict())
+    assert "prompt_token_ids" not in json.dumps(message.model_dump())
+    other = lean_saved(answer)(model="openai/muse-spark", messages=[])
+    assert "prompt_token_ids" in other.to_dict()  # only Glimmer's responses are trimmed
