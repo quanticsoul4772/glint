@@ -314,7 +314,7 @@ SETS = {
     # the broad run on tasks no fix came from: Glimmer alone (ungated) vs the gated tools arm, k=2 (decision
     # 2026-10-30, v9 plan step 7)
     "banking-unseen-gated": {"tasks": banking_unseen_tasks, "trials": 2, "concurrency": 12, "glimmer_usd": 3.0,
-                             "meta_usd": 1.5, "gpu_usd": 24.0, "gates": True, "requires_modal": True,
+                             "meta_usd": 1.5, "gpu_usd": 30.0, "gates": True, "requires_modal": True,
                              "data": MEASURE / "tools_ab_banking_unseen_gated",
                              "out": RESULTS / "tools-ab-banking-unseen-gated.json",
                              "save": "tools-ab-banking-unseen-gated"},

@@ -762,6 +762,7 @@ def test_the_unseen_set_is_the_59_gated_train_tasks_outside_banking12_with_both_
     split = set(json.loads(tools_ab.BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
     assert len(unseen) == 59 and not set(unseen) & (split | set(tools_ab.banking_tasks()["banking_knowledge"]))
     assert cfg["gates"] and cfg["trials"] == 2 and "arms" not in cfg  # base (alone, ungated) and tools (gated)
+    assert cfg["gpu_usd"] == 30.0  # ~$24.4 projected from the test split per completed run (decision 2026-10-30)
     with pytest.raises(SystemExit, match="Modal only"):
         tools_ab.for_backend(cfg, False)
     others = [c for n, c in tools_ab.SETS.items() if n != "banking-unseen-gated"]
