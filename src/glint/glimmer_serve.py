@@ -87,6 +87,10 @@ def _stamp(request) -> None:
 # never ran (0 requests).
 _pool = {"requests": 0, "waited": 0, "longest_s": 0.0}
 _pool_lock = threading.Lock()
+# One POOL WAIT line per window: the first long wait is printed, later ones in the window are counted and named on the
+# next printed line (2026-10-30 review: 18 lines in 17 min of the unseen run, half of the alerts)
+POOL_WAIT_WINDOW_S = 300.0
+_wait_window = {"start": float("-inf"), "more": 0, "longest_s": 0.0}
 
 
 def pool_stats() -> dict:
@@ -97,6 +101,7 @@ def pool_stats() -> dict:
 def reset_pool_stats() -> None:
     with _pool_lock:
         _pool.update(requests=0, waited=0, longest_s=0.0)
+        _wait_window.update(start=float("-inf"), more=0, longest_s=0.0)
 
 
 def _report_pool_wait(response) -> None:
@@ -116,10 +121,20 @@ def _report_pool_wait(response) -> None:
             _pool["longest_s"] = max(_pool["longest_s"], wait)
         if wait <= POOL_WAIT_WARN_S:
             return
+        now = time.monotonic()
+        with _pool_lock:
+            if now - _wait_window["start"] < POOL_WAIT_WINDOW_S:
+                _wait_window["more"] += 1
+                _wait_window["longest_s"] = max(_wait_window["longest_s"], wait)
+                return
+            more, longest = _wait_window["more"], _wait_window["longest_s"]
+            _wait_window.update(start=now, more=0, longest_s=0.0)
         server = marks.get("answered", time.monotonic()) - marks["connected"]
+        earlier = (f" (+{more} more over {POOL_WAIT_WARN_S:.0f} s in the window before, longest {longest:.1f} s)"
+                   if more else "")
         print(f"[serve {time.strftime('%H:%M:%S')}] POOL WAIT {wait:.1f} s on {req.method} {req.url.host}"
-              f"{req.url.path}: queued for a connection (pool full) before it was sent; server time {server:.1f} s",
-              file=sys.stderr, flush=True)
+              f"{req.url.path}: queued for a connection (pool full) before it was sent; server time {server:.1f} s"
+              f"{earlier}", file=sys.stderr, flush=True)
     except Exception as e:  # noqa: BLE001  (a logging bug must not fail a model call; it is printed instead)
         print(f"[serve {time.strftime('%H:%M:%S')}] WARNING: the pool-wait log failed: {type(e).__name__}: {e}",
               file=sys.stderr, flush=True)

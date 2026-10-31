@@ -86,8 +86,11 @@ def simulate(task, filings: dict[str, dict]) -> dict:
     denied = []
     for e in plan["order"]:
         flag = str(e["eligible_for_provisional_credit"]) == "True"  # τ² shows tool-result bools as strings
+        # the plan reply's "24.56" is text; banking.dispute.types refuses a text amount, as τ²'s record would differ
         args = (filings[e["transaction_id"]] | {"eligible_for_provisional_credit": flag}
-                | {k: e[k] for k in ("resolution_requested", "partial_refund_amount") if k in e})
+                | ({"resolution_requested": e["resolution_requested"]} if "resolution_requested" in e else {})
+                | ({"partial_refund_amount": float(e["partial_refund_amount"])}
+                   if e.get("partial_refund_amount") is not None else {}))
         _call(env, "unlock_discoverable_agent_tool", agent_tool_name=DISPUTE)
         reply = _call(env, WRAPPER, agent_tool_name=DISPUTE, arguments=json.dumps(args))
         if "was NOT executed" in str(reply.content):

@@ -76,7 +76,10 @@ def report(name: str, cfg: dict) -> list[str]:
             if finished:
                 line += "  [arm done]"
             elif evs:
-                mean = sum(e["duration_s"] for e in evs) / len(evs)
+                # a context overflow keeps no time in τ²'s record (0 s): averaged in, it made the ETA too short
+                # (2026-10-30 review); runs with a time give the mean, the rest are still counted as done
+                timed = [e["duration_s"] for e in evs if e.get("duration_s")] or [0.0]
+                mean = sum(timed) / len(timed)
                 left = (expected - len(evs)) * mean / max(1, cfg.get("concurrency", 8))
                 line += f"  last {time.strftime('%H:%M', time.localtime(evs[-1]['ts']))}, ~{left / 60:.0f} min left"
                 quiet = time.time() - evs[-1]["ts"]

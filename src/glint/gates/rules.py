@@ -185,6 +185,17 @@ def _airline_passengers(db, a: dict) -> GateResult:
 
 def _dispute(db, a: dict) -> GateResult:
     source = "glint.assist.banking.check_dispute"
+    # τ² shows every bool and number to the model as text, and the filing tool stores what it is given: a "True" or
+    # "24.56" string changes the database τ² compares with gold's true / 24.56, and the task fails with no refusal
+    # (code review of #153, 2026-10-30; checked with the database hash)
+    typed = [f"{k} {a[k]!r} is text" for k in ("contacted_merchant", "eligible_for_provisional_credit",
+                                               "partial_refund_amount") if isinstance(a.get(k), str)]
+    if typed:
+        return deny("banking.dispute.types", source, "true/false and amounts must be sent as JSON values, not text",
+                    "Send contacted_merchant and eligible_for_provisional_credit as true or false and "
+                    "partial_refund_amount as a number (check_card_dispute's arguments_json has them typed).",
+                    {"fields": typed}, consequence="Nothing was filed. A dispute stored with text values does not "
+                    "match the record the bank keeps.", facts=typed)
     uid, tid = a.get("user_id", ""), a.get("transaction_id", "")
     txn = db.credit_card_transaction_history.data.get(tid, {})
     card = banking.card_of_transaction(db, uid, txn)
