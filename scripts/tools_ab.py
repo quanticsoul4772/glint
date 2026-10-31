@@ -66,6 +66,11 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   (#142), the card tier's fee in the expedite refusal (#143), an ask-once confirmation before an order to the address
   on file (#144), and plan_disputes' other_requests holding disputes until a named increase is decided (#145). 052 is
   tuned from here on (the open item came from its runs), leaving 050 and 053 untuned.
+- `banking-plan-v10-gated`: the v9 tools arm plus #148, #149 and four fixes from v9's failures
+  (research/5-measurements/v9-next-causes-2026-10-30.md): a ready check_card_dispute names the filing call
+  (#153), the open-items footer names the filing tool (#154), the card-digits text names the give call (#155),
+  and check_verification (#156). 053 is tuned from here on (fix A came partly from its runs), leaving 050
+  untuned.
 - `banking-unseen-gated`: the 59 banking train tasks outside banking12 whose gold makes a gated write, k=2, Glimmer
   alone (base, ungated) against the gated tools arm, Modal only. No live run of these tasks drove a fix, so this is
   the evidence on tasks the loop did not tune (their gold is in the gold replays and some gate tests).
@@ -89,6 +94,7 @@ Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|bank
                            banking-p2-gated|banking-plan-gated|banking-plan-terse-gated|banking-plan-v2-gated|
                            banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|
                            banking-plan-v6-gated|banking-plan-v7-gated|banking-plan-v8-gated|banking-plan-v9-gated|
+                           banking-plan-v10-gated|
                            banking-unseen-gated|
                            heldout2-gated|
                            banking-high-alone]
@@ -311,6 +317,12 @@ SETS = {
                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v9_gated",
                               "out": RESULTS / "tools-ab-banking12-gated-plan-v9.json",
                               "save": "tools-ab-banking12-gated-plan-v9"},
+    # v9 plus #148, #149 and the four fixes from its failures (#153-#156; decision 2026-10-30)
+    "banking-plan-v10-gated": {"tasks": banking_tasks, "trials": 4, "arms": ("tools",), "concurrency": 12,
+                               "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 8.0, "gates": True,
+                               "requires_modal": True, "data": MEASURE / "tools_ab_banking12_plan_v10_gated",
+                               "out": RESULTS / "tools-ab-banking12-gated-plan-v10.json",
+                               "save": "tools-ab-banking12-gated-plan-v10"},
     # the broad run on tasks no fix came from: Glimmer alone (ungated) vs the gated tools arm, k=2 (decision
     # 2026-10-30, v9 plan step 7)
     "banking-unseen-gated": {"tasks": banking_unseen_tasks, "trials": 2, "concurrency": 12, "glimmer_usd": 3.0,
