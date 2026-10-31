@@ -493,6 +493,24 @@ def test_an_increase_verdict_stays_open_until_its_decision_and_replays_unchanged
     assert env.tools.glint_verdicts == {} and "[open]" not in send("get_current_time", {}, "e").content
 
 
+def test_only_a_credit_limit_increase_holds_the_disputes():
+    from glint.assist.banking import wants_increase
+    for named in (["credit limit increase"], ["raise my credit line"], ["CLI"],
+                  ["replacement card", "Credit-limit increase to $9,000"]):
+        assert wants_increase(named), named
+    for other in (["temporary debit card limit increase"], ["raise my ATM withdrawal limit"],
+                  ["increase my savings interest"], ["lower my credit limit"], ["replacement card"], [], None):
+        assert not wants_increase(other), other
+
+
+def test_the_no_plan_refusal_spells_the_plan_call_with_other_requests():
+    env, task, _ = _bank("task_054")
+    dispute = next(json.loads(a.arguments["arguments"]) for a in task.evaluation_criteria.actions
+                   if _name(a) == rules.DISPUTE)
+    result = proc.dispute_plan(env.tools, dispute)
+    assert result.rule_id == "procedure.dispute_plan.none" and "other_requests=[" in result.fix
+
+
 def test_a_plan_naming_an_increase_holds_the_disputes_until_the_increase_is_decided():
     # banking-plan-v8-gated 054 trial 3 filed the dispute first; the increase was then denied for the pending dispute
     env, task, _ = _bank("task_054")

@@ -418,7 +418,7 @@ def _refused_run() -> dict:
     args = dict(gold()[1]["args"])
     msgs = []
     for i, rule in enumerate(("procedure.lookups", "banking.dispute", "procedure.dispute_plan.values",
-                              "banking.new_rule", "procedure.dispute_plan.ask")):
+                              "banking.new_rule", "banking.replacement.address_ask")):
         msgs += [hidden(DISPUTE, args, i), reply(i, deny(rule, "refused", "fix"), error=True)]
     flipped = args | {"eligible_for_provisional_credit": not args["eligible_for_provisional_credit"]}
     msgs += [hidden(DISPUTE, flipped, 5), reply(5, deny("banking.dispute", "differs", DISPUTE_FIX), error=True)]
@@ -430,7 +430,7 @@ def _refused_run() -> dict:
 def test_live_refusals_sort_each_gate_refusal_against_gold():
     r = inspect.live_refusals(DOMAIN, _refused_run())
     assert r["refused"] == 6  # the environment's rejection is not a gate refusal
-    assert [x["rule_id"] for x in r["held_for_precondition"]] == ["procedure.lookups", "procedure.dispute_plan.ask"]
+    assert [x["rule_id"] for x in r["held_for_precondition"]] == ["procedure.lookups", "banking.replacement.address_ask"]
     assert [x["rule_id"] for x in r["state_differs"]] == ["banking.dispute"]
     assert [x["rule_id"] for x in r["plan_differs_from_gold"]] == ["procedure.dispute_plan.values"]
     assert [x["rule_id"] for x in r["live_false_refusals"]] == ["banking.new_rule"]

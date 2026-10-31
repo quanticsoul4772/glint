@@ -339,8 +339,8 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
     if plan is None:
         return deny("procedure.dispute_plan.none", PLAN_SOURCE, "no dispute plan was made for this customer in this "
                     "conversation", f"Call {PLAN_TOOL}(user_id, transactions=[{{transaction_id, dispute_reason, "
-                    "contacted_merchant, issue_noticed_date, card_action} for EVERY transaction the customer wants disputed]), then "
-                    "file the "
+                    "contacted_merchant, issue_noticed_date, card_action} for EVERY transaction the customer wants "
+                    "disputed], other_requests=[the customer's other requests not done yet, [] if none]), then file the "
                     "disputes in its order with its eligible_for_provisional_credit values.",
                     {"user_id": user, "transaction_id": tid},
                     consequence=f"{CREDIT_ORDER} Plan every dispute the customer asked for in one call.",
@@ -349,8 +349,9 @@ def dispute_plan(toolkit, a: dict) -> GateResult:
         return deny("procedure.dispute_plan.increase_first", PLAN_SOURCE, "the customer also asked for a credit limit "
                     "increase, and no increase was approved or denied for them in this conversation yet",
                     "Do the credit limit increase first: submit it, the required lookups, then approve or deny. Then "
-                    f"file the disputes. If the customer no longer wants the increase, call {PLAN_TOOL} again with "
-                    "other_requests without it.", {"user_id": user, "transaction_id": tid},
+                    f"file the disputes. If the customer no longer wants the increase, or it cannot be decided "
+                    "(check_credit_limit_increase gives no approve or deny verdict), call "
+                    f"{PLAN_TOOL} again with other_requests without it.", {"user_id": user, "transaction_id": tid},
                     consequence="A pending dispute fails the increase (credit_card_account_logistics_005 criterion "
                     "3), so the increase is decided first.",
                     facts=[f"the {PLAN_TOOL} call for {user} named a credit limit increase in other_requests",
