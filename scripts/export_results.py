@@ -30,8 +30,8 @@ GATED_NOTE = ("Glint's decision tools with every write gated (a denied write doe
               "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
     ("banking-plan-v9-gated", True, "Banking, untuned tasks, write gates enforced (v9)", "untuned",
-     ("Tasks 050 and 053, which no gate, plan or open-item change came from. 053 fails with and without Glint on the "
-      "simulated customer's answers; two tasks cannot reach p < 0.05 by sign test. " + GATED_NOTE),
+     ("Tasks 050 and 053, which no gate, plan or open-item change came from. 053's failures are likely the simulated "
+      "customer's answers (not checked); two tasks cannot reach p < 0.05 by sign test. " + GATED_NOTE),
      lambda task: task not in TUNED_GATES),
     ("banking-plan-v9-gated", True, "Banking, tuned tasks, write gates enforced (v9)", "tuned",
      ("Tasks 031, 037-041, 051, 052, 054 and 081: the gates, the dispute plan and the open items were shaped by "
