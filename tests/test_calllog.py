@@ -108,7 +108,8 @@ def test_the_saved_copy_of_a_glimmer_response_is_lean_and_the_live_one_is_whole(
     call = lean_saved(recording(answer, path, context=lambda: ("task_041", 2)))
     r = call(model="openai/Muse-Glimmer-30B-modal", messages=[{"role": "user", "content": "hi"}])
     saved = r.to_dict()
-    assert "prompt_token_ids" not in saved and "logprobs" not in saved["choices"][0]
+    assert "prompt_token_ids" not in saved
+    assert saved["choices"][0]["logprobs"] == {"content": [{"token": "o"}]}  # the text stays for build_jobs.py
     assert saved["choices"][0]["provider_specific_fields"] == {"other": 1}
     assert saved["choices"][0]["message"]["content"] == "ok"
     assert r.choices[0].logprobs is not None and len(r.prompt_token_ids) == 1000  # the live object is whole

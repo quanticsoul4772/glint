@@ -73,13 +73,15 @@ def call_record(response, messages: list[dict], model: str, context: Callable[[]
 # fields were 24 of 25 MB): each save took minutes, finished runs queued behind it for over an hour, the GPU idled and
 # scaled down, and the driver held 28 GB of memory.
 BULKY_TOP = ("prompt_token_ids",)
-BULKY_CHOICE = ("logprobs",)
 BULKY_CHOICE_FIELDS = ("token_ids",)  # inside a choice's provider_specific_fields
+# a choice's logprobs keep each generated token's text only: scripts/build_jobs.py and m1_prefix_check.py rebuild the
+# generated text from it (review, 2026-10-31); its numbers and top_logprobs go
 
 
 def lean_saved(completion_fn, only: str = "Muse-Glimmer"):
     """Wrap a completion function so the saved copy of each response (its `to_dict()`, what τ² stores as raw_data)
-    leaves out the prompt's token ids, the per-token logprobs and the generated token ids. The response object keeps
+    leaves out the prompt's token ids, the logprob numbers (each generated token's text stays) and the generated
+    token ids. The response object keeps
     them, so anything reading it live (atem's re-parse, the call log) is unchanged. Wrap outside both."""
     def _call(*args, **kwargs):
         response = completion_fn(*args, **kwargs)
@@ -91,8 +93,10 @@ def lean_saved(completion_fn, only: str = "Muse-Glimmer"):
                 for key in BULKY_TOP:
                     d.pop(key, None)
                 for choice in d.get("choices") or []:
-                    for key in BULKY_CHOICE:
-                        choice.pop(key, None)
+                    logprobs = choice.get("logprobs")
+                    if isinstance(logprobs, dict) and isinstance(logprobs.get("content"), list):
+                        choice["logprobs"] = {"content": [{"token": t.get("token")} for t in logprobs["content"]
+                                                          if isinstance(t, dict)]}
                     fields = choice.get("provider_specific_fields")
                     if isinstance(fields, dict):
                         for key in BULKY_CHOICE_FIELDS:
