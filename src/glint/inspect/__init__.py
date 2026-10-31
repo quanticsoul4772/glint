@@ -125,6 +125,9 @@ STATE_RULES = ("banking.cli.", "debit.", "banking.replacement", "banking.dispute
 # The plan gate holds a filing to the plan's values: a gold-identical filing refused there means the plan itself
 # differed from gold (v6 041 t1: the disputes were planned in batches), a refusal the plan caused.
 PLAN_RULES = ("procedure.dispute_plan.values",)
+# Rules that refuse a value's type: "True" for true looks like gold's write once normalized, but τ² compares the stored
+# record exactly, so the write does differ from gold (banking.dispute.types, 2026-10-30)
+TYPE_RULES = ("banking.dispute.types",)
 # A refused call of a gated tool that is not a write (rules.GATED_GENERIC: transfer_to_human_agents): gold's writes
 # cannot judge it, so it is counted apart, never judged.
 KINDS = ("live_false_refusals", "plan_differs_from_gold", "state_differs", "held_for_precondition",
@@ -146,7 +149,8 @@ def live_refusals(domain: str, sim: dict) -> dict:
         out["refused"] += 1
         row = {"rule_id": w["rule_id"], "tool": w["tool"], "index": w["index"]}
         rule = str(w["rule_id"])
-        if not any(g["tool"] == w["tool"] and not _differing(g["args"], w["args"]) for g in gold):
+        if rule in TYPE_RULES or not any(g["tool"] == w["tool"] and not _differing(g["args"], w["args"])
+                                         for g in gold):
             kind = "differs_from_gold"
         elif rule.startswith(PRECONDITION_RULES):
             kind = "held_for_precondition"
