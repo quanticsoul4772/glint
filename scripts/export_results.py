@@ -13,26 +13,30 @@ from loguru import logger
 
 logger.remove()  # τ² logs its registry at DEBUG on import
 
+import by_task
 import tools_ab  # after the log setup above
 
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "results.json"
 TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading these tasks' runs
-# the gates and the dispute plan were shaped by these tasks' runs or gold (by_task.TUNED)
-TUNED_GATES = {"task_037", "task_038", "task_039", "task_040", "task_041", "task_054", "task_081"}
+# the gates, the dispute plan and the open items were shaped by these tasks' runs or gold: 037-041, 054, 081, and
+# since 2026-10-30 031, 051 and 052
+TUNED_GATES = set(by_task.TUNED)
 # a tools-only set -> the set whose base arm it is compared with (same tasks, trials and seeds; checked in main)
-BASE_FROM = {"banking-plan-v5-gated": "banking-plan-gated"}
-GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on #117, against the "
-              "ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Four earlier gated "
-              "versions are in docs/results.md; this is the latest, and also the best of the five on the untuned "
-              "tasks, all against one baseline draw. k=4. Glimmer on Modal.")
+BASE_FROM = {"banking-plan-v9-gated": "banking-plan-gated"}
+GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on the code at #147, "
+              "against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight "
+              "earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is "
+              "compared with one baseline draw. Later changes (#148, #149: refusal wording and which requests count "
+              "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
-    ("banking-plan-v5-gated", True, "Banking, untuned tasks, write gates enforced", "untuned",
-     ("Tasks 031 and 050-053, which no gate or plan change came from. " + GATED_NOTE),
+    ("banking-plan-v9-gated", True, "Banking, untuned tasks, write gates enforced (v9)", "untuned",
+     ("Tasks 050 and 053, which no gate, plan or open-item change came from. 053 fails with and without Glint on the "
+      "simulated customer's answers; two tasks cannot reach p < 0.05 by sign test. " + GATED_NOTE),
      lambda task: task not in TUNED_GATES),
-    ("banking-plan-v5-gated", True, "Banking, tuned tasks, write gates enforced", "tuned",
-     ("Tasks 037-041, 054 and 081: the gates and the dispute plan were shaped by their runs and correct answers "
-      "(040 and 041 went from 0/4 to 4/4 and 3/4 after #117, which came from their failures). Do not read as general "
-      "evidence. " + GATED_NOTE),
+    ("banking-plan-v9-gated", True, "Banking, tuned tasks, write gates enforced (v9)", "tuned",
+     ("Tasks 031, 037-041, 051, 052, 054 and 081: the gates, the dispute plan and the open items were shaped by "
+      "their runs and correct answers (052 went from 0/4 in v7 and v8 to 3/4 after the open item for an unfiled "
+      "increase verdict, which came from its failures). Do not read as general evidence. " + GATED_NOTE),
      lambda task: task in TUNED_GATES),
     ("banking-test", True, "Banking test split, read once (current tools, no gates)", "held-out",
      ("τ²'s 20 untouched banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute "
