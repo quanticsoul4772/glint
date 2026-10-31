@@ -377,11 +377,12 @@ def test_replies_carry_the_open_items_and_replay_them_unchanged():
     card = json.loads(plan.content)["card_actions"][0]["credit_card_account_id"]
     read = send("get_current_time").content
     assert f"[open] disputes planned for {user} and not filed yet, in the plan's order: " + ", ".join(
-        d["transaction_id"] for d in gold) in read
+        d["transaction_id"] for d in gold) + f". A dispute is filed only when {rules.DISPUTE} (unlock it, then call " \
+        "it) returns a dispute id.\n" in read
     assert f"[open] {card}: the customer chose to cancel it and get a new one; {banking.ORDER_TOOL}" in read
     send("unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
     filed = send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[0]))
-    assert _ran(filed) and ", ".join(d["transaction_id"] for d in gold[1:]) + "\n" in filed.content
+    assert _ran(filed) and ", ".join(d["transaction_id"] for d in gold[1:]) + ". A dispute is filed" in filed.content
     denied = send(WRAPPER, agent_tool_name=rules.DISPUTE, arguments=json.dumps(gold[5]))
     assert _denied(denied, "procedure.dispute_plan.order") and "[open]" not in denied.content
     replay = constructor(retrieval_variant="bm25_grep", task=task)

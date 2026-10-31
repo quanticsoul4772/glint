@@ -60,6 +60,7 @@ from glint.gates.rules import (
     ADDRESS_ASK,
     APPROVE,
     DENY,
+    DISPUTE,
     EXPEDITE_ASK,
     GATED_GENERIC,
     REQUIRED_GATES,
@@ -83,8 +84,11 @@ def _open_items(tools) -> list[str]:
         filed = {r.get("transaction_id") for r in db.transaction_disputes.data.values() if r.get("user_id") == user}
         unfiled = [str(e["transaction_id"]) for e in plan.get("order", []) if e["transaction_id"] not in filed]
         if unfiled:
+            # banking-plan-v9-gated: in 7 failed runs this item was on every check_card_dispute reply, and the agent
+            # told the customer disputes were filed without ever unlocking the filing tool
             items.append(f"[open] disputes planned for {user} and not filed yet, in the plan's order: "
-                         f"{', '.join(unfiled)}")
+                         f"{', '.join(unfiled)}. A dispute is filed only when {DISPUTE} (unlock it, then call it) "
+                         "returns a dispute id.")
         for c in plan.get("card_actions", []):
             card = str(c.get("credit_card_account_id", ""))
             if c.get("card_action") == "cancel_and_reissue" and not replacements_today(db, card):
