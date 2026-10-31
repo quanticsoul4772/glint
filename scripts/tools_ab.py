@@ -74,6 +74,11 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 - `banking-unseen-gated`: the 59 banking train tasks outside banking12 whose gold makes a gated write, k=2, Glimmer
   alone (base, ungated) against the gated tools arm, Modal only. No live run of these tasks drove a fix, so this is
   the evidence on tasks the loop did not tune (their gold is in the gold replays and some gate tests).
+- `banking-unseen-v10-gated`: the same 59 tasks, k=2, the gated tools arm only, on the code after #158-#174: the
+  v10 fixes, the search that returns its best document whole and points back on a repeat (#171), and the lean
+  checkpoint (#170). Its "alone" column is `banking-unseen-gated`'s base arm (Glimmer alone is unchanged). It tests
+  whether the search fix ends the step-limit losses of the unseen tools arm (41 of 108 runs; research note
+  unseen-step-limit-2026-10-31.md).
 - `banking-gated`, `heldout2-gated`: the same tasks, k and caps as `banking` and `heldout2`, with the tools arm ENFORCING the write gates (glint.gates, decision 2026-10-28): every assistant
   write is checked before it runs and a denied write does not run. Modal only. The base arm stays ungated. Each
   domain's gate decisions go to `gates-<domain>.sqlite` in the set's data folder (hash-chained; one file per run).
@@ -95,7 +100,7 @@ Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|bank
                            banking-plan-v3-gated|banking-plan-v4-gated|banking-plan-v5-gated|
                            banking-plan-v6-gated|banking-plan-v7-gated|banking-plan-v8-gated|banking-plan-v9-gated|
                            banking-plan-v10-gated|
-                           banking-unseen-gated|
+                           banking-unseen-gated|banking-unseen-v10-gated|
                            heldout2-gated|
                            banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
@@ -330,6 +335,12 @@ SETS = {
                              "data": MEASURE / "tools_ab_banking_unseen_gated",
                              "out": RESULTS / "tools-ab-banking-unseen-gated.json",
                              "save": "tools-ab-banking-unseen-gated"},
+    # the tools arm again on the code after #158-#174, against banking-unseen-gated's alone arm (decision 2026-10-31)
+    "banking-unseen-v10-gated": {"tasks": banking_unseen_tasks, "trials": 2, "arms": ("tools",), "concurrency": 12,
+                                 "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 15.0, "gates": True,
+                                 "requires_modal": True, "data": MEASURE / "tools_ab_banking_unseen_v10_gated",
+                                 "out": RESULTS / "tools-ab-banking-unseen-v10-gated.json",
+                                 "save": "tools-ab-banking-unseen-v10-gated"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",

@@ -768,3 +768,18 @@ def test_the_unseen_set_is_the_59_gated_train_tasks_outside_banking12_with_both_
         tools_ab.for_backend(cfg, False)
     others = [c for n, c in tools_ab.SETS.items() if n != "banking-unseen-gated"]
     assert all(cfg[k] != c.get(k) for c in others for k in ("data", "out", "save"))
+
+
+def test_the_unseen_v10_set_is_the_tools_arm_on_the_same_tasks_in_its_own_folder():
+    # decision 2026-10-31: the search fix (#171) is tested on the unseen tasks, where 41 of 108 tools runs hit the
+    # step limit; Glimmer alone is unchanged, so only the tools arm runs again
+    import tools_ab
+
+    v10, first = tools_ab.SETS["banking-unseen-v10-gated"], tools_ab.SETS["banking-unseen-gated"]
+    assert v10["tasks"]()["banking_knowledge"] == first["tasks"]()["banking_knowledge"]
+    assert v10["arms"] == ("tools",) and v10["trials"] == 2 and v10["gates"]
+    assert (v10["glimmer_usd"], v10["meta_usd"], v10["gpu_usd"]) == (3.0, 1.0, 15.0)
+    with pytest.raises(SystemExit, match="Modal only"):
+        tools_ab.for_backend(v10, False)
+    others = [c for n, c in tools_ab.SETS.items() if n != "banking-unseen-v10-gated"]
+    assert all(v10[k] != c.get(k) for c in others for k in ("data", "out", "save"))
