@@ -396,3 +396,34 @@ def test_a_run_tau_kept_nothing_of_gets_the_call_log_and_no_diff(tmp_path, capsy
     assert row["from_calls"] == {"model_calls": 41, "seconds": 570.0, "peak_prompt_tokens": 121000}
     assert ("τ² kept no messages or time; call log: 41 model calls over 570 s, peak prompt 121000 tokens"
             in capsys.readouterr().err)
+
+
+def test_an_arm_without_gates_words_its_warnings_as_the_models_own(tmp_path, capsys):
+    # 2026-10-31 review: the unseen base arm printed "a regression would show this way" 10 times and audited gate
+    # refusals it cannot have; an overflow line printed facts of zeros
+    results, events = tmp_path / "results.json", tmp_path / "e.jsonl"
+    overflow = {"task_id": "t4", "trial": 0, "termination_reason": "infrastructure_error", "reward_info": None,
+                "info": {"error": "ContextWindowExceededError: 131072"}, "duration": None, "messages": []}
+    results.write_text(json.dumps({"simulations": []}), encoding="utf-8")
+    with RunEvents(results, events, label="base banking", poll_s=60, tools=False, gated=False) as watch:
+        watch.diff = lambda sim: {"text": "diff", "fields": ["amount"], "tools": []}
+        watch.facts = lambda sim: ({"claims_not_done": []}, "facts: x")
+        results.write_text(json.dumps({"simulations": [_sim("t1", 0, 0.0), _sim("t2", 0, 0.0), _sim("t3", 0, 1.0),
+                                                       overflow]}), encoding="utf-8")
+        watch.poll()
+    err = capsys.readouterr().err
+    assert "the model's own repeated error (no Glint tools in this arm), not a regression" in err
+    assert "a regression would show this way" not in err
+    assert "PASS AUDIT: 1 passing runs (no gates in this arm); 0 claimed a write that never ran" in err
+    rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    assert "facts" in rows[0] and "facts" not in rows[-1]  # the overflow run has no facts line
+
+
+def test_a_tools_arm_without_gates_keeps_the_regression_wording(tmp_path, capsys):
+    # review of the wording change: a set with gates off still gives its tools arm Glint's decision tools
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({"simulations": [_sim("t1", 0, 0.0), _sim("t2", 0, 0.0)]}), encoding="utf-8")
+    watch = RunEvents(results, tmp_path / "e.jsonl", label="tools banking", poll_s=60, tools=True, gated=False)
+    watch.diff = lambda sim: {"text": "diff", "fields": ["amount"], "tools": []}
+    watch.poll()
+    assert "a regression would show this way" in capsys.readouterr().err
