@@ -52,7 +52,7 @@ DOMAIN = "banking_knowledge"
 
 def train_task_ids() -> list[str]:
     """The 77 banking train tasks (pilot + rest), as gate_replay replays them: the 20 test_untouched tasks of
-    split-partition-banking.json stay unread (decision 2026-10-26)."""
+    split-partition-banking.json stay unread (decisions 2026-10-26 and 2026-10-28)."""
     return sorted(t.id for t in gate_replay.tasks_of(DOMAIN))
 WRAPPER, UNLOCK = "call_discoverable_agent_tool", "unlock_discoverable_agent_tool"
 VISIBLE = {"log_verification", "change_user_email", "transfer_to_human_agents"}  # agent writes called by name

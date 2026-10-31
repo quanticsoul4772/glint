@@ -38,7 +38,7 @@ PLACEHOLDER_GOLD = {("banking_knowledge", "task_005"): "placeholder verification
 
 
 def tasks_of(domain: str) -> list:
-    """The TRAIN tasks only: τ²'s test splits stay unread (decision 2026-10-26). Retail and airline use τ²'s
+    """The TRAIN tasks only: τ²'s test splits stay unread (decision 2026-10-26; amended 2026-10-28: the banking test split was read once, as the final check). Retail and airline use τ²'s
     train split; banking_knowledge has none, so its test tasks are the `test_untouched` 20 of
     split-partition-banking.json and the rest (pilot + rest, 77 tasks) are replayed."""
     loader = registry.get_tasks_loader(domain)

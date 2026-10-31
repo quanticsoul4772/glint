@@ -23,9 +23,9 @@ Glint makes two kinds of claims a bug can break: what it **spends** (Modal GPU t
 - **Never a paid or remote service.**
   - No Modal, GPU, DeepInfra, Meta API or Baseten calls.
   - The modal CLI is a stand-in for `subprocess.run`; HTTP goes through `httpx.MockTransport`; τ²'s batch is a stand-in `_run`; LiteLLM loggers are called directly.
-  - Keys are placeholders written into the test workspace.
+  - No keys: scripts read them only when a run starts (`m2_pilot.require_keys()`), and the test workspace has no `.env`.
 - **No dependence on the clock or ordering.** Background-thread code (watchers, meter loops) is tested by calling its step function (`tick()`, `poll()`) directly, or with short intervals and a deadline.
-- **Fixed inputs live in `tests/data/`.** These are copies of what the scripts read at import, such as the task split partitions.
+- **Fixed inputs live in `tests/data/`.** The task split partitions (`splits/`) and the recorded wrong-write runs (`data-public/`) are in the repo itself, since the scripts read them too.
 
 ## The levels
 1. **Unit.** Pure functions with known answers: outcome classification, price math, verdict rules, parsing (`atem`), timeline building (`desk/events`).

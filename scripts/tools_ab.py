@@ -17,7 +17,7 @@ Sets:
   chosen with parallax `decide`). Retail k=4; airline k=2, because about $2 was left on DeepInfra: trials 0-1 of the
   base arm were already done, and τ² derives trial seeds as a prefix-stable sequence, so k=2 reuses them unchanged.
 - `banking`: the banking tasks whose gold has a credit card dispute or a credit limit increase, outside the untouched
-  test split (`5-measurements/split-partition-banking.json`); 038 and 054 are the recorded failures. These are also
+  test split (`splits/split-partition-banking.json`); 038 and 054 are the recorded failures. These are also
   the tasks whose gold calls the banking tools are checked against (tests/test_assist.py), so they are design tasks,
   not held-out. k=4, retrieval bm25_grep, output capped at 8,192 tokens; caps Meta $1, GPU $6.
 
