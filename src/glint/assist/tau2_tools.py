@@ -299,7 +299,9 @@ class BankingDecisionTools(DisputePlanTools):
         out = banking.check_dispute(self.db, user_id, credit_card_account_id, transaction_id, dispute_reason,
                                     contacted_merchant, replacement_requested, other_requests)
         plan = getattr(self, "glint_plans", {}).get(user_id)
-        if out.get("ready") and plan and (filing := banking.filing_call(self.db, user_id, plan, transaction_id)):
+        decided = user_id in getattr(self, "glint_increase_decided", set())
+        if out.get("ready") and plan and (filing := banking.filing_call(self.db, user_id, plan, transaction_id,
+                                                                        decided)):
             out["filing"] = filing
         return out
 
