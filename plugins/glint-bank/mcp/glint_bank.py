@@ -32,7 +32,7 @@ from collections import deque
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-GLINT_REQUIREMENT = "glint @ git+https://github.com/quanticsoul4772/glint@glint-bank-v0.1.0"
+GLINT_REQUIREMENT = "glint @ git+https://github.com/quanticsoul4772/glint@glint-bank-v0.2.0"
 TAU2_REQUIREMENT = ("tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench"
                     "@fc0055dc4e0a316c3f83133267fbd6faaa770992")
 PYTHON = ">=3.12,<3.13"
