@@ -22,13 +22,20 @@ TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading
 # since 2026-10-30 031, 051 and 052
 TUNED_GATES = set(by_task.TUNED)
 # a tools-only set -> the set whose base arm it is compared with (same tasks, trials and seeds; checked in main)
-BASE_FROM = {"banking-plan-v9-gated": "banking-plan-gated"}
+BASE_FROM = {"banking-plan-v9-gated": "banking-plan-gated", "banking-unseen-v10-gated": "banking-unseen-gated"}
 GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on the code at PR 147, "
               "against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight "
               "earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is "
               "compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count "
               "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
+    ("banking-unseen-v10-gated", True, "Banking, 59 unseen tasks, gates plus the search fix (tuned on their failures)",
+     "tuned",
+     ("The same 59 tasks and seeds, k=2, the gated tools arm only, on the code after PR 158-174: the v10 fixes and the "
+      "search fix of PR 171, which was designed after reading these tasks' step-limit failures, so the set is tuned "
+      "on them. Its alone column is banking-unseen-gated's Glimmer-alone arm. No gain: on the old gated arm's 108 matched "
+      "runs, 14 passed with the fix vs 19 before, and the step limit was hit in 34 vs 41; what keeps these runs "
+      "searching is not established. Glimmer on Modal.")),
     ("banking-unseen-lean-gated", True, "Banking, 59 unseen tasks, write gates enforced", "untuned",
      ("The 59 banking training tasks outside the 12 the gates were built on, whose correct answers make a gated write; "
       "no gate, plan or tool change came from their runs. k=2, Glimmer on Modal, gated tools arm on the code at "

@@ -2,6 +2,15 @@
 
 All runs are on τ²-bench v1.0.1 with Muse Glimmer 30B at medium reasoning; both arms of a comparison run with the same seeds on the same backend. Results are reported **by task**, because runs of one task are not independent. Tuned and untuned tasks are reported apart and never pooled. The README carries the headline; this page carries the detail. The Bank Desk's Results tab shows the same numbers per task.
 
+## Banking, the same 59 tasks with the search fix (v10): no gain, tuned on these tasks
+`banking-unseen-v10-gated`, 2026-11-01: the same 59 tasks and seeds, k=2, the gated tools arm only, on Modal, on the code after PR 158-174 (the v10 fixes; PR 171's search that returns its best document whole and points back on a repeat). Glimmer alone is `banking-unseen-gated`'s ungated arm below, unchanged. The search fix was designed after reading these tasks' step-limit failures, so from this run on they are design data, not unseen.
+
+- **By task against Glimmer alone (all runs):** 6 better, 9 worse, 44 tied (sign test p = 0.61, two-sided). Runs: alone 22/118, gated with the fix 16/118. task_064 counts as tied here: every alone run overflowed, but the gated runs did not.
+- **Against the gated arm before the fix, on its 108 matched runs:** 14 passed with the fix vs 19 before; by task 5 better, 7 worse (p = 0.77).
+- **Overflows do not explain the gap:** Glimmer alone overflowed in 34 of 118 runs; on the 37 tasks where it never did, alone passed 21 of 74 and gated with the fix 16 of 74.
+- **The step limit, on the matched runs:** the gated arm hit τ²'s 200-step limit in 34 of 108 (before the fix: 41 of 108; on all runs 37 of 118), and none of those runs passed. The fix removed few of them; what keeps these runs searching is not established.
+- Spend: Glimmer on Modal $7.32 GPU (2.5 GPU-hours), Meta API $0.39 (Muse Spark as the customer).
+
 ## Banking, 59 unseen tasks, write gates enforced: no gain
 `banking-unseen-gated`: the 59 banking training tasks outside the 12 the gates were built on whose correct answers make a gated write; no gate, plan or tool change came from their runs. k=2, Glimmer alone (ungated, τ²'s full-document `KB_search`) against the gated tools arm, both on Modal, same seeds; the gated arm ran the code at PR 151, before the search fix of PR 171. The run stopped at its $30 GPU cap after the finished runs saved, so the gated arm has 108 runs and alone 118. Analyzed from lean copies of both arms (`banking-unseen-lean-gated`: `raw_data`, logprobs and token ids removed), because the gated arm was saved only as τ²'s 5.8 GB checkpoint.
 - **No gain:** on 108 matched runs (same task, trial and seed) alone passed 21 and gated 19. By task 5 better (012, 045, 072, 085, 089), 8 worse, 46 tied (task_064 is counted as no data on the Results tab: every run in both arms overflowed the context); sign test p = 0.58, two-sided. All runs: alone 22/118, gated 19/108.
