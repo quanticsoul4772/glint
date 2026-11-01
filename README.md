@@ -8,7 +8,7 @@ An agent that can move money is only as safe as its worst call. A 30B model hold
 
 ## For judges: three steps
 1. **Watch the demo video** (2:35, captions): [youtu.be/tdQuhfSO_9w](https://youtu.be/tdQuhfSO_9w). Every clip is replayed from recorded logs: the Muse Code run of 2026-10-31 and the desk's recorded runs.
-2. **Open the Bank Desk:** [quanticsoul4772.github.io/glint](https://quanticsoul4772.github.io/glint/). The same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side; press Play and watch for the red "Blocked by policy gate" cards. No sign-in, no install.
+2. **Open the Bank Desk:** [quanticsoul4772.github.io/glint](https://quanticsoul4772.github.io/glint/). The same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side; press Play and watch for the red "Blocked by policy gate" cards. Then open **Try the gate**, pick a credit-limit increase for the simulated customer and see the gate's own decision for it. No sign-in, no install.
 3. **Check the gates yourself** (no GPU, no keys): clone and run the two gate replays in [Run it](#run-it), or load the [glint-bank plugin](plugins/glint-bank/README.md) in Muse Code, where every write to a τ² bank goes through the gates over MCP.
 
 ![Bank Desk, gated pair (task_054, a tuned task): on the left, Glimmer alone fails; on the right, a policy gate holds a dispute filing until the agent's dispute plan records the date the customer gave, two more gates make it confirm the shipping address and offer expedited shipping, and this run passes](docs/images/desk-gate.png)

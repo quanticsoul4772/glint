@@ -49,6 +49,12 @@ def results():
     return json.loads((HERE / "results.json").read_text(encoding="utf-8"))
 
 
+@app.get("/api/try")
+def try_gate():
+    """The credit-limit gates' decisions for a range of requested increases (scripts/export_try.py): no model, no write."""
+    return json.loads((HERE / "try_credit_limit.json").read_text(encoding="utf-8"))
+
+
 @app.get("/api/scenarios/{scenario_id}")
 def get_scenario(scenario_id: str):
     for s in scenarios():

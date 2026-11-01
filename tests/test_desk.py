@@ -785,3 +785,27 @@ def test_the_desk_bills_the_same_scale_down_window_glimmer_serve_sets():
     from glint.desk import live as desk_live
 
     assert desk_live.SCALEDOWN_S == glimmer_serve.SCALEDOWN_S
+
+
+def test_try_the_gate_serves_the_committed_decisions_and_they_match_the_gates():
+    import importlib.util
+    from pathlib import Path
+
+    served = client.get("/api/try").json()
+    rows = served["decisions"]
+    assert [r["amount"] for r in rows] == list(range(100, 6001, 100))
+    assert all(r["allowed"] for r in rows if r["amount"] <= 2500)  # the premium tier's maximum on a $5,000 limit
+    denied = [r for r in rows if not r["allowed"]]
+    assert denied and all(r["amount"] > 2500 and r["rule"] == "banking.cli.submit.reduce_amount" for r in denied)
+    assert all("NOT executed" in r["message"] and "What to do next:" in r["message"] for r in denied)
+    # regenerate from the gates: the committed file must still be what they decide
+    script = Path(__file__).resolve().parents[1] / "scripts" / "export_try.py"
+    spec = importlib.util.spec_from_file_location("export_try", script)
+    export_try = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(export_try)
+    assert export_try.build() == served, "rerun scripts/export_try.py: the gates' decisions changed"
+
+
+def test_the_page_has_the_try_tab():
+    page = client.get("/").text
+    assert 'id="tab-try"' in page and 'id="try-amt"' in page and 'fetch(API("api/try"))' in page
