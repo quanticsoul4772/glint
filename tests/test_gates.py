@@ -563,8 +563,8 @@ def test_an_unkeyed_chain_cannot_tell_a_recomputed_rewrite_but_a_keyed_one_can(t
     assert EventLog(plain).verify() == 3  # the documented limit of an unkeyed log
     with pytest.raises(ChainBroken, match="row 1: hash"):  # every keyed hash was replaced with an unkeyed one
         EventLog(keyed, key=b"operator secret").verify()
-    with pytest.raises(ChainBroken, match="row 1: hash"):
-        EventLog(keyed, key=b"a guessed key").verify()
+    with pytest.raises(ChainBroken, match="different GLINT_LOG_KEY"):  # refused at open, before any write
+        EventLog(keyed, key=b"a guessed key")
 
 
 def test_a_recorded_head_catches_truncation_and_rewrites(tmp_path):
@@ -598,13 +598,54 @@ def test_a_log_keeps_its_scheme(tmp_path, monkeypatch):
     EventLog(plain).close()
     with pytest.raises(ChainBroken, match="keyed log"):
         EventLog(keyed)
-    with pytest.raises(ChainBroken, match="unkeyed log"):
+    with pytest.raises(ChainBroken, match="records an unkeyed chain but GLINT_LOG_KEY is set"):
         EventLog(plain, key=b"k")
     assert EventLog(keyed, key=b"k").scheme == "hmac-sha256" and EventLog(plain).scheme == "sha256"
     monkeypatch.delenv(KEY_ENV, raising=False)
     assert log_key() is None
     monkeypatch.setenv(KEY_ENV, "s3cret")
     assert log_key() == b"s3cret"
+
+
+def test_a_keyed_log_refuses_a_different_key(tmp_path):
+    path = tmp_path / "g.sqlite"
+    events = EventLog(path, key=b"key A")
+    events.emit("gate.fired", {"i": 0})
+    events.close()
+    with pytest.raises(ChainBroken, match="written with a different GLINT_LOG_KEY"):
+        EventLog(path, key=b"key B")
+    again = EventLog(path, key=b"key A")
+    again.emit("gate.fired", {"i": 1})
+    assert again.verify() == 2
+    again.close()
+
+
+def test_a_keyed_file_from_before_the_key_check_row_is_checked_on_its_first_row(tmp_path):
+    path = tmp_path / "g.sqlite"
+    events = EventLog(path, key=b"key A")
+    events.emit("gate.fired", {"i": 0})
+    events.close()
+    raw = sqlite3.connect(path)
+    raw.execute("DROP TRIGGER meta_no_delete")
+    raw.execute("DELETE FROM meta WHERE k = 'key_check'")  # as a file written before the check row existed
+    raw.commit()
+    raw.close()
+    with pytest.raises(ChainBroken, match="different GLINT_LOG_KEY"):
+        EventLog(path, key=b"key B")
+    assert EventLog(path, key=b"key A").verify() == 1  # the right key stamps the check row again
+
+
+def test_the_meta_table_is_append_only_and_a_head_count_cannot_be_negative(tmp_path):
+    path = tmp_path / "g.sqlite"
+    EventLog(path, key=b"k").close()
+    raw = sqlite3.connect(path)
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        raw.execute("UPDATE meta SET v = 'sha256' WHERE k = 'chain'")
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        raw.execute("DELETE FROM meta")
+    raw.close()
+    with pytest.raises(ValueError, match="negative"):
+        EventLog(path, key=b"k").verify(expected_head=(-1, "genesis"))
 
 
 def test_a_log_from_before_the_meta_table_opens_as_sha256(tmp_path):
