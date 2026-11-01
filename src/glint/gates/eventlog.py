@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS events (
     hash_chain TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TRIGGER IF NOT EXISTS meta_no_update BEFORE UPDATE ON meta
+BEGIN SELECT RAISE(ABORT, 'meta table is append-only; updates are forbidden'); END;
+CREATE TRIGGER IF NOT EXISTS meta_no_delete BEFORE DELETE ON meta
+BEGIN SELECT RAISE(ABORT, 'meta table is append-only; deletes are forbidden'); END;
 CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
 BEGIN SELECT RAISE(ABORT, 'events table is append-only; updates are forbidden'); END;
 CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
@@ -48,6 +52,14 @@ BEGIN SELECT RAISE(ABORT, 'events table is append-only; deletes are forbidden');
 
 class ChainBroken(Exception):
     pass
+
+
+KEY_CHECK = b"glint-log-key-check"
+
+
+def key_check(key: bytes) -> str:
+    """A value that shows which key a keyed log was written with, without revealing the key."""
+    return hmac.new(key, KEY_CHECK, hashlib.sha256).hexdigest()
 
 
 def log_key() -> bytes | None:
@@ -89,8 +101,27 @@ class EventLog:
         if recorded == "hmac-sha256" and not self.key:
             raise ChainBroken(f"{self.path} is a keyed log: set {KEY_ENV} to open it")
         if recorded == "sha256" and self.key:
-            raise ChainBroken(f"{self.path} is an unkeyed log; open it without {KEY_ENV}")
+            # never advise dropping the key: a writer without the key can turn a keyed log into a valid unkeyed one
+            raise ChainBroken(f"{self.path} records an unkeyed chain but {KEY_ENV} is set: if this log was written "
+                              "with the key, the file was changed; do not verify it without the key")
+        if self.key:
+            self._check_key()
         return recorded
+
+    def _check_key(self) -> None:
+        """The key must be the one the log was written with: a different key would chain new events under it and
+        leave the log unverifiable under either. A keyed file from before the check row is checked on its first row."""
+        mine = key_check(self.key)
+        row = self._conn.execute("SELECT v FROM meta WHERE k = 'key_check'").fetchone()
+        if row is None:
+            first = self._conn.execute("SELECT id, ts, type, actor, payload, hash_chain FROM events ORDER BY rowid "
+                                       "LIMIT 1").fetchone()
+            if first and not hmac.compare_digest(chain_hash(GENESIS_HASH, *first[:5], self.key), first[5]):
+                raise ChainBroken(f"{self.path} was written with a different {KEY_ENV}")
+            self._conn.execute("INSERT OR IGNORE INTO meta (k, v) VALUES ('key_check', ?)", (mine,))
+            row = self._conn.execute("SELECT v FROM meta WHERE k = 'key_check'").fetchone()
+        if not hmac.compare_digest(row[0], mine):
+            raise ChainBroken(f"{self.path} was written with a different {KEY_ENV}")
 
     def emit(self, event_type: str, payload: dict, actor: str = "glint.gates") -> str:
         """Append one event; returns its chain hash. The whole read-tail-then-insert runs in one BEGIN IMMEDIATE."""
@@ -146,6 +177,8 @@ class EventLog:
             hashes.append(stored)
         if expected_head is not None:
             n, digest = expected_head
+            if n < 0:
+                raise ValueError(f"a head's event count cannot be negative: {n}")
             if n > len(rows):
                 raise ChainBroken(f"the log has {len(rows)} events but the recorded head is at event {n}: truncated")
             if hashes[n] != digest:

@@ -18,10 +18,10 @@ Each number says where it comes from.
 
 | Check | Result | Where it comes from |
 |---|---|---|
-| τ²'s correct actions replayed through the gates (`scripts/gate_replay.py`, `scripts/bank_replay.py`) | **0 false refusals in 289 expected writes** on the 77 banking training tasks | Replays of the benchmark's own correct answers, not live runs. The gates were checked against these during development. |
+| τ²'s correct actions replayed through the gates (`scripts/gate_replay.py`, `scripts/bank_replay.py`) | **0 false refusals in 289 expected writes** on the 77 banking training tasks (2 of them denied: task_005 verifies its user with placeholder data) | Replays of the benchmark's own correct answers, not live runs. The gates were checked against these during development. |
 | Recorded failed runs replayed (`scripts/bank_replay.py`) | **24 of 32 stopped at a gated step**, the database unchanged: 2 by the task's own rule, 22 by a procedure or plan rule (a skipped lookup, an unverified customer, a dispute out of plan order) | The recorded failures the rules were written from (`data-public/wrong-write-runs.json`), so this shows the gates work as designed, not that they catch new mistakes. τ²'s gold accepts 9 of the 24 stopped writes in another order. |
 | Live gated runs on 59 tasks no gate change came from (`python -m glint.inspect refusals`; gates at PR 151) | **21 refusals; 0 false of the 6 that could be judged**: 6 held a write τ² expects until a required step was done; the other 15 refused writes τ² does not expect (8 card closures with no reason on record), not judged | These tasks' correct answers were in the development replays above, but none of their runs shaped a gate. The same runs show **no pass-rate gain** (below). |
-| Muse Code, 2026-10-31 (plugin 0.2.1, Muse Spark as the agent, task_054) | A $4,000 credit-limit increase **denied**; the agent followed the fix and submitted $2,500, **allowed**; the gate log's hash chain verified | One run on a tuned task. The prompt asked for $4,000, so the deny shows the gate and the agent's recovery, not a mistake the agent made on its own. |
+| Muse Code, 2026-10-31 (plugin 0.2.1, Muse Spark as the agent, task_054) | A $4,000 credit-limit increase **denied**; the agent then submitted $2,500, **allowed**; the gate log's hash chain verified | One run on a tuned task. The prompt scripted both the $4,000 request and following the deny's next step, so this shows the gate's decision and message, not the agent's own error or recovery. |
 
 The deny the agent got in that Muse Code run, word for word (the verdict JSON shortened):
 
@@ -109,8 +109,8 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 | In short | Result |
 |---|---|
 | What the gates do | Block the writes their rules forbid, with 0 false refusals in 289 replayed correct writes and 0 false of the 6 live refusals that could be judged on unseen tasks |
-| What they do not do | Raise pass rates: on 59 unseen tasks, Glimmer alone passed 21 of 108 runs and gated 19 |
-| Where gains appear | Only on tuned tasks (below), which do not count as general evidence |
+| What they do not do | Raise pass rates: on 59 unseen tasks, Glimmer alone passed 21 of 108 matched runs and gated 19; with the search fix, gated 16 of 118 against alone's 22 |
+| Where gains appear | Nowhere significant: the largest, v9's tuned tasks (7/40 → 25/40 runs, p = 0.0625 one-sided), is in-sample; untuned tasks move at most 2/8 → 4/8 |
 
 τ²-bench v1.0.1, Glimmer at medium reasoning, both arms with the same seeds on the same backend. Reported **by task** (runs of one task are not independent); tuned and untuned tasks apart, latest first. A **tuned** task is one whose runs shaped a gate, the dispute plan or a tool; an **untuned** task is one whose runs shaped nothing. k is the number of runs per task. Full detail: [docs/results.md](docs/results.md).
 
@@ -124,7 +124,7 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
   - v9 is the latest of nine reported gated versions (v3 stopped early), each a change made after reading the one before. Tuned totals ranged from 7/40 to 25/40 and v9 is the highest; against v8 (19/40) it is 5 tasks better and 2 worse (p = 0.23, one-sided), so the differences between versions are not established at k=4. Untuned stayed at 4/8 from v4 through v9. All versions by task: [docs/results.md](docs/results.md#banking-write-gates-enforced-design-data-k4).
   - In v9's runs, 0 of the 39 gate refusals that could be judged against τ²'s expected writes were false (55 write refusals; the other 16 refused writes that differ from the expected ones and are not judged).
 - **Banking, current tools: the only domain with a gain, not significant** (12 tasks with a dispute or credit-limit step, k=4).
-  - **10 untuned tasks: 3 improved** (037: 0/4 → 3/4; 050: 2/4 → 4/4; 052: 0/4 → 1/4), 7 tied, 0 worse; sign test p = 0.25; runs 6/40 → 12/40. Their correct answers were used to check the tools' rules, so they are not fully held-out.
+  - **10 tasks untuned for the tools (all but 050 and 053 were later tuned for the gates): 3 improved** (037: 0/4 → 3/4; 050: 2/4 → 4/4; 052: 0/4 → 1/4), 7 tied, 0 worse; sign test p = 0.25; runs 6/40 → 12/40. Their correct answers were used to check the tools' rules, so they are not fully held-out.
   - **2 tuned tasks improved** (038: 0/4 → 1/4; 054: 0/4 → 4/4). The tools were refined after reading their runs.
   - Wrong writes (writes Glint's own checks judge wrong) did not fall on the untuned tasks: 39 without the tools vs 43 with. On the tuned tasks: 11 → 0.
 - **Retail and airline: no gain, and on retail the tools lose runs.** Held-out tasks on the current tools (k=4): retail 39/40 without the tools vs 35/40 with; airline 37/40 vs 38/40. By task: 2 improved, 14 tied, 4 worse (sign test p = 0.69).
@@ -136,7 +136,7 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 <!-- results:end -->
 ## Limitations
 - **The gates block the specific steps they encode; they do not make every write correct, and they have not been shown to raise pass rates.** On the 59 unseen tasks the gated arm passed 19 of 108 matched runs against Glimmer alone's 21; 20 of its failed runs still filed a write with a wrong value, and 65 of its 643 live gate decisions were allows for writes no rule covers.
-- **Muse Code, interactive mode:** checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31), the plugin's server reached `ready` with 23 tools and a $4,000 increase past the tier maximum was refused, then $2,500 allowed. In interactive mode on 2026-11-01, Muse's own startup logs show the start that fetched a fresh feature configuration shutting the plugin's server down about 0.15 s later (`transport_closed`), and the next start, with that configuration cached, reaching `ready` with 23 tools. If the first start reports the server unavailable, start Muse again. `scripts/muse_check.py` reads Muse's startup log and says whether the server reached `ready`.
+- **Muse Code, interactive mode:** checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31), the plugin's server reached `ready` with 23 tools and a $4,000 increase past the tier maximum was refused, then $2,500 allowed. In interactive mode on 2026-11-01, Muse's own startup log shows the interactive start shutting the plugin's server down about 0.15 s after fetching a fresh feature configuration (`transport_closed`); a headless start (`muse exec`) three minutes later, with that configuration cached, reached `ready` with 23 tools. A second interactive start has not been checked, so interactive mode is not shown to work; headless mode is. `scripts/muse_check.py` reads Muse's startup log and says whether the server reached `ready`.
 - **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard.
 - **Small samples.** k=2 to 4 per task; no sign test is significant.
 - **The gates' rules were written and checked on training tasks**, so the replay numbers and the gated results on those 12 tasks are in-sample. A deny that lands on a run's first wrong write shows the gate caught that write, not that the run would then pass.
