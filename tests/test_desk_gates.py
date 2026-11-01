@@ -21,6 +21,25 @@ DENY = (f"{DENY_PREFIX} and was NOT executed. Nothing changed.\n"
         'Verdict: {"ok": false}')
 
 
+def test_the_desk_imports_without_tau2_and_its_deny_prefix_matches_the_gates():
+    """Regression 2026-10-31: events imported glint.gates, which loads τ², so the desk could not start in its own
+    image (Modal, the Pages build), which has no τ²."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from glint.desk import events
+
+    assert events.DENY_PREFIX == DENY_PREFIX
+    src = Path(__file__).resolve().parents[1] / "src"
+    code = ("import sys; sys.modules['tau2'] = None\n"  # any import of τ² now fails
+            "import glint.desk.app; print('ok')")
+    r = subprocess.run([sys.executable, "-X", "utf8", "-c", code], capture_output=True, text=True, encoding="utf-8",
+                       env=dict(os.environ, PYTHONPATH=str(src)), timeout=120, check=False)
+    assert r.returncode == 0 and r.stdout.strip() == "ok", r.stderr[-1500:]
+
+
 def test_a_plain_deny_parses_into_its_card_fields():
     d = parse_deny(DENY)
     assert d["rule"] == "banking.close_card.no_reason"

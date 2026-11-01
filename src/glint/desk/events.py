@@ -5,7 +5,10 @@ import json
 import re
 
 from glint.decisions import GLINT_TOOLS
-from glint.gates.core import DENY_PREFIX
+
+# glint.gates.core.DENY_PREFIX, kept as a copy: importing glint.gates loads τ², which the desk's own image (Modal, and
+# the GitHub Pages build) does not have; tests/test_desk_gates.py checks the two are equal
+DENY_PREFIX = "Error: this write was blocked by a policy gate"
 
 # τ² banking's write tools (glint.gates.enforce.write_tools on the domain's toolkit, without its example tool), kept
 # as a list because the desk's own image has no τ²; tests/test_desk_gates.py checks it against the toolkit
