@@ -37,13 +37,13 @@ SOURCES = [("task_054", "banking-failures", True), ("task_038", "banking-failure
 GATED_SOURCES = [
     ("task_054-gates", "task_054", ("banking-plan-gated", "base"), ("banking-plan-v9-gated", "tools"), True, False,
      "Fraud dispute, replacement card and a credit limit increase (gated)",
-     "Alone: the ungated arm of banking-plan-gated (2026-10-29). Gated: v9 (2026-10-30), same seed. An earlier gated "
-     "version (banking-plan-gated's tools arm) passed this task 4/4 on the same seeds without blocking anything."),
+     ("Alone: the ungated arm of banking-plan-gated (2026-10-29). Gated: v9 (2026-10-30), same seed. An earlier gated "
+      "version (banking-plan-gated's tools arm) passed this task 4/4 on the same seeds without blocking anything.")),
     ("task_045-unseen", "task_045", ("banking-unseen-lean-gated", "base"), ("banking-unseen-lean-gated", "tools"),
      False, True, "Card closure on unseen task 045 (gated)",
-     "Both arms from banking-unseen-gated (2026-10-30 to 31), same seed, a task whose runs no gate was built from. "
-     "Across the set, alone's misses include 30 context overflows, and the gated arm hit τ²'s step limit in 41 of its "
-     "108 runs (research note of 2026-10-31)."),
+     ("Both arms from banking-unseen-gated (2026-10-30 to 31), same seed, a task whose runs no gate was built from. "
+      "Across the set, alone's misses include 30 context overflows, and the gated arm hit τ²'s step limit in 41 of "
+      "its 108 runs (research note of 2026-10-31).")),
 ]
 TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increase",
           "task_038": "Three disputed charges on a card that is being reissued",
