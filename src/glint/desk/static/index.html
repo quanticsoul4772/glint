@@ -440,7 +440,7 @@ async function load(id) {
   stop(); clearInterval(liveTimer);
   liveRun = false;  // back to a recorded replay
   $("mode").classList.remove("live"); $("mode").querySelector("span").textContent = "Replay · recorded runs";
-  data = await (await fetch(API(`api/scenarios/${id}`))).json();
+  data = await (await fetch(API(`api/scenarios/${encodeURIComponent(id)}`))).json();
   $("total").textContent = steps(); $("scrub").max = steps();
   pos = opening(); showUpTo(pos);
   $("goal").textContent = data.customer || "";

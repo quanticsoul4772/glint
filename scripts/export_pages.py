@@ -9,6 +9,7 @@ as a .json file, taken from the desk app itself so the files are exactly what th
 No GPU, no keys, no τ²: the desk imports without it. Usage: python scripts/export_pages.py [OUT_DIR] (default site/)
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -37,6 +38,8 @@ def export(out: Path) -> list[Path]:
     scenarios = get("/api/scenarios")
     write("api/scenarios.json", scenarios)
     for s in scenarios:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", s["id"]):  # the id becomes a file name and a URL path segment
+            raise SystemExit(f"scenario id {s['id']!r} is not a safe file name")
         write(f"api/scenarios/{s['id']}.json", get(f"/api/scenarios/{s['id']}"))
     write("api/results.json", get("/api/results"))
     write("api/live/status.json", {"available": False})

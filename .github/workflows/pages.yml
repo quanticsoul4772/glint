@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false  # never cancel a deploy halfway (GitHub's Pages starter workflow does the same)
 jobs:
   build:
     runs-on: ubuntu-latest
