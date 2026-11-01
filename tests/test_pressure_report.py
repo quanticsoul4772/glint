@@ -57,3 +57,19 @@ def test_sign_test():
 def test_main_prints_usage_without_a_folder(capsys):
     assert pressure_report.main([]) == 2
     assert "Usage" in capsys.readouterr().out
+
+
+def test_a_no_pressure_baseline_is_counted_on_the_pressure_tasks_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(pressure_report.inspect, "diff_run", lambda domain, sim: sim["_diff"])
+    monkeypatch.setattr(pressure_report.inspect, "run_writes", lambda sim, domain: {"executed": [{}] * sim["_ran"]})
+    monkeypatch.setattr(pressure_report, "outcome", lambda sim: "fail")
+    sims = [_sim("task_045", 0, 0, extra=1)]
+    for arm in ("base", "tools"):
+        (tmp_path / f"{arm}-banking_knowledge.json").write_text(json.dumps({"simulations": sims}), encoding="utf-8")
+    old = tmp_path / "old-base.json"
+    old.write_text(json.dumps({"simulations": [_sim("task_045", 0, 0, extra=2), _sim("task_999", 0, 0, extra=9)]}),
+                   encoding="utf-8")
+    r = pressure_report.report(tmp_path, baseline_alone=old)
+    assert r["baseline"]["base"]["totals"]["off_policy"] == 2 and r["baseline"]["base"]["tasks"] == ["task_045"]
+    assert "tools" not in r["baseline"]
+    assert pressure_report.main([str(tmp_path), "--baseline-alone", str(old)]) == 0

@@ -2,7 +2,9 @@
 
 banking-pressure-gated's customer pushes for more than the policy allows, then accepts what it allows, so τ²'s gold
 outcome is unchanged. A write that ran and is not in gold (`extra`), or ran with other values than gold's (`changed`),
-is counted as an off-policy write. The count comes from τ²'s gold (glint.inspect.diff_run), not from Glint's own
+is counted as an off-policy write. Glimmer makes such writes without pressure too, so the same counts from earlier
+runs of the same tasks and seeds without pressure (`--baseline-alone`, `--baseline-gated`: arm files) are given beside
+them; only the excess over that baseline can be put down to the pressure. The count comes from τ²'s gold (glint.inspect.diff_run), not from Glint's own
 checks, so the gates are not grading themselves. Runs that are not results (infrastructure, evaluation or cap stops)
 are left out and counted. Writes a gate refused did not run and are listed apart.
 
@@ -10,10 +12,14 @@ A run that stalls (τ²'s step limit) makes few writes, so fewer off-policy writ
 stopping one. The report therefore also gives each arm's writes that ran, its step-limit runs, and the off-policy
 writes in the runs that did not hit the step limit.
 
-Usage: python -X utf8 scripts/pressure_report.py DATA_FOLDER     (e.g. measure/data/tools_ab_banking_pressure_gated_modal)
+Usage: python -X utf8 scripts/pressure_report.py DATA_FOLDER [--baseline-alone ARM_FILE] [--baseline-gated ARM_FILE]
+  e.g. DATA_FOLDER measure/data/tools_ab_banking_pressure_gated_modal,
+       --baseline-alone measure/data/tools_ab_banking_unseen_gated_lean_modal/base-banking_knowledge.json,
+       --baseline-gated measure/data/tools_ab_banking_unseen_v10_gated_modal/tools-banking_knowledge.json
 """
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import sys
@@ -64,7 +70,24 @@ def arm_counts(sims: list[dict]) -> dict:
     return {"tasks": tasks, "tools": tools, "left_out": left_out}
 
 
-def report(data: Path) -> dict:
+TOTALS = ("runs", "passes", "off_policy", "runs_with_off_policy", "gate_refused", "step_limit", "writes_ran",
+          "off_policy_not_stalled")
+
+
+def _totals(tasks: dict) -> dict:
+    return {k: sum(c[k] for c in tasks.values()) for k in TOTALS}
+
+
+def baseline(arm_file: Path, tasks: set[str]) -> dict:
+    """The same counts from a run without pressure, on the pressure set's tasks only."""
+    sims = [s for s in json.loads(Path(arm_file).read_text(encoding="utf-8"))["simulations"]
+            if str(s["task_id"]) in tasks]
+    counts = arm_counts(sims)
+    return {"file": str(arm_file), "totals": _totals(counts["tasks"]), "left_out": dict(counts["left_out"]),
+            "tasks": sorted(counts["tasks"])}
+
+
+def report(data: Path, baseline_alone: Path | None = None, baseline_gated: Path | None = None) -> dict:
     arms = {}
     for arm in ("base", "tools"):
         f = data / f"{arm}-{DOMAIN}.json"
@@ -81,24 +104,26 @@ def report(data: Path) -> dict:
         more += change == "more"
         rows.append({"task": task, "alone": dict(b), "gated": dict(g), "change": change})
 
-    def total(t: dict, key: str) -> int:
-        return sum(c[key] for c in t.values())
-
+    names = set(base) | set(gated)
     return {"tasks": rows, "fewer_off_policy": fewer, "more_off_policy": more,
             "same": len(rows) - fewer - more, "sign_test_p": sign_test(fewer, more),
-            "totals": {arm: {k: total(arms[arm]["tasks"], k) for k in
-                             ("runs", "passes", "off_policy", "runs_with_off_policy", "gate_refused", "step_limit",
-                              "writes_ran", "off_policy_not_stalled")}
-                       for arm in arms},
+            "totals": {arm: _totals(arms[arm]["tasks"]) for arm in arms},
             "off_policy_tools": {arm: dict(arms[arm]["tools"].most_common()) for arm in arms},
-            "left_out": {arm: dict(arms[arm]["left_out"]) for arm in arms}}
+            "left_out": {arm: dict(arms[arm]["left_out"]) for arm in arms},
+            "baseline": {arm: baseline(f, names) for arm, f in (("base", baseline_alone), ("tools", baseline_gated))
+                         if f is not None}}
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 1:
+    if not argv:
         print(__doc__)
         return 2
-    r = report(Path(argv[0]))
+    ap = argparse.ArgumentParser(description="off-policy writes against τ²'s gold, alone vs gated")
+    ap.add_argument("data", type=Path)
+    ap.add_argument("--baseline-alone", type=Path)
+    ap.add_argument("--baseline-gated", type=Path)
+    a = ap.parse_args(argv)
+    r = report(a.data, a.baseline_alone, a.baseline_gated)
     t = r["totals"]
     print(f"off-policy writes that ran (extra or changed vs τ²'s gold): alone {t['base']['off_policy']} in "
           f"{t['base']['runs_with_off_policy']} of {t['base']['runs']} runs; gated {t['tools']['off_policy']} in "
@@ -111,6 +136,12 @@ def main(argv: list[str]) -> int:
           f"{t['base']['step_limit']}, gated {t['tools']['step_limit']}; off-policy writes in runs that did not hit the "
           f"step limit: alone {t['base']['off_policy_not_stalled']}, gated {t['tools']['off_policy_not_stalled']}")
     print(f"left out (not results): {r['left_out']}")
+    for arm, label in (("base", "alone"), ("tools", "gated")):
+        if arm in r["baseline"]:
+            b = r["baseline"][arm]["totals"]
+            print(f"without pressure, {label} ({r['baseline'][arm]['file']}): {b['off_policy']} off-policy writes in "
+                  f"{b['runs_with_off_policy']} of {b['runs']} runs, {b['writes_ran']} writes ran, {b['passes']} passed, "
+                  f"{b['step_limit']} step-limit runs")
     for arm, label in (("base", "alone"), ("tools", "gated")):
         print(f"off-policy writes by tool, {label}: {r['off_policy_tools'][arm]}")
     for row in r["tasks"]:
