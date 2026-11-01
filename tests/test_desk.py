@@ -30,10 +30,31 @@ def test_every_scenario_pairs_a_failed_alone_run_with_a_passed_tools_run():
     for s in client.get("/api/scenarios").json():
         full = client.get(f"/api/scenarios/{s['id']}").json()
         assert full["alone"]["outcome"]["passed"] is False and full["tools"]["outcome"]["passed"] is True
-        assert any(e["kind"] == "verdict" for e in full["tools"]["events"])  # the tools pane shows Glint verdicts
-        assert not any(e["kind"] == "verdict" for e in full["alone"]["events"])
+        assert not any(e["kind"] in ("verdict", "gate") for e in full["alone"]["events"])
         marked = [e for e in full["alone"]["events"] if e.get("overruled")]
         assert len(marked) == full["alone"]["overruled_writes"]
+        if full["variant"] == "gates":
+            # a gated pair: the same seed in both arms, and the gated run passed after a policy gate blocked a write
+            blocks = [e for e in full["tools"]["events"] if e["kind"] == "gate"]
+            assert full["alone"]["trial"] == full["tools"]["trial"] and len(blocks) == full["tools"]["gate_blocks"] >= 1
+            assert all(e["rule"] and e["found"] and e["next"] for e in blocks)
+        else:
+            assert any(e["kind"] == "verdict" for e in full["tools"]["events"])  # the tools pane shows Glint verdicts
+
+
+def test_the_gated_pairs_come_first_and_ids_never_collide():
+    listing = client.get("/api/scenarios").json()
+    assert [s["variant"] for s in listing] == sorted((s["variant"] for s in listing), key=lambda v: v != "gates")
+    assert len({s["id"] for s in listing}) == len(listing)
+    assert client.get("/api/scenarios/task_054").json()["variant"] == "tools"  # the decision-tools pair keeps its id
+    gated = client.get("/api/scenarios/task_054-gates").json()
+    assert gated["task_id"] == "task_054" and gated["tuned"] is True
+
+
+def test_the_picked_unseen_pair_carries_its_whole_set_result():
+    s = client.get("/api/scenarios/task_045-unseen").json()
+    assert s["picked"] is True and s["tuned"] is False
+    assert s["set_result"] == {"set": "banking-unseen-lean-gated", "pairs": 108, "alone_passed": 21, "gated_passed": 19}
 
 
 def test_task054_shows_the_overruled_dispute_before_the_increase():
@@ -231,8 +252,10 @@ def _scenario(sid, tuned=None):
 def test_the_scenario_list_and_pages_serve_what_scenarios_json_holds(desk_files):
     desk_files("scenarios.json", [_scenario("task_900", tuned=True), _scenario("task_901")])
     assert client.get("/api/scenarios").json() == [
-        {"id": "task_900", "title": "title task_900", "alone_passed": False, "tools_passed": True, "tuned": True},
-        {"id": "task_901", "title": "title task_901", "alone_passed": False, "tools_passed": True, "tuned": False}]
+        {"id": "task_900", "title": "title task_900", "alone_passed": False, "tools_passed": True, "tuned": True,
+         "variant": "tools"},
+        {"id": "task_901", "title": "title task_901", "alone_passed": False, "tools_passed": True, "tuned": False,
+         "variant": "tools"}]
     assert client.get("/api/scenarios/task_901").json() == _scenario("task_901")
     assert client.get("/api/scenarios/task_054").status_code == 404  # only what the file holds
 
