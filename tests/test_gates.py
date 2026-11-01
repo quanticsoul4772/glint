@@ -534,6 +534,95 @@ def test_the_log_is_append_only_and_the_chain_catches_tampering(tmp_path):
     events.close()
 
 
+def _rewrite_chain(path, rowid, payload):
+    """What a writer of the file can do without the key: drop the trigger, edit a row, recompute every sha256 after."""
+    from glint.gates.eventlog import GENESIS_HASH, chain_hash
+    raw = sqlite3.connect(path)
+    raw.execute("DROP TRIGGER IF EXISTS events_no_update")
+    raw.execute("UPDATE events SET payload = ? WHERE rowid = ?", (payload, rowid))
+    prev = GENESIS_HASH
+    for r, eid, ts, t, a, p in raw.execute("SELECT rowid, id, ts, type, actor, payload FROM events ORDER BY rowid"
+                                           ).fetchall():
+        digest = chain_hash(prev, eid, ts, t, a, p)
+        raw.execute("UPDATE events SET prev_hash = ?, hash_chain = ? WHERE rowid = ?", (prev, digest, r))
+        prev = digest
+    raw.commit()
+    raw.close()
+
+
+def test_an_unkeyed_chain_cannot_tell_a_recomputed_rewrite_but_a_keyed_one_can(tmp_path):
+    plain, keyed = tmp_path / "plain.sqlite", tmp_path / "keyed.sqlite"
+    for path, key in ((plain, None), (keyed, b"operator secret")):
+        events = EventLog(path, key=key)
+        for i in range(3):
+            events.emit("gate.fired", {"decision": "deny", "i": i})
+        assert events.verify() == 3
+        events.close()
+    _rewrite_chain(plain, 2, '{"decision": "allow", "i": 1}')
+    _rewrite_chain(keyed, 2, '{"decision": "allow", "i": 1}')
+    assert EventLog(plain).verify() == 3  # the documented limit of an unkeyed log
+    with pytest.raises(ChainBroken, match="row 1: hash"):  # every keyed hash was replaced with an unkeyed one
+        EventLog(keyed, key=b"operator secret").verify()
+    with pytest.raises(ChainBroken, match="row 1: hash"):
+        EventLog(keyed, key=b"a guessed key").verify()
+
+
+def test_a_recorded_head_catches_truncation_and_rewrites(tmp_path):
+    path = tmp_path / "g.sqlite"
+    events = EventLog(path, key=b"k")
+    for i in range(4):
+        events.emit("gate.fired", {"i": i})
+    head = events.head()
+    assert head[0] == 4 and events.verify(expected_head=head) == 4
+    events.emit("gate.fired", {"i": 4})
+    assert events.verify(expected_head=head) == 5  # appending keeps the old head
+    events.close()
+    raw = sqlite3.connect(path)
+    raw.execute("DROP TRIGGER events_no_delete")
+    raw.execute("DELETE FROM events WHERE rowid >= 4")
+    raw.commit()
+    raw.close()
+    cut = EventLog(path, key=b"k")
+    assert cut.verify() == 3  # a shorter chain is still a valid chain
+    with pytest.raises(ChainBroken, match="truncated"):
+        cut.verify(expected_head=head)
+    with pytest.raises(ChainBroken, match="rewritten"):
+        cut.verify(expected_head=(2, head[1]))
+    cut.close()
+
+
+def test_a_log_keeps_its_scheme(tmp_path, monkeypatch):
+    from glint.gates.eventlog import KEY_ENV, log_key
+    keyed, plain = tmp_path / "keyed.sqlite", tmp_path / "plain.sqlite"
+    EventLog(keyed, key=b"k").close()
+    EventLog(plain).close()
+    with pytest.raises(ChainBroken, match="keyed log"):
+        EventLog(keyed)
+    with pytest.raises(ChainBroken, match="unkeyed log"):
+        EventLog(plain, key=b"k")
+    assert EventLog(keyed, key=b"k").scheme == "hmac-sha256" and EventLog(plain).scheme == "sha256"
+    monkeypatch.delenv(KEY_ENV, raising=False)
+    assert log_key() is None
+    monkeypatch.setenv(KEY_ENV, "s3cret")
+    assert log_key() == b"s3cret"
+
+
+def test_a_log_from_before_the_meta_table_opens_as_sha256(tmp_path):
+    from glint.gates.eventlog import GENESIS_HASH, chain_hash
+    path = tmp_path / "old.sqlite"
+    raw = sqlite3.connect(path)
+    raw.execute("CREATE TABLE events (id TEXT PRIMARY KEY, ts INTEGER NOT NULL, type TEXT NOT NULL, actor TEXT NOT "
+                "NULL, payload TEXT NOT NULL, prev_hash TEXT NOT NULL, hash_chain TEXT NOT NULL)")
+    digest = chain_hash(GENESIS_HASH, "e1", 1, "gate.fired", "glint.gates", "{}")
+    raw.execute("INSERT INTO events VALUES ('e1', 1, 'gate.fired', 'glint.gates', '{}', ?, ?)", (GENESIS_HASH, digest))
+    raw.commit()
+    raw.close()
+    old = EventLog(path)
+    assert old.scheme == "sha256" and old.verify() == 1 and old.head() == (1, digest)
+    old.close()
+    assert EventLog(":memory:").head() == (0, GENESIS_HASH)
+
+
 def test_a_failed_emit_rolls_back(tmp_path, monkeypatch):
     events = EventLog(tmp_path / "g.sqlite")
     events.emit("a", {})

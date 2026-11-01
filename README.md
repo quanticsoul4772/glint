@@ -58,6 +58,20 @@ flowchart LR
 3. **Every write is intercepted** (`glint.gates.enforce`) and checked by the gates registered for that tool. A gate is a plain function of the live database and the write's arguments, so the same call against the same records always gets the same decision, including when τ²'s evaluator replays the run.
 4. A deny returns, as the tool result, the rule, what the check found, the facts it used, why it matters and the next step. Arguments are never rewritten. A gate that raises, times out or returns nothing usable denies (fail closed).
 5. Every decision is written to an append-only, hash-chained SQLite log (`glint.gates.eventlog`). At startup, every write tool in the toolkit must have a gate, or enforcement refuses to start.
+6. **What the log protects against.** Unkeyed (SHA-256), the chain catches damage and edits that do not recompute it. With `GLINT_LOG_KEY` set, each link is an HMAC-SHA256 under the operator's key, so a rewrite by anyone without the key fails `verify()`; the key lives in the gate server's environment, so keep it out of the agent's prompt and of any file the agent can read. Truncation leaves a valid shorter chain, so `python -m glint.bank.server log SESSION_ID` prints the log's head (event count and last hash) to keep off the machine; `verify(expected_head=...)` fails when the log no longer contains it.
+
+## How it compares
+Each cell is from the project's own documentation (checked 2026-11-01; Invariant's guardrail docs were removed on 2026-01-12, so its row uses their last published version). "Not documented" means the docs do not say, not that the feature is absent.
+
+| Project | Mainly guards against | Decides with | Reads the application's current data at decision time | The agent gets on a block | Tamper-evident decision log |
+|---|---|---|---|---|---|
+| [AWS AgentCore Policy](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.md) | Unauthorized agent tool calls | Deterministic Cedar rules (optional guardrail scores) | The request, identity claims and session history; application data not documented | An error naming the policy denial | Not documented (CloudWatch logs) |
+| [Invariant Guardrails](https://github.com/invariantlabs-ai/invariant) | Prompt injection, unsafe tool data flows | Rules plus classifier and LLM detectors | The trace (messages, tool calls, outputs) | The violated rule and where | Not documented |
+| [NVIDIA NeMo Guardrails](https://github.com/NVIDIA-NeMo/Guardrails) | Jailbreaks, unsafe or off-topic conversation | Colang flows plus LLM and classifier checks | Through custom Python actions | A refusal message (configurable) | Not documented |
+| [Meta LlamaFirewall](https://github.com/meta-llama/PurpleLlama/tree/main/LlamaFirewall) | Prompt injection, goal hijacking, insecure code | Classifier, LLM auditor, static analysis | Messages and the agent's trace | A decision, a reason and a score | Not documented |
+| **Glint** | Writes that break a business's written policy | Deterministic Python functions | Yes: τ²'s live database plus the call's arguments | The rule, the facts, the consequence and the next step; the write did not run | Hash chain; HMAC-keyed with `GLINT_LOG_KEY` |
+
+The others mostly decide whether a conversation or a call is safe; Glint decides whether a specific write is allowed by the business's policy given the account's current records, and tells the agent how to fix it. It complements them rather than replacing them: a prompt-injection scanner and a policy gate catch different failures.
 
 ## The gates
 Rules are per write tool, never per task, and each cites the policy document it comes from (`glint.gates.rules`).
@@ -153,7 +167,7 @@ uv run pytest -q
 - **Tests:** coverage goals and rules in [docs/testing-strategy.md](docs/testing-strategy.md); CI runs pytest with the coverage gate and ruff on every PR.
 
 ## Built during the event
-- All code in this repo was written during the event (Oct 26 – Nov 4, 2026). The first commit is `952dd30` on 2026-10-26.
+- All code in this repo was written during the event (Oct 26 – Nov 4, 2026); no earlier code was copied. The gate runner's and gate log's design follows the author's earlier private projects (agent-harness-v2 and pgharness). The first commit is `952dd30` on 2026-10-26.
 - This history was rewritten on Oct 31 to remove the author's name, local paths and session links. Authors and dates are unchanged; the only changes to files are local folder paths in comments, now `<workspace>`, and one coverage data file removed. The old-to-new commit map is in [docs/history-map.txt](docs/history-map.txt). The original repository, with its pull request and CI record, is private, and the organizers can be given access. PR numbers in this repo ("PR 147") refer to that record.
 - Third-party work, used under its license: [τ²-bench](https://github.com/sierra-research/tau2-bench) (MIT, Sierra Research) is the benchmark and a dependency; its banking data is bundled in `plugins/glint-bank/data/` with its license. The desk's spacing, type and color scales follow Astryx's neutral theme (MIT, Meta Platforms).
 
