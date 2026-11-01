@@ -11,7 +11,7 @@ muse plugins install plugins/glint-bank --scope user
 muse plugins approve glint-bank
 ```
 
-The first start installs Glint (its git tag) and τ² (one pinned commit of its git repository) through uv, so it takes a few minutes; the bank data comes from this plugin's `data/`. Checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31); see the main README's Limitations for one interactive session where Muse stopped the server at startup.
+The first start installs Glint (its git tag) and τ² (one pinned commit of its git repository) through uv, so it takes a few minutes; the bank data comes from this plugin's `data/`. Checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31); in interactive mode, if the first start reports the glint-bank server unavailable, start Muse again: on 2026-11-01 the start that fetched a fresh feature configuration stopped the server, and the next start, with the configuration cached, reached `ready` with 23 tools (Muse's bootstrap logs).
 
 ## Launcher
 
