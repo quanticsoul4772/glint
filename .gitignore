@@ -20,6 +20,8 @@ activations/
 meter/*.jsonl
 .pytest_home/
 .pytest_tmp/
+site/
+
 coverage.json
 .coverage
 !tests/data/
