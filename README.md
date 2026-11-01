@@ -6,7 +6,7 @@
 
 An agent that can move money is only as safe as its worst call. A 30B model holds a customer conversation well and still gets policy decisions wrong: the largest credit-limit increase a card allows, which disputes need a provisional credit, whether a card can be closed. Glint takes those decisions away from the model. Each write the agent attempts goes through a gate that applies the bank's written policy to the live account records. An allowed write runs. A denied write does not run, and the agent gets the rule, what the check found, the facts it used and the next step. The agent cannot skip the check. A gate checks only what its rules encode: a write no rule covers is allowed and logged as such.
 
-**Demo video:** added with the submission.
+**Demo video (2:35, captions):** [youtu.be/tdQuhfSO_9w](https://youtu.be/tdQuhfSO_9w). Every clip is replayed from recorded logs: the Muse Code run of 2026-10-31 and the desk's recorded runs.
 
 ## Try it
 - **Bank Desk, recorded runs:** [quanticsoul4772.github.io/glint](https://quanticsoul4772.github.io/glint/). The same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side; the gated pairs show each write a policy gate blocked and what the agent did next. No sign-in.
