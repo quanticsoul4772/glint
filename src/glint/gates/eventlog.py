@@ -1,7 +1,7 @@
 """A hash-chained, append-only event log in SQLite with one writer.
 
-Written for this event; the design follows the author's earlier agent-harness-v2 (private), and no code was copied
-from it. The one writer serializes emits with an RLock and writes each event inside BEGIN IMMEDIATE; each row's hash
+All code was written during the event; no earlier code was copied. The gate log's design follows the author's
+earlier private project (agent-harness-v2). The one writer serializes emits with an RLock and writes each event inside BEGIN IMMEDIATE; each row's hash
 is computed over the previous hash and the row's fields with null-byte separators, starting from "genesis"; triggers
 make UPDATE and DELETE abort. One log file per run; `verify()` walks the chain by rowid and names the first row that
 does not match.
