@@ -1,16 +1,16 @@
 """A hash-chained, append-only event log in SQLite with one writer.
 
-All code was written during the event; no earlier code was copied. The gate log's design follows the author's
-earlier private project (agent-harness-v2). The one writer serializes emits with an RLock and writes each event inside BEGIN IMMEDIATE; each row's hash
-is computed over the previous hash and the row's fields with null-byte separators, starting from "genesis"; triggers
+All code was written during the event; no earlier code was copied. The design follows the author's earlier private
+projects (agent-harness-v2 and pgharness). The one writer serializes emits with an RLock and writes each event inside
+BEGIN IMMEDIATE; each row's hash is computed over the previous hash and the row's fields with null-byte separators, starting from "genesis"; triggers
 make UPDATE and DELETE abort. One log file per run; `verify()` walks the chain by rowid and names the first row that
 does not match.
 
 What the chain protects against depends on the key:
 - **Unkeyed (sha256):** accidental damage and edits that do not recompute the chain. Anyone who can write the file can
   drop the triggers, edit a row and recompute every hash after it.
-- **Keyed (HMAC-SHA256, GLINT_LOG_KEY):** a rewrite by anyone without the key, which the agent and the tools it calls
-  never hold. The scheme is recorded in the file's meta table, so a keyed log is never verified as an unkeyed one.
+- **Keyed (HMAC-SHA256, GLINT_LOG_KEY):** a rewrite by anyone without the key. The key is in the gate server's
+  environment, so keep it out of the agent's prompt and of any file the agent can read. The scheme is recorded in the file's meta table, so a keyed log is never verified as an unkeyed one.
 - **Truncation:** cutting rows off the end leaves a valid shorter chain. `head()` returns (count, last hash); kept
   somewhere the agent cannot write, `verify(expected_head=...)` fails when the log no longer contains that head.
 """
@@ -82,13 +82,10 @@ class EventLog:
     def _scheme(self) -> str:
         """The file's chain scheme, recorded on first open. A file from before the meta table, with events, is sha256."""
         wanted = "hmac-sha256" if self.key else "sha256"
-        row = self._conn.execute("SELECT v FROM meta WHERE k = 'chain'").fetchone()
-        if row is None:
-            has_events = self._conn.execute("SELECT 1 FROM events LIMIT 1").fetchone() is not None
-            recorded = "sha256" if has_events else wanted
-            self._conn.execute("INSERT INTO meta (k, v) VALUES ('chain', ?)", (recorded,))
-        else:
-            recorded = row[0]
+        # one statement, so two processes opening a new file at once cannot both insert; whichever wins, both read it
+        self._conn.execute("INSERT OR IGNORE INTO meta (k, v) SELECT 'chain', CASE WHEN EXISTS (SELECT 1 FROM events) "
+                           "THEN 'sha256' ELSE ? END", (wanted,))
+        recorded = self._conn.execute("SELECT v FROM meta WHERE k = 'chain'").fetchone()[0]
         if recorded == "hmac-sha256" and not self.key:
             raise ChainBroken(f"{self.path} is a keyed log: set {KEY_ENV} to open it")
         if recorded == "sha256" and self.key:

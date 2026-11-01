@@ -60,8 +60,8 @@ with quiet_stdout():
 
     from glint.assist.banking import PLAN_TOOL
     from glint.assist.tau2_tools import assist_environment
-    from glint.gates import Enforcer, EventLog
-    from glint.gates.eventlog import log_key
+    from glint.gates import ChainBroken, Enforcer, EventLog
+    from glint.gates.eventlog import KEY_ENV, log_key
 
 DOMAIN = "banking_knowledge"
 RETRIEVAL = "bm25_grep"
@@ -147,7 +147,12 @@ class BankServer:
         with self._lock:
             s = self.sessions.get(sid)
             if s is None:
-                s = BankSession(sid, EventLog(session_dir(self.home, sid) / "gates.sqlite", key=log_key()))
+                try:
+                    events = EventLog(session_dir(self.home, sid) / "gates.sqlite", key=log_key())
+                except ChainBroken as e:  # a resumed session whose log was opened with a different GLINT_LOG_KEY
+                    raise MCPError(types.INTERNAL_ERROR, f"{e}. Restart the server with {KEY_ENV} as it was when "
+                                   "this session's log was created, or start a new session.") from e
+                s = BankSession(sid, events)
                 s.enforcer = Enforcer(DOMAIN, s.events, context=s.context)
                 self.sessions[sid] = s
         with s.lock:

@@ -200,6 +200,19 @@ def test_load_scenario_resets_and_never_leaks_the_customer_instructions(server):
     assert loaded == ["task_054", "task_054", ""] and server.session().events.verify() > 3
 
 
+def test_a_session_log_opened_with_another_key_setting_names_the_fix(server, monkeypatch):
+    from glint.gates.eventlog import KEY_ENV
+    monkeypatch.setenv(KEY_ENV, "operator key")
+    server.load_scenario(None, "task_054")
+    server.session().events.close()
+    monkeypatch.delenv(KEY_ENV)
+    restarted = bank.BankServer(sid="s1")  # the same session folder, now without the key
+    with pytest.raises(MCPError, match=f"keyed log.*Restart the server with {KEY_ENV}"):
+        restarted.call(None, bank.POLICY, {})
+    monkeypatch.setenv(KEY_ENV, "operator key")
+    assert not bank.BankServer(sid="s1").call(None, bank.POLICY, {}).is_error
+
+
 def test_get_bank_policy_is_the_environment_policy(server):
     reply = server.call(None, bank.POLICY, {})
     assert not reply.is_error and reply.content[0].text == bank.build_environment().get_policy()
