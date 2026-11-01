@@ -1,6 +1,6 @@
 # Glint: project rules
 
-Glint: MCP decision tools that take over analytical decisions for Meta's open-weight Muse Glimmer 30B on τ²-bench (Meta Global AI Developer Hackathon, Indie track). Working files (run data, ledger, results, keys) live outside the repo, under `GLINT_HOME`.
+Glint: deterministic policy gates that check every write of Meta's open-weight Muse Glimmer 30B against a bank's written policy, as code, before it runs, on τ²-bench, with a hash-chained gate log (Meta Global AI Developer Hackathon, Indie track). Working files (run data, ledger, results, keys) live outside the repo, under `GLINT_HOME`.
 
 ## Experiments
 - **Every paid run has caps** (`glint.meter`); Modal sessions go through `glimmer_serve.session()` (mid-session cap, retried stop, spend written every 60 s).

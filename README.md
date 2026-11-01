@@ -6,12 +6,10 @@
 
 An agent that can move money is only as safe as its worst call. A 30B model holds a customer conversation well and still gets policy decisions wrong: the largest credit-limit increase a card allows, which disputes need a provisional credit, whether a card can be closed. Glint takes those decisions away from the model. Each write the agent attempts goes through a gate that applies the bank's written policy to the live account records. An allowed write runs. A denied write does not run, and the agent gets the rule, what the check found, the facts it used and the next step. The agent cannot skip the check. A gate checks only what its rules encode: a write no rule covers is allowed and logged as such.
 
-**Demo video (2:35, captions):** [youtu.be/tdQuhfSO_9w](https://youtu.be/tdQuhfSO_9w). Every clip is replayed from recorded logs: the Muse Code run of 2026-10-31 and the desk's recorded runs.
-
-## Try it
-- **Bank Desk, recorded runs:** [quanticsoul4772.github.io/glint](https://quanticsoul4772.github.io/glint/). The same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side; the gated pairs show each write a policy gate blocked and what the agent did next. No sign-in.
-- **In Muse Code:** the [glint-bank plugin](plugins/glint-bank/README.md) serves a τ² bank over MCP with every write gated. Checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31): the server reached `ready` with 23 tools and a $4,000 increase past the tier maximum was refused, then $2,500 allowed. In one interactive session (2026-11-01) Muse shut the plugin's server down at startup, after fetching a fresh feature configuration, so the agent had no bank tools; `scripts/muse_check.py` reads Muse's startup log and says whether the server reached `ready`.
-- **Locally:** the desk in replay mode needs no GPU and no keys (see [Run it](#run-it)).
+## For judges: three steps
+1. **Watch the demo video** (2:35, captions): [youtu.be/tdQuhfSO_9w](https://youtu.be/tdQuhfSO_9w). Every clip is replayed from recorded logs: the Muse Code run of 2026-10-31 and the desk's recorded runs.
+2. **Open the Bank Desk:** [quanticsoul4772.github.io/glint](https://quanticsoul4772.github.io/glint/). The same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side; press Play and watch for the red "Blocked by policy gate" cards. No sign-in, no install.
+3. **Check the gates yourself** (no GPU, no keys): clone and run the two gate replays in [Run it](#run-it), or load the [glint-bank plugin](plugins/glint-bank/README.md) in Muse Code, where every write to a τ² bank goes through the gates over MCP.
 
 ![Bank Desk, gated pair (task_054, a tuned task): on the left, Glimmer alone fails; on the right, a policy gate holds a dispute filing until the agent's dispute plan records the date the customer gave, two more gates make it confirm the shipping address and offer expedited shipping, and this run passes](docs/images/desk-gate.png)
 
@@ -22,7 +20,7 @@ Each number says where it comes from.
 |---|---|---|
 | τ²'s correct actions replayed through the gates (`scripts/gate_replay.py`, `scripts/bank_replay.py`) | **0 false refusals in 289 expected writes** on the 77 banking training tasks | Replays of the benchmark's own correct answers, not live runs. The gates were checked against these during development. |
 | Recorded failed runs replayed (`scripts/bank_replay.py`) | **24 of 32 stopped at a gated step**, the database unchanged: 2 by the task's own rule, 22 by a procedure or plan rule (a skipped lookup, an unverified customer, a dispute out of plan order) | The recorded failures the rules were written from (`data-public/wrong-write-runs.json`), so this shows the gates work as designed, not that they catch new mistakes. τ²'s gold accepts 9 of the 24 stopped writes in another order. |
-| Live gated runs on 59 tasks no gate change came from (`python -m glint.inspect refusals`; gates at PR 151) | **21 refusals, 0 false**: 6 held a write τ² expects until a required step was done; the other 15 refused writes τ² does not expect (8 card closures with no reason on record), not judged | These tasks' correct answers were in the development replays above, but none of their runs shaped a gate. The same runs show **no pass-rate gain** (below). |
+| Live gated runs on 59 tasks no gate change came from (`python -m glint.inspect refusals`; gates at PR 151) | **21 refusals; 0 false of the 6 that could be judged**: 6 held a write τ² expects until a required step was done; the other 15 refused writes τ² does not expect (8 card closures with no reason on record), not judged | These tasks' correct answers were in the development replays above, but none of their runs shaped a gate. The same runs show **no pass-rate gain** (below). |
 | Muse Code, 2026-10-31 (plugin 0.2.1, Muse Spark as the agent, task_054) | A $4,000 credit-limit increase **denied**; the agent followed the fix and submitted $2,500, **allowed**; the gate log's hash chain verified | One run on a tuned task. The prompt asked for $4,000, so the deny shows the gate and the agent's recovery, not a mistake the agent made on its own. |
 
 The deny the agent got in that Muse Code run, word for word (the verdict JSON shortened):
@@ -94,7 +92,13 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 
 <!-- results:start (replaced by the refresh-results step; edit the result notes, not this block) -->
 ## What was measured
-τ²-bench v1.0.1, Glimmer at medium reasoning, both arms with the same seeds on the same backend. Reported **by task** (runs of one task are not independent); tuned and untuned tasks apart, latest first. Full detail: [docs/results.md](docs/results.md).
+| In short | Result |
+|---|---|
+| What the gates do | Block the writes their rules forbid, with 0 false refusals in 289 replayed correct writes and 0 false of the 6 live refusals that could be judged on unseen tasks |
+| What they do not do | Raise pass rates: on 59 unseen tasks, Glimmer alone passed 21 of 108 runs and gated 19 |
+| Where gains appear | Only on tuned tasks (below), which do not count as general evidence |
+
+τ²-bench v1.0.1, Glimmer at medium reasoning, both arms with the same seeds on the same backend. Reported **by task** (runs of one task are not independent); tuned and untuned tasks apart, latest first. A **tuned** task is one whose runs shaped a gate, the dispute plan or a tool; an **untuned** task is one whose runs shaped nothing. k is the number of runs per task. Full detail: [docs/results.md](docs/results.md).
 
 - **Banking, 59 unseen tasks, every write gated: no gain** (k=2, the gated arm on the code at PR 151, before the search fix of PR 171). On 108 matched runs Glimmer alone passed 21 and gated 19; by task 5 better, 8 worse (sign test p = 0.58, two-sided). These are the training tasks outside the 12 the gates were built on whose correct answers make a gated write; no change came from their runs.
   - Alone's misses include 30 context overflows (gated: 3); on the 39 tasks where alone never overflowed, alone passed 20 and gated 19. The gated arm hit τ²'s step limit in 41 of 108 runs, all failed; 83% of their calls were knowledge-base searches. The likely cause, not tested, is the search's budget, which PR 171 changed after this run.
@@ -117,6 +121,7 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 <!-- results:end -->
 ## Limitations
 - **The gates block the specific steps they encode; they do not make every write correct, and they have not been shown to raise pass rates.** On the 59 unseen tasks the gated arm passed 19 of 108 matched runs against Glimmer alone's 21; 20 of its failed runs still filed a write with a wrong value, and 65 of its 643 live gate decisions were allows for writes no rule covers.
+- **Muse Code, interactive mode:** checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31), the plugin's server reached `ready` with 23 tools and a $4,000 increase past the tier maximum was refused, then $2,500 allowed. In one interactive session (2026-11-01) Muse shut the plugin's server down at startup, after fetching a fresh feature configuration, so the agent had no bank tools; `scripts/muse_check.py` reads Muse's startup log and says whether the server reached `ready`.
 - **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard.
 - **Small samples.** k=2 to 4 per task; no sign test is significant.
 - **The gates' rules were written and checked on training tasks**, so the replay numbers and the gated results on those 12 tasks are in-sample. A deny that lands on a run's first wrong write shows the gate caught that write, not that the run would then pass.
@@ -150,7 +155,6 @@ uv run pytest -q
 ## Built during the event
 - All code in this repo was written during the event (Oct 26 – Nov 4, 2026). The first commit is `952dd30` on 2026-10-26.
 - This history was rewritten on Oct 31 to remove the author's name, local paths and session links. Authors and dates are unchanged; the only changes to files are local folder paths in comments, now `<workspace>`, and one coverage data file removed. The old-to-new commit map is in [docs/history-map.txt](docs/history-map.txt). The original repository, with its pull request and CI record, is private, and the organizers can be given access. PR numbers in this repo ("PR 147") refer to that record.
-- The gate runner and event log reuse design patterns from the author's earlier work; all code here was written during the event.
 - Third-party work, used under its license: [τ²-bench](https://github.com/sierra-research/tau2-bench) (MIT, Sierra Research) is the benchmark and a dependency; its banking data is bundled in `plugins/glint-bank/data/` with its license. The desk's spacing, type and color scales follow Astryx's neutral theme (MIT, Meta Platforms).
 
 ## License

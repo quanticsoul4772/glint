@@ -126,7 +126,7 @@ def test_live_endpoints_refuse_when_not_configured(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     assert client.get("/api/live/status").json()["available"] is False
     r = client.post("/api/live/start", json={"task_id": "task_054"})
-    assert r.status_code == 503 and "GLINT_GLIMMER_URL" in r.json()["detail"]
+    assert r.status_code == 503 and r.json()["detail"] == "live mode is not configured"  # names stay in the app log
 
 
 def test_live_endpoints_run_one_pair_at_a_time(monkeypatch):
@@ -764,10 +764,19 @@ def test_live_status_reports_a_missing_baseten_key(monkeypatch):
     monkeypatch.delenv("BASETEN_API_KEY", raising=False)
     status = client.get("/api/live/status").json()
     assert status["available"] is True  # live mode runs on Meta alone
-    assert status["fallback_available"] is False and status["fallback_missing"] == ["BASETEN_API_KEY"]
+    assert status["fallback_available"] is False
     monkeypatch.setenv("BASETEN_API_KEY", "x")
     status = client.get("/api/live/status").json()
-    assert status["fallback_available"] is True and status["fallback_missing"] == []
+    assert status["fallback_available"] is True
+
+
+def test_live_status_never_names_the_missing_settings(monkeypatch):
+    for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY_KEY", "MODAL_PROXY_SECRET", "MODEL_API_KEY", "BASETEN_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    body = client.get("/api/live/status").text
+    assert '"available":false' in body
+    for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY", "MODEL_API_KEY", "BASETEN_API_KEY", "missing"):
+        assert k not in body
 
 
 def test_the_desk_bills_the_same_scale_down_window_glimmer_serve_sets():
