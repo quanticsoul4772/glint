@@ -25,6 +25,16 @@ for ref in "$@"; do
   if ! git -C "$repo" worktree add -q --detach "$wt" "$ref" 2>/dev/null; then
     echo "$ref: FAILED to check out"; status=1; rmdir "$wt" 2>/dev/null; continue
   fi
+  # a ref that changes only Markdown against origin/main: ruff alone (CI still runs everything); the full check took
+  # about 5 minutes per docs PR (2026-11-01)
+  changed=$(git -C "$wt" diff --name-only "$(git -C "$wt" merge-base HEAD origin/main)" HEAD)
+  if [ -n "$changed" ] && ! printf '%s\n' "$changed" | grep -qv '\.md$'; then
+    (cd "$wt" && $RUFF check src tests scripts --line-length 120 > ruff.log 2>&1); r=$?
+    echo "$ref: docs only ($(printf '%s\n' "$changed" | wc -l) Markdown files): ruff exit $r; pytest and replays skipped"
+    [ $r -eq 0 ] || { head -n 20 "$wt/ruff.log"; status=1; }
+    git -C "$repo" worktree remove --force "$wt"
+    continue
+  fi
   (cd "$wt" && PYTHONPATH=src $PY -X utf8 -m pytest -q -p no:cacheprovider --cov --cov-report=json:coverage.json \
     > pytest.log 2>&1); p=$?
   (cd "$wt" && $PY scripts/coverage_gate.py > cov.log 2>&1); c=$?

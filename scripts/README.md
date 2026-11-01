@@ -24,6 +24,9 @@ Run them from the repo root with `uv run python scripts/NAME.py` (each script's 
 |---|---|
 | `coverage_gate.py` | Per-module coverage floors, run after `pytest --cov` (also in CI) |
 | `push_pr.sh` | Pushes the current branch only if its PR is still open |
+| `pr_edit.sh` | Edits an open PR's title or body (REST); refuses a merged or closed PR |
+| `wt.sh` | Runs pytest or a script against this checkout's `src` with the shared venv, from any worktree |
+| `wait_run.sh` | Waits for a launch.sh job's log to show the job ended, then prints the ending lines (run in the background) |
 | `launch.sh` | Starts one long job detached and checks it is alive |
 
 ## Measurement history (Oct 26–27)
