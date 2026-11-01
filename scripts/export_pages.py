@@ -42,6 +42,7 @@ def export(out: Path) -> list[Path]:
             raise SystemExit(f"scenario id {s['id']!r} is not a safe file name")
         write(f"api/scenarios/{s['id']}.json", get(f"/api/scenarios/{s['id']}"))
     write("api/results.json", get("/api/results"))
+    write("api/try.json", get("/api/try"))
     write("api/live/status.json", {"available": False})
     page = (HERE / "static" / "index.html").read_text(encoding="utf-8")
     if "<script>" not in page:

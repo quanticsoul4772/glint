@@ -1,0 +1,370 @@
+{
+ "task_id": "task_054",
+ "tool": "submit_credit_limit_increase_request",
+ "card": "Gold Rewards Card",
+ "current_limit": 5000,
+ "customer": "Sofia Papadopoulos (simulated τ²-bench customer)",
+ "note": "Each decision is the gates' own output on task_054's τ²-bench database after the customer is verified, computed by scripts/export_try.py; no write was executed.",
+ "decisions": [
+  {
+   "amount": 100,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 200,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 300,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 400,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 500,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 600,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 700,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 800,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 900,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1000,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1100,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1200,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1300,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1400,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1500,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1600,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1700,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1800,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 1900,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 2000,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 2100,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 2200,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 2300,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 2400,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 2500,
+   "allowed": true,
+   "rule": "banking.cli.submit.approve",
+   "message": ""
+  },
+  {
+   "amount": 2600,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $2,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $2,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 2700,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $2,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $2,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 2800,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $2,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $2,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 2900,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $2,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $2,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3000,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3100,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,100.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,100.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3200,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,200.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,200.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3300,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,300.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,300.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3400,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,400.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,400.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3500,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,500.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,500.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3600,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3700,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3800,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 3900,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $3,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $3,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4000,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4100,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,100.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,100.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4200,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,200.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,200.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4300,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,300.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,300.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4400,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,400.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,400.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4500,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,500.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,500.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4600,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4700,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4800,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 4900,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $4,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $4,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5000,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5100,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,100.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,100.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5200,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,200.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,200.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5300,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,300.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,300.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5400,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,400.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,400.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5500,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,500.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,500.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5600,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,600.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5700,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,700.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5800,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,800.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 5900,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $5,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $5,900.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  },
+  {
+   "amount": 6000,
+   "allowed": false,
+   "rule": "banking.cli.submit.reduce_amount",
+   "message": "Error: this write was blocked by a policy gate and was NOT executed. Nothing changed.\nRule: banking.cli.submit.reduce_amount (glint.assist.banking.check_credit_limit_increase)\nWhat the check found: the requested increase cannot be submitted as given\nFacts it used:\n- requested increase $6,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\nWhy it matters: Nothing was submitted. Tell the customer the largest increase their card allows and ask whether to submit that.\nWhat to do next: Submit an increase no larger than max_increase in the verdict, for an account of this user.\nVerdict: {\"current_limit\": 5000.0, \"max_increase\": 2500.0, \"payment_months\": 3, \"reasons\": [\"requested increase $6,000.00 exceeds the premium-tier maximum $2,500.00 (50% of the current limit); do not submit it, offer the maximum instead\"], \"steps\": [\"Each tool below is hidden: unlock it once with unlock_discoverable_agent_tool(agent_tool_name=...), then call it with call_discoverable_agent_tool(agent_tool_name=..., arguments=...). Never call it by its own name.\", \"1. submit_credit_limit_increase_request_7392 (requested_increase_amount must not exceed max_increase)\", \"2-5. Required lookups, all four, before deciding (the policy requires them even though this verdict already read the same records): get_user_dispute_history_7291, get_pending_replacement_orders_5765, get_credit_limit_increase_history_4829, get_payment_history_6183 with months = payment_months\", \"6. approve_credit_limit_increase_5847 with new_credit_limit, or deny_credit_limit_increase_5848 with denial_reason, as this verdict says\"], \"tier\": \"premium\", \"verdict\": \"reduce_amount\"}"
+  }
+ ]
+}

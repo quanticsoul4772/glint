@@ -21,6 +21,7 @@ def test_every_exported_file_is_what_the_api_serves(tmp_path):
     assert json.loads((tmp_path / "api" / "results.json").read_text(encoding="utf-8")) == client.get(
         "/api/results").json()
     assert json.loads((tmp_path / "api" / "live" / "status.json").read_text(encoding="utf-8")) == {"available": False}
+    assert json.loads((tmp_path / "api" / "try.json").read_text(encoding="utf-8")) == client.get("/api/try").json()
     assert (tmp_path / ".nojekyll").exists()
 
 
