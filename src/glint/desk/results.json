@@ -3,7 +3,7 @@
   "set": "banking-unseen-lean-gated",
   "title": "Banking, 59 unseen tasks, write gates enforced",
   "role": "untuned",
-  "note": "The 59 banking training tasks outside the 12 the gates were built on, whose correct answers make a gated write; no gate, plan or tool change came from their runs. k=2, Glimmer on Modal, gated tools arm on the code before PR 153-PR 167. No gain: 5 tasks better, 8 worse (sign test p = 0.58, two-sided). Alone's misses include 30 context overflows; the gated arm hit \u03c4\u00b2's step limit in 41 of 108 runs (cause likely, not tested). The gate refused 21 writes: 0 false (6 refused a write \u03c4\u00b2 expects until a required step was done); the other 15 refused writes \u03c4\u00b2 does not expect and are not judged. The gated arm made 0 decision-tool calls.",
+  "note": "The 59 banking training tasks outside the 12 the gates were built on, whose correct answers make a gated write; no gate, plan or tool change came from their runs. k=2, Glimmer on Modal, gated tools arm on the code at PR 151 (before the search fix of PR 171). No gain: 5 tasks better, 8 worse (sign test p = 0.58, two-sided); task_064 is no data because every run in both arms overflowed. Alone's misses include 30 context overflows; the gated arm hit \u03c4\u00b2's step limit in 41 of 108 runs (cause likely, not tested). The gate refused 21 writes: 0 false (6 refused a write \u03c4\u00b2 expects until a required step was done); the other 15 refused writes \u03c4\u00b2 does not expect and are not judged.",
   "tasks": [
    {
     "task": "banking_knowledge-task_005",

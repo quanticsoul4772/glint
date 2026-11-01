@@ -2,9 +2,9 @@
 
 [![tests](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml/badge.svg)](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml)
 
-**Verifiable agents: Glint lets Meta's open-weight Muse Glimmer 30B act on a bank's accounts because the agent only proposes. Written policy, as code, decides every write before it runs, and every decision goes into a hash-chained log.**
+**Verifiable agents: Glint puts Meta's open-weight Muse Glimmer 30B in front of a bank's accounts with the bank's written policy, as code, checking every write before it runs. A write the policy forbids does not run, and every decision goes into a hash-chained log.**
 
-An agent that can move money is only as safe as its worst call. A 30B model holds a customer conversation well and still gets policy decisions wrong: the largest credit-limit increase a card allows, which disputes need a provisional credit, whether a card can be closed. Glint takes those decisions away from the model. Each write the agent attempts goes through a gate that applies the bank's written policy to the live account records. An allowed write runs. A denied write does not run, and the agent gets the rule, what the check found, the facts it used and the next step. The agent cannot skip the check.
+An agent that can move money is only as safe as its worst call. A 30B model holds a customer conversation well and still gets policy decisions wrong: the largest credit-limit increase a card allows, which disputes need a provisional credit, whether a card can be closed. Glint takes those decisions away from the model. Each write the agent attempts goes through a gate that applies the bank's written policy to the live account records. An allowed write runs. A denied write does not run, and the agent gets the rule, what the check found, the facts it used and the next step. The agent cannot skip the check. A gate checks only what its rules encode: a write no rule covers is allowed and logged as such.
 
 **Demo video:** added with the submission.
 
@@ -21,9 +21,9 @@ Each number says where it comes from.
 | Check | Result | Where it comes from |
 |---|---|---|
 | τ²'s correct actions replayed through the gates (`scripts/gate_replay.py`, `scripts/bank_replay.py`) | **0 false refusals in 289 expected writes** on the 77 banking training tasks | Replays of the benchmark's own correct answers, not live runs. The gates were checked against these during development. |
-| Recorded wrong writes replayed (`scripts/bank_replay.py`) | **24 of 24 stopped**, each by the expected rule, the database unchanged | The recorded failures the rules were written from (`data-public/wrong-write-runs.json`), so this shows the gates work as designed, not that they catch new mistakes. |
-| Live gated runs on 59 tasks no gate was built from (`python -m glint.inspect refusals`) | **21 refusals, 0 false**: 6 held a write τ² expects until a required step was done; the other 15 refused writes τ² does not expect (8 card closures with no reason on record), not judged | Out of sample. The same runs show **no pass-rate gain** (below). |
-| Muse Code, 2026-10-31 (plugin 0.2.1, Muse Spark as the agent, task_054) | A $4,000 credit-limit increase **denied**; the agent followed the fix and submitted $2,500, **allowed**; the gate log's hash chain verified | One run on a tuned task. |
+| Recorded failed runs replayed (`scripts/bank_replay.py`) | **24 of 32 stopped at a gated step**, the database unchanged: 2 by the task's own rule, 22 by a procedure or plan rule (a skipped lookup, an unverified customer, a dispute out of plan order) | The recorded failures the rules were written from (`data-public/wrong-write-runs.json`), so this shows the gates work as designed, not that they catch new mistakes. τ²'s gold accepts 9 of the 24 stopped writes in another order. |
+| Live gated runs on 59 tasks no gate change came from (`python -m glint.inspect refusals`; gates at PR 151) | **21 refusals, 0 false**: 6 held a write τ² expects until a required step was done; the other 15 refused writes τ² does not expect (8 card closures with no reason on record), not judged | These tasks' correct answers were in the development replays above, but none of their runs shaped a gate. The same runs show **no pass-rate gain** (below). |
+| Muse Code, 2026-10-31 (plugin 0.2.1, Muse Spark as the agent, task_054) | A $4,000 credit-limit increase **denied**; the agent followed the fix and submitted $2,500, **allowed**; the gate log's hash chain verified | One run on a tuned task. The prompt asked for $4,000, so the deny shows the gate and the agent's recovery, not a mistake the agent made on its own. |
 
 The deny the agent got in that Muse Code run, word for word (the verdict JSON shortened):
 
@@ -80,7 +80,7 @@ Writes no rule covers yet are allowed and logged as `no_rule_yet`, with the reas
 - `glint.atem` re-parses Glimmer's tool calls from its raw token stream: the hosted parser turned string arguments such as zip codes into numbers.
 
 ## Decision tools
-Before the gates, the same checks were offered as seven optional **MCP tools** the agent could call (`python -m glint.assist.server`, stdio). They are still served, and wired into τ²-bench toolkits (`glint.assist.tau2_tools`) and the Muse Code plugin. Measured: Glimmer called them in only 2 of 80 runs on τ²'s banking test split, and 0 times in the 108 gated runs on the unseen tasks, which is why the checks became enforced gates.
+Before the gates, the same checks were offered as seven optional **MCP tools** the agent could call (`python -m glint.assist.server`, stdio). They are still served, and wired into τ²-bench toolkits (`glint.assist.tau2_tools`) and the Muse Code plugin. Measured: Glimmer called one in 1 of 80 runs on τ²'s banking test split, which is why the checks became enforced gates.
 
 | Tool | Domain | Decides |
 |---|---|---|
@@ -96,9 +96,9 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 ## What was measured
 τ²-bench v1.0.1, Glimmer at medium reasoning, both arms with the same seeds on the same backend. Reported **by task** (runs of one task are not independent); tuned and untuned tasks apart, latest first. Full detail: [docs/results.md](docs/results.md).
 
-- **Banking, 59 unseen tasks, every write gated: no gain** (k=2, the gated arm on the code before PR 153-PR 167). On 108 matched runs Glimmer alone passed 21 and gated 19; by task 5 better, 8 worse (sign test p = 0.58, two-sided). These are the training tasks outside the 12 the gates were built on whose correct answers make a gated write; no change came from their runs.
-  - Alone's misses include 30 context overflows (gated: 3). The gated arm hit τ²'s step limit in 41 of 108 runs, all failed; most of their calls were knowledge-base searches. The likely cause, not tested, is the search's budget.
-  - The gate refused 21 writes in these runs: 0 false (above).
+- **Banking, 59 unseen tasks, every write gated: no gain** (k=2, the gated arm on the code at PR 151, before the search fix of PR 171). On 108 matched runs Glimmer alone passed 21 and gated 19; by task 5 better, 8 worse (sign test p = 0.58, two-sided). These are the training tasks outside the 12 the gates were built on whose correct answers make a gated write; no change came from their runs.
+  - Alone's misses include 30 context overflows (gated: 3); on the 39 tasks where alone never overflowed, alone passed 20 and gated 19. The gated arm hit τ²'s step limit in 41 of 108 runs, all failed; 83% of their calls were knowledge-base searches. The likely cause, not tested, is the search's budget, which PR 171 changed after this run.
+  - The gate refused 21 writes in these runs: 0 false (above). 20 of the gated arm's failed runs still filed a write with a wrong value (a field the gates do not check).
 - **Banking with every write gated (v9, design data): no gain shown on untuned tasks (2 tasks, 2/8 → 4/8); on 10 tuned tasks 6 improved and 1 worse against Glimmer alone, not significant** (the same 12 tasks, k=4; the gated arm also has the decision tools, a dispute plan and open-item reminders; code at PR 147).
   - **10 tuned tasks** (the gates, the plan and the reminders were shaped by their runs): 039: 0/4 → 4/4; 054: 0/4 → 4/4; 040, 041, 051, 052: 0/4 → 3/4; 031, 038, 081 tied; 037 worse (4/4 → 2/4); sign test p = 0.0625 (one-sided); runs 7/40 → 25/40. Do not read as general evidence.
   - **2 untuned tasks:** 050: 2/4 → 4/4; 053 tied at 0/4 (likely the simulated customer's answers; not checked); runs 2/8 → 4/8. Two tasks cannot reach p < 0.05.
@@ -116,7 +116,7 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 
 <!-- results:end -->
 ## Limitations
-- **The gates make writes policy-correct; they have not been shown to raise pass rates.** On the 59 unseen tasks the gated arm passed 19 of 108 matched runs against Glimmer alone's 21.
+- **The gates block the specific steps they encode; they do not make every write correct, and they have not been shown to raise pass rates.** On the 59 unseen tasks the gated arm passed 19 of 108 matched runs against Glimmer alone's 21; 20 of its failed runs still filed a write with a wrong value, and 65 of its 643 live gate decisions were allows for writes no rule covers.
 - **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard.
 - **Small samples.** k=2 to 4 per task; no sign test is significant.
 - **The gates' rules were written and checked on training tasks**, so the replay numbers and the gated results on those 12 tasks are in-sample. A deny that lands on a run's first wrong write shows the gate caught that write, not that the run would then pass.
