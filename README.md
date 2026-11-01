@@ -10,7 +10,7 @@ An agent that can move money is only as safe as its worst call. A 30B model hold
 
 ## Try it
 - **Bank Desk, recorded runs:** [quanticsoul4772.github.io/glint](https://quanticsoul4772.github.io/glint/). The same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side; the gated pairs show each write a policy gate blocked and what the agent did next. No sign-in.
-- **In Muse Code, live:** the [glint-bank plugin](plugins/glint-bank/README.md) serves a τ² bank over MCP with every write gated. Ask your Muse Code agent to raise a card's limit past its tier maximum and watch the gate refuse it, then accept the allowed amount.
+- **In Muse Code:** the [glint-bank plugin](plugins/glint-bank/README.md) serves a τ² bank over MCP with every write gated. Checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31): the server reached `ready` with 23 tools and a $4,000 increase past the tier maximum was refused, then $2,500 allowed. In one interactive session (2026-11-01) Muse shut the plugin's server down at startup, after fetching a fresh feature configuration, so the agent had no bank tools; `scripts/muse_check.py` reads Muse's startup log and says whether the server reached `ready`.
 - **Locally:** the desk in replay mode needs no GPU and no keys (see [Run it](#run-it)).
 
 ![Bank Desk, gated pair (task_054, a tuned task): on the left, Glimmer alone fails; on the right, a policy gate holds a dispute filing until the agent's dispute plan records the date the customer gave, two more gates make it confirm the shipping address and offer expedited shipping, and this run passes](docs/images/desk-gate.png)
