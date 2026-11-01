@@ -29,6 +29,14 @@ GATED_NOTE = ("Glint's decision tools with every write gated (a denied write doe
               "compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count "
               "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
+    ("banking-unseen-lean-gated", True, "Banking, 59 unseen tasks, write gates enforced", "untuned",
+     ("The 59 banking training tasks outside the 12 the gates were built on, whose correct answers make a gated write; "
+      "no gate, plan or tool change came from their runs. k=2, Glimmer on Modal, gated tools arm on the code at "
+      "PR 151 (before the search fix of PR 171). No gain: 5 tasks better, 8 worse (sign test p = 0.58, two-sided); "
+      "task_064 is no data because every run in both arms overflowed. Alone's misses include 30 context overflows; "
+      "the gated arm hit τ²'s step limit in 41 of 108 runs (cause likely, not tested). The gate refused 21 writes: "
+      "0 false (6 refused a write τ² expects until a required step was done); the other 15 refused writes τ² does "
+      "not expect and are not judged.")),
     ("banking-plan-v9-gated", True, "Banking, untuned tasks, write gates enforced (v9)", "untuned",
      ("Tasks 050 and 053, which no gate, plan or open-item change came from. 053's failures are likely the simulated "
       "customer's answers (not checked); two tasks cannot reach p < 0.05 by sign test. " + GATED_NOTE),
