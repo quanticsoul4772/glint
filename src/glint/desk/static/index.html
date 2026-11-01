@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Glint Bank Desk</title>
+<meta name="description" content="Glint checks every write a bank agent attempts against the bank's written policy, as code, before it runs. Recorded runs of Meta's Muse Glimmer 30B alone and with Glint, side by side.">
+<meta property="og:title" content="Glint: the model proposes, the policy decides">
+<meta property="og:description" content="Deterministic policy gates for Meta's open-weight Muse Glimmer 30B on τ²-bench banking: a write the policy forbids does not run, and every decision goes into a hash-chained log.">
+<meta property="og:image" content="https://raw.githubusercontent.com/quanticsoul4772/glint/main/docs/images/desk-gate.png">
+<meta property="og:url" content="https://quanticsoul4772.github.io/glint/">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23B45309' d='M12 1c.6 5.6 2.4 8.4 11 11-8.6 2.6-10.4 5.4-11 11-.6-5.6-2.4-8.4-11-11 8.6-2.6 10.4-5.4 11-11z'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -215,6 +221,8 @@
   .dots i { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--chip); }
   .dots i.on { background: var(--text-2); }
   .dots.tools i.on { background: var(--accent); }
+  .intro { padding: var(--s3) var(--s6); font-size: var(--t-base); color: var(--text-2); border-bottom: 1px solid var(--border); }
+  .intro b { color: var(--text); font-weight: 600; } .intro a { color: var(--accent); }
   .chg { font-weight: 600; } .chg.improved { color: var(--ok); } .chg.worse { color: var(--bad); } .chg.tied { color: var(--text-3); font-weight: 500; }
 </style>
 </head>
@@ -224,6 +232,10 @@
   <nav class="seg" aria-label="View"><button id="tab-desk" class="on">Bank Desk</button><button id="tab-results">Results</button></nav>
   <div class="pill" id="mode"><i></i><span>Replay · recorded runs</span></div>
 </header>
+<p class="intro"><b>Glint checks every write a bank agent attempts against the bank's written policy, as code, before it runs.</b>
+  Press Play: the left pane is Meta's Muse Glimmer 30B alone; the right adds Glint, and each red "Blocked by policy gate" card
+  is a write that did not run, with the rule and the next step the agent was given.
+  <a href="https://youtu.be/tdQuhfSO_9w">Video</a> · <a href="https://github.com/quanticsoul4772/glint">Code and results</a></p>
 
 <main>
 <div id="desk-view">

@@ -98,11 +98,10 @@ def _new_session(task_id: str) -> live.LiveSession:
 
 @app.get("/api/live/status")
 def live_status():
-    missing = [k for k in LIVE_ENV if not os.environ.get(k)]
+    # public route: says whether live mode can run, never which settings are missing (the app log names them)
     running = [s.id for s in _sessions.values() if not s.done]
-    fallback_missing = [k for k in FALLBACK_ENV if not os.environ.get(k)]
-    return {"available": not missing, "missing": missing, "fallback_available": not fallback_missing,
-            "fallback_missing": fallback_missing, "running": running,
+    return {"available": all(os.environ.get(k) for k in LIVE_ENV),
+            "fallback_available": all(os.environ.get(k) for k in FALLBACK_ENV), "running": running,
             "pairs_today": budget.pairs_today(), "pairs_per_day": budget.pairs_per_day}
 
 
@@ -110,7 +109,8 @@ def live_status():
 def live_start(body: StartLive):
     missing = [k for k in LIVE_ENV if not os.environ.get(k)]
     if missing:
-        raise HTTPException(503, f"live mode is not configured: missing {', '.join(missing)}")
+        print(f"live start refused: missing {', '.join(missing)}", flush=True)  # names in the app log only
+        raise HTTPException(503, "live mode is not configured")
     if body.task_id not in banking_tasks():
         raise HTTPException(404, f"no banking task {body.task_id}")
     with _lock:  # one live pair at a time: each holds two conversations on the one Glimmer endpoint
