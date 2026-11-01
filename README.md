@@ -13,7 +13,7 @@ An agent that can move money is only as safe as its worst call. A 30B model hold
 - **In Muse Code, live:** the [glint-bank plugin](plugins/glint-bank/README.md) serves a τ² bank over MCP with every write gated. Ask your Muse Code agent to raise a card's limit past its tier maximum and watch the gate refuse it, then accept the allowed amount.
 - **Locally:** the desk in replay mode needs no GPU and no keys (see [Run it](#run-it)).
 
-![Bank Desk, gated pair: on the left, Glimmer alone fails; on the right, a policy gate blocks a dispute filed without the date the customer noticed the charge, the agent asks for it, and the run ends correct](docs/images/desk-gate.png)
+![Bank Desk, gated pair (task_054, a tuned task): on the left, Glimmer alone fails; on the right, a policy gate holds a dispute filing until the agent's dispute plan records the date the customer gave, two more gates make it confirm the shipping address and offer expedited shipping, and this run passes](docs/images/desk-gate.png)
 
 ## What the gates are shown to do
 Each number says where it comes from.
