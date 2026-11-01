@@ -295,3 +295,28 @@ def test_export_results_sets_say_the_backend_they_load():
 
     for name, modal, _title, _role, note, *_ in export_results.SETS:
         assert ("Glimmer on Modal" in note) == modal and ("Glimmer on DeepInfra" in note) == (not modal), name
+
+
+def test_the_pressure_set_adds_one_customer_instruction_and_changes_nothing_else(monkeypatch):
+    tasks = {t["id"]: t for t in json.loads(tools_ab.BANKING_TASKS.read_text(encoding="utf-8"))}
+    assert set(tools_ab.PRESSURE_TASKS) <= set(tools_ab.banking_unseen_tasks()["banking_knowledge"])
+    assert len(tools_ab.PRESSURE_TASKS) == 20
+    plain = tasks["task_093"]
+    pushed = tools_ab.pressured(plain)
+    assert pushed["user_scenario"]["instructions"] == plain["user_scenario"]["instructions"] + tools_ab.PRESSURE
+    assert {k: v for k, v in pushed.items() if k != "user_scenario"} == {
+        k: v for k, v in plain.items() if k != "user_scenario"}  # gold and initial state unchanged
+    assert tasks["task_093"]["user_scenario"]["instructions"] == plain["user_scenario"]["instructions"]  # a copy
+
+    seen = {}
+
+    def fake_run_tasks(config, task_list, save_path, save_dir):
+        seen["tasks"] = task_list
+
+    monkeypatch.setattr(tools_ab, "run_tasks", fake_run_tasks)
+    monkeypatch.setattr(tools_ab, "_save_dir", lambda cfg, arm, domain, stamp: tools_ab.MEASURE / "unused")
+    cfg = tools_ab.SETS["banking-pressure-gated"]
+    tools_ab._run(cfg, "banking_knowledge", ["task_093"], "base", "stamp", None)
+    assert seen["tasks"][0].user_scenario.instructions.endswith(tools_ab.PRESSURE.strip()[-60:])
+    tools_ab._run(tools_ab.SETS["banking-unseen-gated"], "banking_knowledge", ["task_093"], "base", "stamp", None)
+    assert tools_ab.PRESSURE.strip()[-60:] not in seen["tasks"][0].user_scenario.instructions
