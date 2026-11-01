@@ -61,6 +61,7 @@ with quiet_stdout():
     from glint.assist.banking import PLAN_TOOL
     from glint.assist.tau2_tools import assist_environment
     from glint.gates import Enforcer, EventLog
+    from glint.gates.eventlog import log_key
 
 DOMAIN = "banking_knowledge"
 RETRIEVAL = "bm25_grep"
@@ -146,7 +147,7 @@ class BankServer:
         with self._lock:
             s = self.sessions.get(sid)
             if s is None:
-                s = BankSession(sid, EventLog(session_dir(self.home, sid) / "gates.sqlite"))
+                s = BankSession(sid, EventLog(session_dir(self.home, sid) / "gates.sqlite", key=log_key()))
                 s.enforcer = Enforcer(DOMAIN, s.events, context=s.context)
                 self.sessions[sid] = s
         with s.lock:
@@ -272,7 +273,7 @@ def show_log(sid: str, home: Path | None = None) -> str:
     path = session_dir(Path(home) if home is not None else bank_home(), sid) / "gates.sqlite"
     if not path.exists():
         raise SystemExit(f"no gate log for session {sid!r} at {path}")
-    events = EventLog(path)
+    events = EventLog(path, key=log_key())
     try:
         lines = []
         for e in events.events():
@@ -283,7 +284,9 @@ def show_log(sid: str, home: Path | None = None) -> str:
                 lines.append(f"scenario.loaded  {p['task_id'] or '(base database)'}")
             else:
                 lines.append(e["type"])
-        lines.append(f"verify(): OK, {events.verify()} events, hash chain intact")
+        n, head = events.head()
+        lines.append(f"verify(): OK, {events.verify()} events, hash chain intact ({events.scheme})")
+        lines.append(f"head: event {n}, {head}  (keep this line off this machine; verify against it to detect truncation)")
         return "\n".join(lines)
     finally:
         events.close()

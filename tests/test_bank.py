@@ -318,7 +318,7 @@ def test_brief_and_log_clis(server, capsys, monkeypatch):
     assert bank.main(["log", "s1"]) == 0
     out = capsys.readouterr().out
     assert "scenario.loaded  task_054" in out and "banking.cli.submit.reduce_amount" in out
-    assert "gates.manifest" in out and "hash chain intact" in out
+    assert "gates.manifest" in out and "hash chain intact (sha256)" in out and "head: event " in out
     with pytest.raises(SystemExit, match="no gate log"):
         bank.main(["log", "nobody"])
     with pytest.raises(SystemExit, match="unknown task_id"):
