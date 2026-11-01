@@ -59,6 +59,15 @@ def test_a_denied_call_becomes_a_gate_event_in_place_of_its_action_or_lookup():
     assert gate["args"] == {"id": "cc_1"} and gate["next"] == "Ask why the user is closing and log it."
 
 
+def test_the_desk_write_list_is_tau2_bankings_write_tools():
+    from tau2.domains.banking_knowledge.environment import get_environment
+
+    from glint.desk.events import WRITES
+    from glint.gates.enforce import write_tools
+
+    assert WRITES == write_tools(get_environment(retrieval_variant="bm25_grep").tools) - {"example_agent_tool_0000"}
+
+
 def _run(make_sim, trial, kind, deny=False):
     messages = [{"role": "user", "content": "close my card"}]
     if deny:
@@ -83,6 +92,27 @@ def test_gated_pairs_use_one_trial_where_alone_failed_and_the_gated_run_passed_a
     assert (s["id"], s["task_id"], s["variant"]) == ("task_050-gates", "task_050", "gates")
     assert s["alone"]["trial"] == s["tools"]["trial"] == 2 and s["tools"]["gate_blocks"] == 1
     assert s["set_result"] == {"set": "banking-other", "pairs": 3, "alone_passed": 1, "gated_passed": 3}
+
+
+def test_a_gated_pair_reads_each_arm_from_its_own_set(run_set, make_sim, monkeypatch, tmp_path):
+    """task_054's pair: alone from one set's base arm, gated from another set's tools arm, counts from each."""
+    alone = run_set({("base", "banking_knowledge"): [_run(make_sim, 0, "fail"), _run(make_sim, 1, "fail")]}, k=2,
+                    name="a_modal")
+    gated = run_set({("tools", "banking_knowledge"): [_run(make_sim, 0, "pass"), _run(make_sim, 1, "pass", deny=True)]},
+                    k=2, name="b_modal")
+    by_set = {"banking-other": alone, "banking-failures": gated}
+    monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: by_set[next(k for k, v in tools_ab.SETS.items()
+                                                                              if v is c)])
+    monkeypatch.setattr(export_scenarios, "DATA", alone["data"].parent)
+    monkeypatch.setattr(export_scenarios, "SOURCES", [])
+    monkeypatch.setattr(export_scenarios, "GATED_SOURCES", [
+        ("task_050-gates", "task_050", ("banking-other", "base"), ("banking-failures", "tools"), True, False, "t", "n")])
+    monkeypatch.setattr(export_scenarios, "OUT", tmp_path / "scenarios.json")
+    export_scenarios.main()
+    (s,) = json.loads((tmp_path / "scenarios.json").read_text(encoding="utf-8"))
+    assert s["alone"]["trial"] == s["tools"]["trial"] == 1  # trial 0's gated pass had no deny
+    assert s["recorded"] == {"base": {"passed": 0, "runs": 2}, "tools": {"passed": 2, "runs": 2}}
+    assert s["source"].startswith("a_modal and b_modal") and "set_result" not in s
 
 
 def test_a_gated_source_without_such_a_trial_is_left_out_loudly(run_set, make_sim, monkeypatch, tmp_path, capsys):

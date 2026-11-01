@@ -263,7 +263,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let data = null, pos = 0, timer = null;
+let data = null, pos = 0, timer = null, liveRun = false;  // liveRun: the panes show a live run (never gated)
 const STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1c.6 5.6 2.4 8.4 11 11-8.6 2.6-10.4 5.4-11 11-.6-5.6-2.4-8.4-11-11 8.6-2.6 10.4-5.4 11-11z"/></svg>';
 const ICON = {
   lookup: '<svg viewBox="0 0 16 16"><path d="M7 2a5 5 0 014 8l3 3-1 1-3-3A5 5 0 117 2zm0 2a3 3 0 100 6 3 3 0 000-6z"/></svg>',
@@ -344,7 +344,7 @@ function outcomeText(side, o, overruled) {
   if (o.passed) return "Task completed correctly: the bank's records match the correct outcome.";
   return "Task failed: the bank's records do not match the correct outcome." +
     // the overrule count comes from the decision tools' checks; on a gated pair the gate story is told on the right
-    (side === "alone" && overruled !== undefined && !(data && data.variant === "gates")
+    (side === "alone" && overruled !== undefined && (liveRun || !(data && data.variant === "gates"))
       ? (overruled ? ` ${overruled} action(s) a Glint tool would have overruled.` : " No action here is one Glint's tools judge; it failed for another reason.")
       : "");
 }
@@ -355,7 +355,7 @@ function setOutcome(side, o, overruled) {
 }
 function summarize(alone, tools, overruled) {
   const line = (name, o, extra) => `<div><span class="dot ${o.passed ? "ok" : "bad"}"></span>${esc(name)}: ${o.passed ? "passed" : "failed"}${esc(extra)}</div>`;
-  const gated = data && data.variant === "gates" && $("mode").querySelector("span").textContent.startsWith("Replay");
+  const gated = !liveRun && data && data.variant === "gates";
   const blocks = gated ? data.tools.gate_blocks || 0 : 0;
   $("summary").innerHTML = line("Glimmer alone", alone, !alone.passed && overruled ? `, ${overruled} action(s) a Glint check would overrule` : "") +
                            line(gated ? "Glimmer + Glint tools + gates" : "Glimmer + Glint tools", tools,
@@ -404,6 +404,7 @@ async function runLive() {
                                             body: JSON.stringify({task_id: data.task_id || data.id})});
   const body = await r.json();
   if (!r.ok) { $("live-note").textContent = body.detail || "live run failed to start"; return; }
+  liveRun = true;
   $("mode").classList.add("live"); $("mode").querySelector("span").textContent = "Live · Glimmer 30B on Modal";
   $("tools-title").textContent = "Glimmer + Glint tools (live: no gates)";
   $("summary").classList.remove("on");
@@ -433,7 +434,9 @@ function play() {
 // open on the customer's first message, so neither pane starts empty
 function opening() { const i = data.alone.events.findIndex((e) => e.kind === "customer"); return i < 0 ? 0 : i + 1; }
 async function load(id) {
-  stop();
+  stop(); clearInterval(liveTimer);
+  liveRun = false;  // back to a recorded replay
+  $("mode").classList.remove("live"); $("mode").querySelector("span").textContent = "Replay · recorded runs";
   data = await (await fetch(`/api/scenarios/${id}`)).json();
   $("total").textContent = steps(); $("scrub").max = steps();
   pos = opening(); showUpTo(pos);

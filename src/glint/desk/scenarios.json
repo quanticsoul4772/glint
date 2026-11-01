@@ -7,7 +7,7 @@
   "variant": "gates",
   "picked": false,
   "customer": "You noticed a fraudulent charge on your Gold Rewards Card from \"CloudSync Storage\" for $487.50 - a service you've never used. You're worried your card information was compromised, so you want to dispute the charge AND get a replacement card to be safe. Additionally, you've been meaning to request a credit limit increase because you have a home renovation project coming up and need more headroom for large purchases. Get ALL THREE things done: (1) dispute the fraudulent charge, (2) get a replaceme …",
-  "source": "tools_ab_banking12_plan_gated_modal and tools_ab_banking12_plan_v9_gated_modal (Glimmer 30B bf16 on Modal). Alone: the ungated arm of banking-plan-gated (2026-10-29). Gated: v9 (2026-10-30), same seed.",
+  "source": "tools_ab_banking12_plan_gated_modal and tools_ab_banking12_plan_v9_gated_modal (Glimmer 30B bf16 on Modal). Alone: the ungated arm of banking-plan-gated (2026-10-29). Gated: v9 (2026-10-30), same seed. An earlier gated version (banking-plan-gated's tools arm) passed this task 4/4 on the same seeds without blocking anything.",
   "recorded": {
    "base": {
     "passed": 0,
@@ -62,7 +62,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Sofia Papadopoulos",
@@ -359,7 +359,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Sofia Papadopoulos",
@@ -786,7 +786,7 @@
   "variant": "gates",
   "picked": true,
   "customer": "You've been looking at other credit card options and found the Pursuit Ink Business Preferred card, which offers 3x points on travel, shipping, and advertising purchases, plus no foreign transaction fees. It seems similar to your Business Silver Rewards Card but with slightly better perks for your consulting work. You don't use your Rho-Bank business card that much anymore and want to simplify your finances. Express that you want to close your Business Silver Rewards Card because you found a bet …",
-  "source": "tools_ab_banking_unseen_gated_lean_modal (Glimmer 30B bf16 on Modal). Both arms from banking-unseen-gated (2026-10-30 to 31), same seed, a task no gate was built from.",
+  "source": "tools_ab_banking_unseen_gated_lean_modal (Glimmer 30B bf16 on Modal). Both arms from banking-unseen-gated (2026-10-30 to 31), same seed, a task whose runs no gate was built from. Across the set, alone's misses include 30 context overflows, and the gated arm hit τ²'s step limit in 41 of its 108 runs (research note of 2026-10-31).",
   "recorded": {
    "base": {
     "passed": 0,
@@ -841,7 +841,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Yuki Nakamura",
@@ -986,7 +986,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_credit_card_closure_reason_4521",
      "args": {
       "credit_card_account_id": "cc_224959b99e_bsilver",
@@ -1064,7 +1064,7 @@
      "text": "Yes, please go ahead and close the Business Silver Rewards Card."
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "close_credit_card_account_7834",
      "args": {
       "credit_card_account_id": "cc_224959b99e_bsilver",
@@ -1204,7 +1204,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Yuki Nakamura",
@@ -1475,7 +1475,7 @@
      "text": "Yes, I authorize it — please go ahead and pay the $125 from my checking account 05 to my Business Silver card."
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "pay_credit_card_from_checking_9182",
      "args": {
       "user_id": "224959b99e",
@@ -1644,7 +1644,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_credit_card_closure_reason_4521",
      "args": {
       "credit_card_account_id": "cc_224959b99e_bsilver",
@@ -1804,7 +1804,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "apply_statement_credit_8472",
      "args": {
       "user_id": "224959b99e",
@@ -1839,7 +1839,7 @@
    "gate_blocks": 1
   },
   "set_result": {
-   "set": "banking-unseen-gated-lean",
+   "set": "banking-unseen-lean-gated",
    "pairs": 108,
    "alone_passed": 21,
    "gated_passed": 19
@@ -1908,7 +1908,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Sofia Papadopoulos",
@@ -2175,7 +2175,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Sofia Papadopoulos",
@@ -2511,7 +2511,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Fatima Al-Hassan",
@@ -2876,7 +2876,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Fatima Al-Hassan",
@@ -3316,7 +3316,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Sofia Papadopoulos",
@@ -3546,7 +3546,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Sofia Papadopoulos",
@@ -3771,7 +3771,7 @@
      "text": "Yeah of course — my phone number is 619-555-0756 and my date of birth is 01/24/1991. My full name is Zhang Mei."
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Zhang Mei",
@@ -3995,7 +3995,7 @@
      "error": false
     },
     {
-     "kind": "lookup",
+     "kind": "action",
      "tool": "log_verification",
      "args": {
       "name": "Zhang Mei",

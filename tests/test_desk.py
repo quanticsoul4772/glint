@@ -54,7 +54,7 @@ def test_the_gated_pairs_come_first_and_ids_never_collide():
 def test_the_picked_unseen_pair_carries_its_whole_set_result():
     s = client.get("/api/scenarios/task_045-unseen").json()
     assert s["picked"] is True and s["tuned"] is False
-    assert s["set_result"] == {"set": "banking-unseen-gated-lean", "pairs": 108, "alone_passed": 21, "gated_passed": 19}
+    assert s["set_result"] == {"set": "banking-unseen-lean-gated", "pairs": 108, "alone_passed": 21, "gated_passed": 19}
 
 
 def test_task054_shows_the_overruled_dispute_before_the_increase():
