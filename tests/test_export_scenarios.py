@@ -24,6 +24,7 @@ def test_replay_pairs_a_failed_alone_run_with_a_passed_tools_run_and_counts_like
     monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: cfg)
     monkeypatch.setattr(export_scenarios, "DATA", cfg["data"].parent)
     monkeypatch.setattr(export_scenarios, "SOURCES", [("task_050", "banking-other", False)])
+    monkeypatch.setattr(export_scenarios, "GATED_SOURCES", [])
     monkeypatch.setattr(export_scenarios, "OUT", tmp_path / "scenarios.json")
     export_scenarios.main()
     (s,) = json.loads((tmp_path / "scenarios.json").read_text(encoding="utf-8"))
@@ -40,6 +41,7 @@ def test_a_task_without_a_pair_is_left_out_loudly(run_set, make_sim, monkeypatch
     monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: cfg)
     monkeypatch.setattr(export_scenarios, "DATA", cfg["data"].parent)
     monkeypatch.setattr(export_scenarios, "SOURCES", [("task_050", "banking-other", False)])
+    monkeypatch.setattr(export_scenarios, "GATED_SOURCES", [])
     monkeypatch.setattr(export_scenarios, "OUT", tmp_path / "scenarios.json")
     export_scenarios.main()
     assert "task_050 left out of the replay" in capsys.readouterr().out

@@ -336,6 +336,12 @@ SETS = {
                              "data": MEASURE / "tools_ab_banking_unseen_gated",
                              "out": RESULTS / "tools-ab-banking-unseen-gated.json",
                              "save": "tools-ab-banking-unseen-gated"},
+    # banking-unseen-gated's runs for analysis only: its tools arm was saved only as τ²'s 5.8 GB checkpoint and its
+    # base arm file is 0.8 GB, so both arms were copied without raw_data, logprobs and token ids (2026-10-31)
+    "banking-unseen-gated-lean": {"tasks": banking_unseen_tasks, "trials": 2, "analysis_only": True,
+                                  "requires_modal": True, "data": MEASURE / "tools_ab_banking_unseen_gated_lean",
+                                  "out": RESULTS / "tools-ab-banking-unseen-gated.json",
+                                  "save": "tools-ab-banking-unseen-gated-lean"},
     # the tools arm again on the code after PR 158-PR 174, against banking-unseen-gated's alone arm (decision 2026-10-31)
     "banking-unseen-v10-gated": {"tasks": banking_unseen_tasks, "trials": 2, "arms": ("tools",), "concurrency": 12,
                                  "glimmer_usd": 3.0, "meta_usd": 1.0, "gpu_usd": 15.0, "gates": True,
@@ -972,6 +978,9 @@ def main(argv: list[str]) -> int:
         print(f"unknown argument(s): {' '.join(unknown)}\n\n{__doc__}", file=sys.stderr)
         return 2
     cfg = for_backend(SETS[next((a for a in argv if a in SETS), "design")], "--modal" in argv)
+    if cfg.get("analysis_only") and "--analyze" not in argv:
+        print("this set holds copies of finished runs for analysis only: pass --analyze", file=sys.stderr)
+        return 2
     if "--analyze" not in argv:
         # the Spark customer and judge always; DeepInfra's key only when Glimmer is not served on Modal
         require_keys(*(("MODEL_API_KEY",) if "--modal" in argv else ()))

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import re
 
 from glint.decisions import GLINT_TOOLS
+from glint.gates.core import DENY_PREFIX
 
 WRITES = {"file_credit_card_transaction_dispute_4829", "order_replacement_credit_card_7291",
           "submit_credit_limit_increase_request_7392", "approve_credit_limit_increase_5847",
@@ -15,9 +17,38 @@ def _short(value, n=400) -> str:
     return text if len(text) <= n else text[:n] + " …"
 
 
+_DENY_LINES = {"What the check found": "found", "Why it matters": "why", "What to do next": "next"}
+
+
+def parse_deny(text: str) -> dict:
+    """A gate's deny (glint.gates.core GateResult.message, plain wording) as card fields: the rule and its source,
+    what the check found, the facts it used, why it matters and the next step. A deny in another layout keeps its
+    whole text in `found`."""
+    fields = {"rule": "", "source": "", "found": "", "facts": [], "why": "", "next": ""}
+    in_facts = False
+    for line in text.splitlines():
+        if m := re.match(r"Rule: (\S+) \((.*)\)$", line):
+            fields["rule"], fields["source"] = m.group(1), m.group(2)
+            continue
+        if line.startswith("Facts it used:"):
+            in_facts = True
+            continue
+        head, _, rest = line.partition(": ")
+        if head in _DENY_LINES:
+            fields[_DENY_LINES[head]], in_facts = rest, False
+        elif line.startswith("Verdict: "):
+            in_facts = False
+        elif in_facts and line.startswith("- "):
+            fields["facts"].append(line[2:])
+    if not fields["found"]:
+        fields["found"] = text.removeprefix(DENY_PREFIX).strip()
+    return fields
+
+
 def timeline(messages: list[dict], overrules: dict[int, dict] | None = None) -> list[dict]:
     """Events in conversation order from τ² messages (dicts). `overrules`: assistant message index -> decision
-    (tool, reasons) for writes a Glint tool would have overruled."""
+    (tool, reasons) for writes a Glint tool would have overruled. A call a policy gate denied becomes a "gate" event
+    in place of its action or lookup: the write did not run."""
     overrules = overrules or {}
     results = {m.get("id"): m.get("content") for m in messages if m.get("role") == "tool"}
     events = []
@@ -43,6 +74,9 @@ def timeline(messages: list[dict], overrules: dict[int, dict] | None = None) -> 
                     name, args = args.get("agent_tool_name", ""), json.loads(inner) if isinstance(inner, str) else inner
                 except json.JSONDecodeError:
                     name, args = args.get("agent_tool_name", ""), {"arguments": inner}
+            if str(result or "").startswith(DENY_PREFIX):  # parsed whole: a deny runs 1-2 KB, past _short's cut
+                events.append({"kind": "gate", "tool": name, "args": args, **parse_deny(str(result))})
+                continue
             event = {"kind": "action" if name in WRITES else "lookup", "tool": name, "args": args,
                      "result": None if result is None else _short(result),
                      "error": str(result or "").startswith("Error")}
