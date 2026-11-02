@@ -272,6 +272,9 @@ def test_close_credit_card_needs_a_logged_reason():
     close = {"credit_card_account_id": log["credit_card_account_id"], "user_id": log["user_id"]}
     assert _denied(_hidden(env, "close_credit_card_account_7834", **close), "no closure reason")
     assert _ran(_hidden(env, "log_credit_card_closure_reason_4521", **log))
+    assert _denied(_hidden(env, "close_credit_card_account_7834", **close), "record_retention_answer")
+    _call(env, "record_retention_answer", **close, offer="$50 statement credit", accepted=False,
+          customer_words="No, please close it.")
     assert _ran(_hidden(env, "close_credit_card_account_7834", **close))
     env, task, _ = _bank("task_048")  # the Green card has a reason logged within the past year: it closes
     assert _ran(_hidden(env, "close_credit_card_account_7834", **_play(env, task, "close_credit_card_account_7834")))
