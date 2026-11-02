@@ -115,6 +115,23 @@ def write_tools(toolkit) -> set[str]:
     return {n for n in toolkit.tools if toolkit.tool_type(n) == ToolType.WRITE and n != WRAPPER}
 
 
+REPEAT_NOTE = ("\n\nThis exact call was already refused for the same reason, so sending it again will not work. Ask "
+               "the customer how they want to proceed, or transfer to a human agent (transfer_to_human_agents) if it "
+               "cannot be resolved.")
+
+
+def attestation_classes(passed: list[str]) -> list[str]:
+    """What stood behind an allowed write, from the names of the gates that allowed it: 'rule_checked' (a policy rule
+    on the write's values or state), 'customer_requested' (the request record covers it), or 'uncovered' (only the
+    procedure gates and a no_rule_yet allow)."""
+    classes = []
+    if any(not g.startswith(("no_rule_", "procedure_", "banking_request_")) for g in passed):
+        classes.append("rule_checked")
+    if any(g.startswith("banking_request_") for g in passed):
+        classes.append("customer_requested")
+    return classes or ["uncovered"]
+
+
 class Enforcer:
     def __init__(self, domain: str, events: EventLog, context: Callable[[], dict] | None = None,
                  wording: str = "plain"):
@@ -149,7 +166,7 @@ class Enforcer:
                           "of the request is not affected.", facts=["`arguments` is not a JSON object"])
             self._log(tool, args, result, 0.0, replay, "unparsed")
             return result
-        final = None
+        final, passed = None, []
         for gate in self.registry.for_tool(tool):
             if gate.toolkit and toolkit is None:
                 result, ms = deny("gate_error", gate.name, f"the check {gate.name!r} needs the environment's "
@@ -163,10 +180,22 @@ class Enforcer:
                               consequence=CANNOT_DECIDE, facts=["the gate.fired event was not written"])
             if not result.allowed:
                 return result
+            passed.append(gate.name)
             final = final or result
         if final is None:  # attach() refuses an environment with an ungated write; this is a second line
             raise RuntimeError(f"write {tool} has no gate")
+        self._attest(tool, passed, replay)
         return final
+
+    def _attest(self, tool: str, passed: list[str], replay: bool) -> None:
+        """A write.attested event for each allowed write: which kind of check stood behind it (attestation_classes).
+        Never decides anything; a failure to log is logged, not raised."""
+        try:
+            self.events.emit("write.attested", {"domain": self.domain, "tool": tool,
+                                                "classes": attestation_classes(passed), "gates": passed,
+                                                "replay": replay, **self.context()})
+        except Exception:
+            log.exception("the write.attested event was not logged")
 
     def _log(self, tool, args, result: GateResult, ms: float, replay: bool, gate: str) -> bool:
         try:
@@ -323,6 +352,7 @@ class Enforcer:
         if self.domain == "banking_knowledge":
             add_plan_tool(env)
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
+        env.tools.glint_denied = set()  # (tool, arguments, rule) of every refusal, for the repeat escalation
         env.tools.glint_requests = None  # the latest record_requests list (None: not recorded yet)
         env.tools.glint_retention = {}  # credit card account -> the recorded answer to the retention offer
         env.tools.glint_verdicts = {}  # card -> the increase verdict check_credit_limit_increase gave, not filed yet
@@ -357,8 +387,11 @@ class Enforcer:
             asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
             if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
                 asked[result.rule_id].add(str((write[1] or {}).get("credit_card_account_id", "")))
-            return ToolMessage(id=message.id, content=result.message(self.wording), requestor=message.requestor,
-                               role="tool", error=True)
+            key = (write[0], json.dumps(write[1], sort_keys=True, default=str), result.rule_id)
+            repeat = key in env.tools.glint_denied  # the same call refused for the same rule before: escalate
+            env.tools.glint_denied.add(key)
+            content = result.message(self.wording) + (REPEAT_NOTE if repeat else "")
+            return ToolMessage(id=message.id, content=content, requestor=message.requestor, role="tool", error=True)
 
         def set_state(*args, **kwargs):  # τ²'s evaluator replays the trajectory here: those events say replay=true
             state["replay"] = True

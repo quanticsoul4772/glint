@@ -898,3 +898,21 @@ def test_writes_follow_the_recorded_requests():
                    for e in events.events("gate.fired")[-3:])
     assert "unknown action" in _call(env, "record_requests", user_id="a7c2f85d91",
                                      requests=[{"action": "wire_money"}]).content
+
+
+def test_allowed_writes_are_attested_and_a_repeated_refusal_escalates():
+    from glint.gates.enforce import attestation_classes
+    from glint.gates.summary import line, summarize
+    assert attestation_classes(["procedure_verified_gate", "no_rule_x"]) == ["uncovered"]
+    assert attestation_classes(["banking_request_close_debit_card_4721", "debit_close_debit_card_4721_gate"]) == [
+        "rule_checked", "customer_requested"]
+    env, _, events = _bank("task_084")
+    _verify(env, "a7c2f85d91")
+    close = {"card_id": "dbc_82b5d1a6f3", "reason": "fraud_suspected"}
+    first = _hidden(env, "close_debit_card_4721", **close)
+    second = _hidden(env, "close_debit_card_4721", **close)
+    assert _denied(first, "record_requests") and "already refused" not in first.content
+    assert second.content.startswith(first.content) and "transfer_to_human_agents" in second.content
+    attested = [e["payload"]["classes"] for e in events.events("write.attested")]
+    assert attested == [["rule_checked"]]  # the verification: a rule on its values
+    assert "allowed writes by what checked them: rule_checked 1" in line("t", summarize(events.events(), []))
