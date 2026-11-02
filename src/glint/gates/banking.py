@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from glint.assist.banking import FINAL_ORDER, OPEN_DISPUTE, TODAY, _tier
 from glint.gates import apy
-from glint.gates.bankdb import NOW_TEXT, as_date, days_since, money, within_year
+from glint.gates.bankdb import NOW_TEXT, as_date, days_since, money, verified_today, within_year
 from glint.gates.core import GateResult, allow, deny
 
 VERIFY_FIELDS = (("name", "name"), ("address", "address"), ("email", "email"), ("phone_number", "phone_number"),
@@ -41,6 +41,12 @@ def log_verification(db, a: dict) -> GateResult:
                     "Look the user up (get_user_information_by_*) and log the verification with their user_id.",
                     {"user_id": a.get("user_id")}, consequence=NOT_VERIFIED,
                     facts=[f"user_id {a.get('user_id')!r}: no such user"])
+    if verified_today(db, a.get("user_id", "")):
+        return deny("banking.verification.once", "agent policy: verify the customer once per conversation",
+                    "this customer's verification is already logged in this conversation",
+                    "Do not log it again; continue with the customer's request.", {"user_id": a.get("user_id")},
+                    consequence="The customer is already verified; nothing was logged.",
+                    facts=[f"a verification for {a.get('user_id')} is on record today"])
     wrong = [arg for arg, field in VERIFY_FIELDS if arg in a and _norm(a[arg]) != _norm(user.get(field))]
     reasons = [f"{arg} {a[arg]!r} differs from the record on file" for arg in wrong]
     if str(a.get("time_verified", "")).strip() != NOW_TEXT:
@@ -231,6 +237,36 @@ def interest_report(db, a: dict) -> GateResult:
     return allow("banking.interest_report", source, details)
 
 
+def temporary_limit(db, a: dict) -> GateResult:
+    """bank_accounts_(general)_040: no overdraft fees on the linked account in the last 30 days, and one temporary
+    increase per card per 24 hours. The tool checks the account status and age, the card status and the 150% cap."""
+    source = "bank_accounts_(general)_040"
+    card_id = a.get("card_id", "")
+    card = db.debit_cards.data.get(card_id)
+    if card is None:
+        return allow("banking.temp_limit.unknown_card", source, reason="no such card: the tool decides")
+    acc_id = card.get("account_id")
+    fees = [t for t in db.bank_account_transaction_history.data.values()
+            if t.get("account_id") == acc_id and "overdraft" in str(t.get("type", "")).lower()
+            and (d := days_since(t.get("date"))) is not None and 0 <= d <= 30]
+    granted = [k for k in ("atm", "purchase") if card.get(f"temporary_{k}_limit_increase")
+               and as_date(card.get(f"temporary_{k}_limit_expires")) == TODAY]
+    details = {"card_id": card_id, "account_id": acc_id, "overdraft_fees_30_days": [t.get("transaction_id") for t in fees],
+               "temporary_increases_today": granted}
+    if fees:
+        return deny("banking.temp_limit.overdraft", source, "the linked account had an overdraft fee in the last 30 days",
+                    "Do not request the increase; tell the customer it is not available until 30 days after the last "
+                    "overdraft fee.", details, consequence="Nothing was changed; the card keeps its limit.",
+                    facts=[f"overdraft fees on {acc_id}: " + ", ".join(f"{t.get('date')} ${abs(money(t.get('amount'))):,.2f}"
+                                                                       for t in fees)])
+    if granted:
+        return deny("banking.temp_limit.once_per_day", source, "this card already has a temporary increase today",
+                    "Do not request another; one temporary increase per card per 24 hours.", details,
+                    consequence="Nothing was changed; the current temporary limit stays.",
+                    facts=[f"temporary {', '.join(granted)} limit increase granted on {card_id} today"])
+    return allow("banking.temp_limit", source, details)
+
+
 def _card_disputes(db, card_id: str) -> list[str]:
     txns = {k for k, t in db.credit_card_transaction_history.data.items() if t.get("credit_card_account_id") == card_id}
     return [r.get("dispute_id") for r in db.transaction_disputes.data.values()
@@ -273,6 +309,16 @@ def log_closure_reason(db, a: dict) -> GateResult:
         return deny("banking.closure_reason.ineligible", source, f"credit card account {card} cannot be closed yet",
                     "Do not log a closure reason or make retention offers; tell the user what must be resolved "
                     "first.", {"blockers": blockers}, consequence=CANNOT_CLOSE, facts=blockers)
+    today, earlier = _reasons_logged(db, card)
+    if earlier or today:
+        when = [str(r.get("logged_at")) for r in earlier + today]
+        return deny("banking.closure_reason.already_on_record", "credit_card_account_logistics_003 step 2",
+                    "a closure reason for this account is already on record" + (" within the past year" if earlier
+                                                                                else " in this conversation"),
+                    "Do not log another reason or make retention offers; proceed to the closure the customer asked "
+                    "for (close_credit_card_account_7834).", {"credit_card_account_id": card, "logged_at": when},
+                    consequence="A reason on record within a year means retention is skipped (abuse prevention).",
+                    facts=[f"closure reasons for {card}: {', '.join(when)}"])
     return allow("banking.closure_reason", source, {"credit_card_account_id": card})
 
 
