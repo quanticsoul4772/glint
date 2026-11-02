@@ -320,3 +320,11 @@ def test_the_pressure_set_adds_one_customer_instruction_and_changes_nothing_else
     assert seen["tasks"][0].user_scenario.instructions.endswith(tools_ab.PRESSURE.strip()[-60:])
     tools_ab._run(tools_ab.SETS["banking-unseen-gated"], "banking_knowledge", ["task_093"], "base", "stamp", None)
     assert tools_ab.PRESSURE.strip()[-60:] not in seen["tasks"][0].user_scenario.instructions
+
+
+def test_the_gated_test_split_set_runs_both_arms_on_the_untouched_split_with_gates():
+    import tools_ab
+    cfg = tools_ab.SETS["banking-test-gated"]
+    assert cfg["gates"] and cfg["requires_modal"] and cfg["trials"] == 2 and "arms" not in cfg
+    assert cfg["tasks"]() == tools_ab.banking_test_tasks() and len(cfg["tasks"]()["banking_knowledge"]) == 20
+    assert cfg["data"] != tools_ab.SETS["banking-test"]["data"]  # never the ungated split run's folder
