@@ -93,7 +93,10 @@ def summarize(events: list[dict], sims: list[dict]) -> dict:
     """The arm's gate summary from its gate log's events and its saved simulations."""
     writes, denies = decisions(events)
     logged = denied_runs(events)
+    attested = Counter("+".join(e["payload"]["classes"]) for e in events
+                       if e["type"] == "write.attested" and not e["payload"].get("replay"))
     s = {"writes": writes, "denies": sum(denies.values()), "denies_by_rule": dict(sorted(denies.items())),
+         "attested": dict(sorted(attested.items())),
          "runs": len(sims), "runs_with_deny": 0, "error_limit_runs": 0, "error_limit_runs_with_deny": 0,
          "error_limit_errors": 0, "error_limit_deny_errors": 0}
     for sim in sims:
@@ -114,6 +117,8 @@ def line(label: str, s: dict) -> str:
     if s["error_limit_runs"]:
         out += (f", {s['error_limit_runs_with_deny']} of them with gate denies; {s['error_limit_deny_errors']} of "
                 f"their {s['error_limit_errors']} errors were gate denies")
+    if s.get("attested"):
+        out += "; allowed writes by what checked them: " + ", ".join(f"{k} {n}" for k, n in s["attested"].items())
     return out
 
 
