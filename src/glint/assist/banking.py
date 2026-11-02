@@ -278,6 +278,25 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str, increase_deci
 
 
 PLAN_TOOL = "plan_disputes"
+RETENTION_TOOL = "record_retention_answer"
+
+
+def record_retention_answer(db, credit_card_account_id: str, user_id: str, offer: str, accepted: bool,
+                            customer_words: str) -> dict:
+    """The customer's answer to the retention offer (credit_card_account_logistics_003 step 5), as recorded by the
+    agent. Validates the account and the answer; never writes the database."""
+    acc = db.credit_card_accounts.data.get(credit_card_account_id)
+    if acc is None or acc.get("user_id") != user_id:
+        return {"recorded": False, "error": f"no credit card account {credit_card_account_id!r} for user {user_id!r}"}
+    answer = str(accepted).strip().lower()
+    if answer not in ("true", "false") or not str(customer_words).strip() or not str(offer).strip():
+        return {"recorded": False, "error": "give the offer made, accepted as true or false, and the customer's own "
+                "words answering it"}
+    accepted = answer == "true"
+    return {"recorded": True, "credit_card_account_id": credit_card_account_id, "user_id": user_id,
+            "offer": str(offer), "accepted": accepted, "customer_words": str(customer_words),
+            "next": "Keep the account open and apply the offer." if accepted else
+            "Proceed with the closure the customer asked for (close_credit_card_account_7834)."}
 OVERCHARGE = "incorrect_amount"
 CARD_DIGITS_TOOL = "get_card_last_4_digits"
 

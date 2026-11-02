@@ -173,6 +173,30 @@ class DisputePlanTools(ToolKitBase):
         """
         return banking.plan_disputes(self.db, user_id, transactions, other_requests)
 
+    @is_tool(ToolType.GENERIC, mutates_state=True)
+    def record_retention_answer(self, credit_card_account_id: str, user_id: str, offer: str, accepted: bool,
+                                customer_words: str) -> dict:
+        """Record the customer's answer to the retention offer before closing a credit card account. The retention
+        protocol (knowledge base credit_card_account_logistics_003) makes ONE retention offer by card tier after the
+        reason is logged and the concern addressed (entry: 500 points or a $5 statement credit; mid: 2,000 points or
+        $20; premium and above: 5,000 points or $50), then closes only if the customer declines. Ask the customer a
+        direct yes/no question about the offer, then call this with their answer. A closure is checked against it:
+        no closure without a recorded answer, and none after the customer accepted. Not needed when a closure reason
+        was already on record within the past year (retention is skipped). It does not change the database.
+
+        Args:
+            credit_card_account_id: The credit card account the customer wants to close.
+            user_id: The customer's user id.
+            offer: The offer made, for example "$20 statement credit".
+            accepted: true if the customer accepted the offer and keeps the account, false if they declined.
+            customer_words: The customer's own words answering the offer, quoted.
+
+        Returns:
+            dict: recorded, the answer as recorded, and the next step; or an error.
+        """
+        return banking.record_retention_answer(self.db, credit_card_account_id, user_id, offer, accepted,
+                                               customer_words)
+
 
 class BankingDecisionTools(DisputePlanTools):
     """Mixed in ahead of the banking toolkit class τ² composes per retrieval variant (see `install`). Its KB_search

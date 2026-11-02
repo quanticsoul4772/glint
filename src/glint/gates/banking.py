@@ -343,6 +343,38 @@ def close_card(db, a: dict) -> GateResult:
     return allow("banking.close_card", source, {"reasons_today": len(today), "reasons_past_year": len(earlier)})
 
 
+def retention_answered(toolkit, a: dict) -> GateResult:
+    """credit_card_account_logistics_003 steps 5-6: after a closure reason is logged in this conversation, the card
+    closes only when the customer declined the one retention offer, as recorded with record_retention_answer. A reason
+    already on record within the past year skips retention (step 2)."""
+    source = "credit_card_account_logistics_003 steps 5-6"
+    card = a.get("credit_card_account_id", "")
+    db = toolkit.db
+    if card not in db.credit_card_accounts.data:
+        return allow("banking.retention.unknown_card", source, reason="no such account: the tool decides")
+    today, earlier = _reasons_logged(db, card)
+    if earlier or not today:
+        return allow("banking.retention.not_required", source, {"reasons_today": len(today),
+                                                                 "reasons_past_year": len(earlier)},
+                     reason="retention is skipped (a reason within the past year) or no reason is logged yet")
+    answer = getattr(toolkit, "glint_retention", {}).get(card)
+    if answer is None:
+        return deny("banking.retention.no_answer", source, "no answer to the retention offer is recorded for this "
+                    "account", "Make ONE retention offer by card tier (entry $5 or 500 points, mid $20 or 2,000, "
+                    "premium and above $50 or 5,000), ask the customer whether they accept, and record the answer "
+                    "with record_retention_answer. Close only if they decline.", {"credit_card_account_id": card},
+                    consequence="The card stays open; the protocol closes it only after a declined offer.",
+                    facts=[f"closure reason logged today for {card}; no recorded answer to the retention offer"])
+    if answer.get("accepted"):
+        return deny("banking.retention.accepted", source, "the customer accepted the retention offer",
+                    "Do not close the account. Apply the offer the customer accepted and tell them it stays open.",
+                    {"credit_card_account_id": card, "offer": answer.get("offer")},
+                    consequence="Closing after an accepted offer reverses what the customer agreed to.",
+                    facts=[f"offer: {answer.get('offer')}; customer: \"{answer.get('customer_words')}\""])
+    return allow("banking.retention.declined", source, {"credit_card_account_id": card, "offer": answer.get("offer"),
+                                                        "customer_words": answer.get("customer_words")})
+
+
 def _retention(db, a: dict, rule: str, what: str) -> GateResult | None:
     """None when a retention offer may be made on this account; else the deny."""
     source = "credit_card_account_logistics_003"

@@ -52,7 +52,8 @@ from collections.abc import Callable
 from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
-from glint.assist.banking import ORDER_TOOL, PLAN_TOOL, replacements_today
+from glint.assist import as_flag
+from glint.assist.banking import ORDER_TOOL, PLAN_TOOL, RETENTION_TOOL, replacements_today
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
@@ -246,6 +247,26 @@ class Enforcer:
         except Exception:
             log.exception("the dispute_plan.recorded event was not logged")
 
+    def _record_retention(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
+        """Keep the customer's recorded answer to the retention offer, per credit card account (the latest wins)."""
+        if call.requestor != "assistant" or call.name != RETENTION_TOOL or reply.error:
+            return
+        try:
+            answer = json.loads(reply.content)
+        except (TypeError, json.JSONDecodeError):
+            return
+        if not isinstance(answer, dict) or not as_flag(answer.get("recorded")):
+            return
+        answer["accepted"] = as_flag(answer.get("accepted"))  # τ² shows bools as "True"/"False"
+        env.tools.glint_retention[answer["credit_card_account_id"]] = answer
+        try:
+            self.events.emit("retention_answer.recorded", {
+                "domain": self.domain, "credit_card_account_id": answer["credit_card_account_id"],
+                "accepted": answer["accepted"], "customer_words": answer["customer_words"][:200], "replay": replay,
+                **self.context()})
+        except Exception:
+            log.exception("the retention_answer.recorded event was not logged")
+
     def _record_check(self, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """A check.recorded event for each decision-tool answer the agent got (check_card_dispute,
         check_verification, check_credit_limit_increase): what it said, so a diagnosis counts "the check said ready
@@ -283,13 +304,14 @@ class Enforcer:
         if self.domain == "banking_knowledge":
             add_plan_tool(env)
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
+        env.tools.glint_retention = {}  # credit card account -> the recorded answer to the retention offer
         env.tools.glint_verdicts = {}  # card -> the increase verdict check_credit_limit_increase gave, not filed yet
         env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
         env.tools.glint_address_asked = set()  # cards whose replacement the address_ask gate refused once
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
-            if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name == PLAN_TOOL
+            if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in (PLAN_TOOL, RETENTION_TOOL)
                     or reply.error or str(reply.content).startswith("Error")):
                 return reply
             items = _open_items(env.tools)
@@ -301,6 +323,7 @@ class Enforcer:
                 reply = original_response(message)
                 self._record_read(env, message, reply)
                 self._record_plan(env, message, reply, state["replay"])
+                self._record_retention(env, message, reply, state["replay"])
                 self._record_verdict(env, message, reply)
                 self._record_check(message, reply, state["replay"])
                 return with_open_items(message, reply)
