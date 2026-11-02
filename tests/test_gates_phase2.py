@@ -893,6 +893,8 @@ def test_writes_follow_the_recorded_requests():
                    "did not ask for clear_fraud_alert_or_velocity_block")
     _call(env, "record_requests", user_id="a7c2f85d91", requests=[
         {"action": "close_debit_card", "target_id": close["card_id"], "customer_words": "close the card"}])
+    # each call adds to the record (Glimmer records one request per call in banking-smoke-gated): both cards stay on it
+    assert [r["target_id"] for r in env.tools.glint_requests] == [other, close["card_id"]]
     _hidden(env, "close_debit_card_4721", **close)  # the request gate allows; the lookup gate decides next
     assert not any(e["payload"]["rule_id"].startswith("banking.request.") and e["payload"]["decision"] == "deny"
                    for e in events.events("gate.fired")[-3:])
