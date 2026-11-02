@@ -79,6 +79,11 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   checkpoint (PR 170). Its "alone" column is `banking-unseen-gated`'s base arm (Glimmer alone is unchanged). It tests
   whether the search fix ends the step-limit losses of the unseen tools arm (41 of 108 runs; research note
   unseen-step-limit-2026-10-31.md).
+- `banking-smoke-gated`: six design-data tasks (044, 045, 084, 087, 089, 093), k=1, the gated tools arm only, on
+  Modal: checks that Glimmer uses record_requests and record_retention_answer (PRs 21-22) before the test-split run.
+- `banking-test-gated`: τ²'s banking test split (20 tasks), k=2, Glimmer alone against Glimmer with the gates and
+  the decision tools, on Modal (decision 2026-11-02): the one gated run on the split, after the improvements of PRs
+  20-23. Some debit rules were written from this split's failures on 2026-10-28, so it is reported with that.
 - `banking-pressure-gated`: 20 of the unseen tasks whose gold writes money or account changes, k=2, Glimmer alone
   against the gated tools arm, with one instruction added to the simulated customer: push for more than the policy
   allows, twice, then accept what it allows (PRESSURE). τ²'s gold is unchanged, so a write it does not expect is one the
@@ -106,6 +111,8 @@ Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|bank
                            banking-plan-v10-gated|
                            banking-unseen-gated|banking-unseen-v10-gated|
                            banking-pressure-gated|
+                           banking-test-gated|
+                           banking-smoke-gated|
                            heldout2-gated|
                            banking-high-alone]
        [--modal] [--analyze] [--allow-mixed-code] [--rerun-infrastructure-errors]
@@ -379,6 +386,18 @@ SETS = {
                                "data": MEASURE / "tools_ab_banking_pressure_gated",
                                "out": RESULTS / "tools-ab-banking-pressure-gated.json",
                                "save": "tools-ab-banking-pressure-gated"},
+    # Before the test-split run: does Glimmer record requests and retention answers (decision 2026-11-02)
+    "banking-smoke-gated": {"tasks": lambda: {"banking_knowledge": ["task_044", "task_045", "task_084", "task_087",
+                                                                  "task_089", "task_093"]},
+                            "trials": 1, "arms": ("tools",), "concurrency": 6, "glimmer_usd": 1.0, "meta_usd": 0.3,
+                            "gpu_usd": 3.0, "gates": True, "requires_modal": True,
+                            "data": MEASURE / "tools_ab_banking_smoke_gated",
+                            "out": RESULTS / "tools-ab-banking-smoke-gated.json", "save": "tools-ab-banking-smoke-gated"},
+    # The one gated run on τ²'s banking test split (decision 2026-11-02), after PRs 20-23
+    "banking-test-gated": {"tasks": banking_test_tasks, "trials": 2, "concurrency": 12, "glimmer_usd": 3.0,
+                           "meta_usd": 1.0, "gpu_usd": 12.0, "gates": True, "requires_modal": True,
+                           "data": MEASURE / "tools_ab_banking_test_gated",
+                           "out": RESULTS / "tools-ab-banking-test-gated.json", "save": "tools-ab-banking-test-gated"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
