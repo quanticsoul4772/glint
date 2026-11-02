@@ -813,3 +813,31 @@ def test_compiled_apy_reproduces_every_gold_report():
                     g["args"]["expected_apy"])
                 checked += 1
     assert checked == 9
+
+
+def test_verification_is_logged_once_per_conversation():
+    env, task, _ = _bank("task_044")
+    verify = _play(env, task, "log_verification")
+    assert _ran(_call(env, "log_verification", **verify))
+    assert _denied(_call(env, "log_verification", **verify), "already logged in this conversation")
+
+
+def test_closure_reason_once_and_not_after_a_record_within_a_year():
+    env, task, _ = _bank("task_044")
+    log = _play(env, task, "log_credit_card_closure_reason_4521")
+    assert _ran(_hidden(env, "log_credit_card_closure_reason_4521", **log))
+    assert _denied(_hidden(env, "log_credit_card_closure_reason_4521", **log), "already on record")
+
+
+def test_temporary_limit_needs_no_recent_overdraft_and_one_per_day():
+    env, task, _ = _bank("task_089")
+    req = _play(env, task, "request_temporary_debit_card_limit_increase_8374")
+    acc = env.tools.db.debit_cards.data[req["card_id"]]["account_id"]
+    rows = env.tools.db.bank_account_transaction_history.data
+    rows["txn_test_overdraft"] = {"transaction_id": "txn_test_overdraft", "account_id": acc, "date": "11/01/2025",
+                                  "description": "OVERDRAFT FEE", "amount": -35.0, "type": "overdraft_fee",
+                                  "status": "posted"}
+    assert _denied(_hidden(env, "request_temporary_debit_card_limit_increase_8374", **req), "overdraft fee")
+    del rows["txn_test_overdraft"]
+    assert _ran(_hidden(env, "request_temporary_debit_card_limit_increase_8374", **req))
+    assert _denied(_hidden(env, "request_temporary_debit_card_limit_increase_8374", **req), "already has a temporary")
