@@ -767,3 +767,18 @@ def test_replay_waits_for_a_slow_gate_instead_of_timing_out():
     threading.Timer(0.2, release.set).start()
     replayed, ms = run_gate(slow, None, {}, wait=True)
     assert replayed.allowed and ms >= 150
+
+
+def test_interest_report_follows_the_rate_paid_and_the_credit():
+    env, task, _ = _bank("task_093")  # gold: credit $33.00, then report 4.275% expected, 4.0% actual, $33.00
+    report = _play(env, task, "submit_interest_discrepancy_report_7294")
+    credit = {"account_id": report["account_id"], "amount": 33.0, "credit_type": "interest_correction"}
+    # the gold credit was already sent by _play; a report off by the arithmetic or the paid rate is refused
+    assert _denied(_hidden(env, "submit_interest_discrepancy_report_7294", **(report | {"amount_difference": 40.1})),
+                   "does not follow from the APYs")
+    assert _denied(_hidden(env, "submit_interest_discrepancy_report_7294", **(report | {"actual_apy": 3.93})),
+                   "not the rate the account was paid at")
+    assert _ran(_hidden(env, "submit_interest_discrepancy_report_7294", **report))
+    env, task, _ = _bank("task_093")  # a correct report with no credit applied first is refused
+    assert _play(env, task, "apply_savings_account_credit_6831") == credit
+    assert _denied(_hidden(env, "submit_interest_discrepancy_report_7294", **report), "Apply the interest correction")

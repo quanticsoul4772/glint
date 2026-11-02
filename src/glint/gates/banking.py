@@ -116,6 +116,68 @@ def checking_credit(db, a: dict) -> GateResult:
     return allow("banking.checking_credit", source, details)
 
 
+def _interest_basis(db, acc_id: str) -> tuple[float, float, list[dict]] | None:
+    """The account's latest monthly interest credit, its balance before any interest correction applied today, and
+    those corrections. None when the account has no interest credit on record."""
+    rows = [t for t in db.bank_account_transaction_history.data.values() if t.get("account_id") == acc_id]
+    interest = [t for t in rows if t.get("type") == "interest_credit"]
+    if not interest:
+        return None
+    latest = max(interest, key=lambda t: (as_date(t.get("date")) or TODAY, str(t.get("transaction_id"))))
+    today = [t for t in rows if t.get("type") == "interest_correction" and as_date(t.get("date")) == TODAY]
+    holdings = money(db.accounts.data.get(acc_id, {}).get("current_holdings"))
+    return money(latest.get("amount")), round(holdings - sum(money(t.get("amount")) for t in today), 2), today
+
+
+def interest_report(db, a: dict) -> GateResult:
+    """bank_accounts_(general)_043/_044: the report's actual APY is the one the account was paid at, its amount is the
+    difference between the interest at the expected APY and the interest credited, and the credit is applied first,
+    for that same amount. The expected APY itself is not checked (it needs the account type's rate documents)."""
+    source = "bank_accounts_(general)_043/_044"
+    acc_id = a.get("account_id", "")
+    acc = db.accounts.data.get(acc_id)
+    basis = _interest_basis(db, acc_id) if acc else None
+    if basis is None:
+        return allow("banking.interest_report.no_interest_on_record", source, {"account_id": acc_id},
+                     reason="no interest credit on record for this account; nothing to check the report against")
+    paid, balance, corrections = basis
+    try:
+        expected, actual, diff = (float(a.get(k)) for k in ("expected_apy", "actual_apy", "amount_difference"))
+    except (TypeError, ValueError):
+        return allow("banking.interest_report.not_numbers", source, {"account_id": acc_id},
+                     reason="the APYs or amount are not numbers; the tool rejects them")
+    applied = round(paid * 12 / balance * 100, 3) if balance > 0 else None
+    owed = round(round(balance * expected / 1200, 2) - paid, 2)
+    details = {"account_id": acc_id, "balance": balance, "interest_credited": paid, "applied_apy": applied,
+               "amount_at_expected_apy": owed, "corrections_today": [money(t.get("amount")) for t in corrections]}
+    paid_fact = f"latest monthly interest credited: ${paid:,.2f} on a balance of ${balance:,.2f}"
+    if applied is not None and abs(actual - applied) > 0.0015:
+        return deny("banking.interest_report.actual_apy", source, "the actual APY is not the rate the account was paid at",
+                    f"Report actual_apy {applied} (monthly interest x 12 / balance), then recompute the difference.",
+                    details, consequence="Nothing was reported. The backend team needs the rate actually applied.",
+                    facts=[paid_fact, f"rate applied: {applied}%; the report says {actual}%"])
+    if abs(diff - owed) > 0.015 and abs(diff - round(balance * (expected - actual) / 1200, 2)) > 0.015:
+        return deny("banking.interest_report.amount", source, "the amount difference does not follow from the APYs",
+                    f"For expected_apy {expected}, the difference is ${owed:,.2f} (balance x expected APY / 12, minus "
+                    "the interest credited). Check the expected APY against the account type's documents.",
+                    details, consequence="Nothing was reported. The report and the credit must carry the same, "
+                    "correctly computed amount.",
+                    facts=[paid_fact, (f"interest at {expected}%: ${owed + paid:,.2f}; difference ${owed:,.2f}; "
+                                       f"the report says ${diff:,.2f}")])
+    if not any(abs(money(t.get("amount")) - diff) <= 0.015 for t in corrections):
+        why = ("no interest correction was applied to this account in this conversation" if not corrections else
+               "the interest correction applied does not equal the reported difference")
+        return deny("banking.interest_report.credit_first", source, why,
+                    f"Apply the interest correction of ${diff:,.2f} to this account first "
+                    "(apply_savings_account_credit_6831), then submit the report with the same amount." if not
+                    corrections else "The credit and the report must carry the same amount; recheck the expected APY "
+                    "and tell the customer if the credit applied was wrong.",
+                    details, consequence="Nothing was reported. The policy applies the credit before the report.",
+                    facts=[f"interest corrections today: {details['corrections_today'] or 'none'}",
+                           f"reported difference: ${diff:,.2f}"])
+    return allow("banking.interest_report", source, details)
+
+
 def _card_disputes(db, card_id: str) -> list[str]:
     txns = {k for k, t in db.credit_card_transaction_history.data.items() if t.get("credit_card_account_id") == card_id}
     return [r.get("dispute_id") for r in db.transaction_disputes.data.values()
