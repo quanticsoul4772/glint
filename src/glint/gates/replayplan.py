@@ -18,7 +18,7 @@ from collections.abc import Callable
 
 from tau2.data_model.message import ToolCall
 
-from glint.assist.banking import DISPUTE_HISTORY_TOOL, PLAN_TOOL
+from glint.assist.banking import DISPUTE_HISTORY_TOOL, PLAN_TOOL, RETENTION_TOOL
 from glint.gates.rules import DISPUTE, REPLACE, parse_hidden_arguments, same_address
 
 WRAPPER = "call_discoverable_agent_tool"
@@ -53,12 +53,37 @@ def _history_read(call: ToolCall) -> bool:
     return call.requestor == "assistant" and call.name == WRAPPER and args.get("agent_tool_name") == DISPUTE_HISTORY_TOOL
 
 
+CLOSE_CARD, CLOSURE_REASON = "close_credit_card_account_7834", "log_credit_card_closure_reason_4521"
+
+
+def _hidden(call: ToolCall, tool: str) -> dict | None:
+    """The arguments of an assistant's call of `tool`, by name or through the hidden-tool wrapper."""
+    if call.requestor != "assistant":
+        return None
+    args = call.arguments or {}
+    if call.name == WRAPPER and args.get("agent_tool_name") == tool:
+        return parse_hidden_arguments(args.get("arguments", "{}"))
+    return dict(args) if call.name == tool else None
+
+
 def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
     """`calls` with a plan_disputes call before each user's first dispute filing (ids `<filing id>-plan`), and the
-    dispute-history read before it when none came earlier (ids `<filing id>-history-unlock`, `<filing id>-history`)."""
+    dispute-history read before it when none came earlier (ids `<filing id>-history-unlock`, `<filing id>-history`).
+    Before each closure of a credit card account whose closure reason was logged earlier in the conversation, the
+    record_retention_answer call (accepted false) an agent following the retention gate makes (id `<close id>-retention`):
+    the conversation closes the account, so the customer declined the offer."""
     plans = plan_arguments([f for c in calls if (f := filing(c))])
-    out, planned, read = [], set(), False
+    out, planned, read, logged, answered = [], set(), False, set(), set()
     for c in calls:
+        if (reason := _hidden(c, CLOSURE_REASON)) is not None:
+            logged.add(reason.get("credit_card_account_id"))
+        close = _hidden(c, CLOSE_CARD)
+        if close is not None and close.get("credit_card_account_id") in logged - answered:
+            card = close.get("credit_card_account_id")
+            answered.add(card)
+            out.append(ToolCall(id=f"{c.id}-retention", name=RETENTION_TOOL, requestor="assistant", arguments={
+                "credit_card_account_id": card, "user_id": close.get("user_id"), "offer": "retention offer by card tier",
+                "accepted": False, "customer_words": "(replay: the conversation closes the account)"}))
         f = filing(c)
         user = str(f.get("user_id", "")) if f else None
         if f is not None and user not in planned:

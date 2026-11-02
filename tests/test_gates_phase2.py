@@ -813,3 +813,17 @@ def test_compiled_apy_reproduces_every_gold_report():
                     g["args"]["expected_apy"])
                 checked += 1
     assert checked == 9
+
+
+def test_closure_after_a_logged_reason_needs_a_declined_retention_offer():
+    env, task, _ = _bank("task_045")  # gold logs the reason, the customer accepts the retention credit, the card stays
+    credit = _play(env, task, "apply_statement_credit_8472")
+    close = {"credit_card_account_id": credit["credit_card_account_id"], "user_id": credit["user_id"]}
+    assert _denied(_hidden(env, "close_credit_card_account_7834", **close), "record_retention_answer")
+    answer = close | {"offer": "$50 statement credit", "customer_words": "Yes, I'll take the credit and keep it."}
+    assert "recorded" in _call(env, "record_retention_answer", **(answer | {"accepted": True})).content
+    assert _denied(_hidden(env, "close_credit_card_account_7834", **close), "accepted the retention offer")
+    # τ² shows bools to the model as "True"/"False": a string "False" is a decline, not an acceptance
+    _call(env, "record_retention_answer", **(answer | {"accepted": "False", "customer_words": "No thanks, close it."}))
+    assert env.tools.glint_retention[close["credit_card_account_id"]]["accepted"] is False
+    assert "accepted the retention offer" not in _hidden(env, "close_credit_card_account_7834", **close).content

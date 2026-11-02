@@ -433,6 +433,8 @@ def _register_banking(reg: GateRegistry) -> None:
                "tier; a submitted credit limit increase is decided before a transfer.")))
     for tool, fn, purpose in others:
         reg.register(Gate(f"banking_{tool}_gate", (tool,), purpose, fn, toolkit=fn is procedure.transfer))
+    reg.register(Gate("banking_retention_answer_gate", ("close_credit_card_account_7834",), "credit_card_account_logistics_003 steps 5-6: after a reason is logged, close only on a declined retention offer recorded with "
+                      "record_retention_answer.", bank_rules.retention_answered, toolkit=True))
     # procedure gates: every banking write acting for a user, and every write whose procedure names lookups
     reg.register(Gate("procedure_verified_gate", procedure.VERIFIED_WRITES, "Every procedure starts with a verified "
                       "customer: the user's log_verification record from this conversation.", procedure.verified))
