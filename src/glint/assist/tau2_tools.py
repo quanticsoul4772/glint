@@ -198,6 +198,30 @@ class DisputePlanTools(ToolKitBase):
                                                customer_words)
 
 
+    @is_tool(ToolType.GENERIC, mutates_state=True)
+    def record_requests(self, user_id: str, requests: list[dict]) -> dict:
+        """Record the account actions the customer asked for, before making any of them. Each write below is checked
+        against this record: a write it does not cover is refused until the customer asks for it and it is recorded.
+        Call it again to replace the record when the customer adds or changes a request. It does not change the
+        database.
+
+        Args:
+            user_id: The customer's user id.
+            requests: One object per action the customer asked for: {"action": one of 'dispute_debit_transaction'
+                (target: transaction_id), 'close_debit_card' (card_id), 'order_debit_card' (checking account_id),
+                'clear_fraud_alert_or_velocity_block' (card_id), 'temporary_limit_increase' (card_id),
+                'reset_or_change_pin' (card_id), 'pay_credit_card' (credit_card_account_id), 'correct_rewards'
+                (transaction_id), 'close_credit_card' (credit_card_account_id), 'savings_interest_correction'
+                (savings account_id); "target_id": the id of the card, account or transaction the customer means
+                (look it up first; leave it empty only if the customer's request covers any); "customer_words":
+                the customer's own words asking for it}.
+
+        Returns:
+            dict: recorded, the requests as recorded; or an error.
+        """
+        return banking.record_requests(self.db, user_id, requests)
+
+
 class BankingDecisionTools(DisputePlanTools):
     """Mixed in ahead of the banking toolkit class τ² composes per retrieval variant (see `install`). Its KB_search
     and grep replace τ²'s (whole documents) with excerpts within a context budget (glint.assist.kb), wherever this

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 
 from glint.assist import airline, as_flag, banking, retail
+from glint.assist.banking import REQUEST_TOOLS
 from glint.gates import banking as bank_rules
 from glint.gates import debit, procedure, travel
 from glint.gates.bankdb import undecided_increases
@@ -437,6 +438,10 @@ def _register_banking(reg: GateRegistry) -> None:
         reg.register(Gate(f"banking_{tool}_gate", (tool,), purpose, fn, toolkit=fn is procedure.transfer))
     reg.register(Gate("banking_retention_answer_gate", ("close_credit_card_account_7834",), "credit_card_account_logistics_003 steps 5-6: after a reason is logged, close only on a declined retention offer recorded with "
                       "record_retention_answer.", bank_rules.retention_answered, toolkit=True))
+    for tool in REQUEST_TOOLS:
+        reg.register(Gate(f"banking_request_{tool}", (tool,), "Act only on what the customer asked for: the "
+                          "write is covered by the record_requests record.", bank_rules.requested(tool),
+                          toolkit=True))
     # procedure gates: every banking write acting for a user, and every write whose procedure names lookups
     reg.register(Gate("procedure_verified_gate", procedure.VERIFIED_WRITES, "Every procedure starts with a verified "
                       "customer: the user's log_verification record from this conversation.", procedure.verified))

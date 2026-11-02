@@ -13,7 +13,7 @@
 """
 from __future__ import annotations
 
-from glint.assist.banking import FINAL_ORDER, OPEN_DISPUTE, TODAY, _tier
+from glint.assist.banking import FINAL_ORDER, OPEN_DISPUTE, REQUEST_TOOLS, REQUESTS_TOOL, TODAY, _tier
 from glint.gates import apy
 from glint.gates.bankdb import NOW_TEXT, as_date, days_since, money, verified_today, within_year
 from glint.gates.core import GateResult, allow, deny
@@ -341,6 +341,42 @@ def close_card(db, a: dict) -> GateResult:
                     "close only if the customer still wants it after the offer.",
                     facts=[f"closure reasons for {card} in the past year: none"])
     return allow("banking.close_card", source, {"reasons_today": len(today), "reasons_past_year": len(earlier)})
+
+
+def requested(tool: str):
+    """A gate for `tool`: the write is one the customer asked for, per the agent's record_requests record (a write the
+    record does not cover is an action nobody requested; on the wrong record, the refusal names the requested one)."""
+    action, target_arg = REQUEST_TOOLS[tool]
+
+    def gate(toolkit, a: dict) -> GateResult:
+        source = "glint request record (record_requests): act only on what the customer asked for"
+        record = getattr(toolkit, "glint_requests", None)
+        target = str(a.get(target_arg) or "")
+        if record is None:
+            return deny("banking.request.no_record", source, "the customer's requests are not recorded yet",
+                        f"Call {REQUESTS_TOOL}(user_id, requests=[...]) with every account action the customer asked "
+                        "for (action, the id it targets, their words), then make this write if it is one of them.",
+                        {"tool": tool, "target": target},
+                        consequence="Nothing was changed. Writes are made only for requests on record.",
+                        facts=[f"{tool} on {target or '(no target)'}: no request record in this conversation"])
+        same_action = [r for r in record if r["action"] == action]
+        if any(not r["target_id"] or r["target_id"] == target for r in same_action):
+            return allow("banking.request", source, {"tool": tool, "action": action, "target": target})
+        asked = "; ".join(f"{r['action']} on {r['target_id'] or 'any'}" for r in record)
+        if same_action:
+            wanted = ", ".join(r["target_id"] for r in same_action)
+            return deny("banking.request.other_target", source, f"the customer asked for {action} on {wanted}, "
+                        f"not on {target}", f"Make the write on {wanted}, the record the customer named; if they meant "
+                        f"{target} too, confirm with them and add it with {REQUESTS_TOOL}.",
+                        {"tool": tool, "target": target, "requested_targets": wanted},
+                        consequence="Nothing was changed on the record the customer did not name.",
+                        facts=[f"requests on record: {asked}"])
+        return deny("banking.request.not_requested", source, f"the customer did not ask for {action}",
+                    f"Do not make this write unless the customer asks for it; if they do, add it with "
+                    f"{REQUESTS_TOOL} first.", {"tool": tool, "target": target, "action": action},
+                    consequence="Nothing was changed. An action nobody requested is not made.",
+                    facts=[f"requests on record: {asked}"])
+    return gate
 
 
 def retention_answered(toolkit, a: dict) -> GateResult:
