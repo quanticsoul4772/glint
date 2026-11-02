@@ -782,3 +782,34 @@ def test_interest_report_follows_the_rate_paid_and_the_credit():
     env, task, _ = _bank("task_093")  # a correct report with no credit applied first is refused
     assert _play(env, task, "apply_savings_account_credit_6831") == credit
     assert _denied(_hidden(env, "submit_interest_discrepancy_report_7294", **report), "Apply the interest correction")
+
+
+def test_savings_credit_is_the_interest_owed_at_the_compiled_apy():
+    env, task, _ = _bank("task_094")  # Gold $96,000: 5.5 + Green boost 0.75 + EcoCard 0.6 = 6.85%; owed $140.00
+    credit = _play(env, task, "apply_savings_account_credit_6831")
+    assert credit["amount"] == 140.0
+    assert _denied(_hidden(env, "apply_savings_account_credit_6831", **(credit | {"amount": 142.0})),
+                   "not the amount owed")
+    assert _ran(_hidden(env, "apply_savings_account_credit_6831", **credit))
+    assert _denied(_hidden(env, "apply_savings_account_credit_6831", **credit), "no interest correction is owed")
+    report = {"account_id": credit["account_id"], "user_id": "wl94k7m3p8", "expected_apy": 6.875, "actual_apy": 5.1,
+              "amount_difference": 142.0}
+    assert _denied(_hidden(env, "submit_interest_discrepancy_report_7294", **report), "expected_apy 6.85")
+    assert _ran(_hidden(env, "submit_interest_discrepancy_report_7294",
+                        **(report | {"expected_apy": 6.85, "amount_difference": 140.0})))
+    assert _ran(_hidden(env, "apply_savings_account_credit_6831", account_id=credit["account_id"], amount=5.0,
+                        credit_type="goodwill_credit"))
+
+
+def test_compiled_apy_reproduces_every_gold_report():
+    from glint import inspect
+    from glint.gates import apy
+    checked = 0
+    for tid in ("task_093", "task_094", "task_095", "task_096", "task_097"):
+        env, _, _ = _bank(tid)
+        for g in inspect.gold_writes("banking_knowledge", tid):
+            if g["tool"] == "submit_interest_discrepancy_report_7294":
+                assert apy.expected_apy(env.tools.db, g["args"]["account_id"])[0] == pytest.approx(
+                    g["args"]["expected_apy"])
+                checked += 1
+    assert checked == 9
