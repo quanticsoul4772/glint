@@ -299,7 +299,7 @@ REQUEST_TOOLS = {tool: (action, target) for action, (tools, target) in REQUEST_A
 
 def record_requests(db, user_id: str, requests: list[dict]) -> dict:
     """The account actions the customer asked for in this conversation, as the agent records them. Validates the user
-    and each action; never writes the database. A later record replaces this one."""
+    and each action; never writes the database. Each record adds to the earlier ones (glint.gates.enforce)."""
     if user_id not in db.users.data:
         return {"recorded": False, "error": f"no user {user_id!r}"}
     out, errors = [], []

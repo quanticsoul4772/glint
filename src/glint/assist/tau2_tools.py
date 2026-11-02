@@ -202,7 +202,7 @@ class DisputePlanTools(ToolKitBase):
     def record_requests(self, user_id: str, requests: list[dict]) -> dict:
         """Record the account actions the customer asked for, before making any of them. Each write below is checked
         against this record: a write it does not cover is refused until the customer asks for it and it is recorded.
-        Call it again to replace the record when the customer adds or changes a request. It does not change the
+        Call it again to add requests when the customer asks for more (each call adds to the record). It does not change the
         database.
 
         Args:

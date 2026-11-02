@@ -286,7 +286,12 @@ class Enforcer:
             return
         if not isinstance(record, dict) or not as_flag(record.get("recorded")):
             return
-        env.tools.glint_requests = [r for r in record.get("requests") or [] if isinstance(r, dict)]
+        merged = list(env.tools.glint_requests or [])  # each call adds: agents record one request per call
+        for r in record.get("requests") or []:
+            if isinstance(r, dict) and all((r.get("action"), r.get("target_id")) != (m.get("action"),
+                                                                                   m.get("target_id")) for m in merged):
+                merged.append(r)
+        env.tools.glint_requests = merged
         try:
             self.events.emit("requests.recorded", {
                 "domain": self.domain, "user_id": record.get("user_id"), "replay": replay,
