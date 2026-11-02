@@ -89,6 +89,15 @@ def _card(env, card_id: str) -> dict:
     return env.tools.db.debit_cards.data[card_id]
 
 
+ANY_REQUEST = [{"action": a, "target_id": "", "customer_words": "(test)"} for a in __import__(
+    "glint.assist.banking", fromlist=["REQUEST_ACTIONS"]).REQUEST_ACTIONS]
+
+
+def _request_any(env, user_id: str) -> None:
+    """Record every account action as requested, for any target: tests of other gates on covered write tools."""
+    assert "recorded" in _call(env, "record_requests", user_id=user_id, requests=ANY_REQUEST).content
+
+
 def _verify(env, user_id: str) -> None:
     user = env.tools.db.users.data[user_id]
     assert _ran(_call(env, "log_verification", time_verified="2025-11-14 03:40:00 EST",
@@ -123,6 +132,7 @@ def test_unfreeze_only_a_frozen_card():
 def test_close_a_frozen_card_is_unfrozen_first():
     env, task, _ = _bank("task_087")
     _play(env, task, "unfreeze_debit_card_3893")
+    _request_any(env, "mt35a7c9d2")
     _lookups(env, "mt35a7c9d2", "chk_mt35a7c9d2_blue")
     blue = {"card_id": "dbc_mt35a7c9d2_blue", "reason": "lost"}
     assert _denied(_hidden(env, "close_debit_card_4721", **blue), "Unfreeze it")
@@ -150,6 +160,7 @@ def _new_card(env, account_id: str) -> str:
 def test_close_a_new_card_needs_14_days_unless_lost_stolen_or_fraud():
     env, task, _ = _bank("task_081")
     assert _ran(_hidden(env, "order_debit_card_5739", **_play(env, task, "order_debit_card_5739")))
+    _request_any(env, "tm92c4d7e8")
     new = _new_card(env, "chk_tm92c4d7e8_blue")
     assert _denied(_hidden(env, "close_debit_card_4721", card_id=new, reason="no_longer_needed"), "at least 14 days")
     assert _ran(_hidden(env, "close_debit_card_4721", card_id=new, reason="lost"))
@@ -186,6 +197,7 @@ def test_order_past_the_replacement_limit_needs_the_excess_fee():
     env, _, events = _bank("task_073")
     user, account = "kj93a7b2e1", "chk_kj93a7b2e1_3"
     _verify(env, user)
+    _request_any(env, user)
     _lookups(env, user, account)
     order = {"account_id": account, "user_id": user, "delivery_option": "STANDARD", "delivery_fee": 0,
              "card_design": "CLASSIC", "design_fee": 0, "shipping_address": "1 Main St, Austin, TX 78701"}
@@ -318,6 +330,7 @@ def test_a_write_needs_the_user_verified_in_this_conversation():
 def test_a_close_needs_the_transactions_lookup_on_the_gates_own_record():
     env, _, _ = _bank("task_084")
     _verify(env, "a7c2f85d91")
+    _request_any(env, "a7c2f85d91")
     close = {"card_id": "dbc_82b5d1a6f3", "reason": "fraud_suspected"}
     assert _denied(_hidden(env, "close_debit_card_4721", **close), "get_bank_account_transactions_9173")
     assert env.tools.glint_reads == set()
@@ -345,6 +358,7 @@ def test_lookup_gate_decisions_replay_unchanged_in_taus_strict_replay():
     user = env.tools.db.users.data["a7c2f85d91"]
     send("log_verification", time_verified="2025-11-14 03:40:00 EST",
          **{k: user[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
+    send("record_requests", user_id="a7c2f85d91", requests=ANY_REQUEST)
     close = json.dumps({"card_id": "dbc_82b5d1a6f3", "reason": "fraud_suspected"})
     send("unlock_discoverable_agent_tool", agent_tool_name="close_debit_card_4721")
     assert _denied(send("call_discoverable_agent_tool", agent_tool_name="close_debit_card_4721", arguments=close),
@@ -385,6 +399,7 @@ def test_other_changes_wait_for_the_submitted_increase():
     # decision changes the utilization the denial reads
     env, task, events = _bank("task_051")
     deny_args = _play(env, task, rules.DENY)
+    _request_any(env, deny_args["user_id"])
     pay = json.loads(next(a.arguments["arguments"] for a in task.evaluation_criteria.actions
                           if _name(a) == "pay_credit_card_from_checking_9182"))
     reply = _hidden(env, "pay_credit_card_from_checking_9182", **pay)
@@ -443,6 +458,8 @@ def test_increase_record_and_its_decisions_replay_unchanged_in_taus_strict_repla
     send(ToolCall(id="s2", name="call_discoverable_agent_tool", requestor="assistant", arguments={
         "agent_tool_name": rules.SUBMIT, "arguments": json.dumps(submit | {"requested_increase_amount": 500})}))
     pay = gold[upto].arguments
+    send(ToolCall(id="r", name="record_requests", requestor="assistant",
+                  arguments={"user_id": submit["user_id"], "requests": ANY_REQUEST}))
     assert _denied(send(ToolCall(id="p", name=gold[upto].name, arguments=pay, requestor="assistant")),
                    "approve or deny")
     replay, _, _ = _bank("task_051", enforcer)
@@ -858,3 +875,26 @@ def test_temporary_limit_needs_no_recent_overdraft_and_one_per_day():
     del rows["txn_test_overdraft"]
     assert _ran(_hidden(env, "request_temporary_debit_card_limit_increase_8374", **req))
     assert _denied(_hidden(env, "request_temporary_debit_card_limit_increase_8374", **req), "already has a temporary")
+
+
+def test_writes_follow_the_recorded_requests():
+    env, _, events = _bank("task_084")
+    _verify(env, "a7c2f85d91")
+    close = {"card_id": "dbc_82b5d1a6f3", "reason": "fraud_suspected"}
+    assert _denied(_hidden(env, "close_debit_card_4721", **close), "record_requests")
+    assert _rule(events) == "banking.request.no_record"
+    other = next(k for k, c in env.tools.db.debit_cards.data.items()
+                 if c.get("user_id") == "a7c2f85d91" and k != close["card_id"])
+    _call(env, "record_requests", user_id="a7c2f85d91", requests=[
+        {"action": "close_debit_card", "target_id": other, "customer_words": "close my other card"}])
+    reply = _hidden(env, "close_debit_card_4721", **close)
+    assert _denied(reply, other) and _rule(events) == "banking.request.other_target"
+    assert _denied(_hidden(env, "clear_debit_card_fraud_alert_4892", card_id=other, reason="customer_verified"),
+                   "did not ask for clear_fraud_alert_or_velocity_block")
+    _call(env, "record_requests", user_id="a7c2f85d91", requests=[
+        {"action": "close_debit_card", "target_id": close["card_id"], "customer_words": "close the card"}])
+    _hidden(env, "close_debit_card_4721", **close)  # the request gate allows; the lookup gate decides next
+    assert not any(e["payload"]["rule_id"].startswith("banking.request.") and e["payload"]["decision"] == "deny"
+                   for e in events.events("gate.fired")[-3:])
+    assert "unknown action" in _call(env, "record_requests", user_id="a7c2f85d91",
+                                     requests=[{"action": "wire_money"}]).content

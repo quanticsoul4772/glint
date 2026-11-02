@@ -39,7 +39,7 @@ from loguru import logger
 from mcp.client.client import Client
 from tau2.data_model.message import ToolCall
 
-from glint.assist.banking import PLAN_TOOL
+from glint.assist.banking import PLAN_TOOL, REQUEST_TOOLS, REQUESTS_TOOL, RETENTION_TOOL
 from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
 from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, plan_arguments, with_address_asks, with_plans
@@ -49,6 +49,18 @@ from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, plan_arguments, with_addr
 RECS = Path(__file__).resolve().parents[1] / "data-public" / "wrong-write-runs.json"
 DOMAIN = "banking_knowledge"
 
+
+def run_requests(writes: list[dict]) -> dict | None:
+    """The record_requests arguments a recorded run's own writes imply (it was recorded before the request gate)."""
+    user = next((str(w["args"]["user_id"]) for w in writes if (w.get("args") or {}).get("user_id")), None)
+    items = []
+    for w in writes:
+        if w["name"] in REQUEST_TOOLS:
+            action, target_arg = REQUEST_TOOLS[w["name"]]
+            item = {"action": action, "target_id": str(w["args"].get(target_arg) or ""), "customer_words": "(replay)"}
+            if item not in items:
+                items.append(item)
+    return {"user_id": user, "requests": items} if user and items else None
 
 def train_task_ids() -> list[str]:
     """The 77 banking train tasks (pilot + rest), as gate_replay replays them: the 20 test_untouched tasks of
@@ -94,10 +106,10 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                                           lambda u, users=users: (users.get(u) or {}).get("address"))
                 for call in calls:
                     k, action = call.id.removeprefix("gold-"), call
-                    if call.name == PLAN_TOOL:  # Glint's tool: the ungated twin has none
-                        reply = await client.call_tool(PLAN_TOOL, call.arguments)
+                    if call.name in (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL):  # Glint's tools: the twin has none
+                        reply = await client.call_tool(call.name, call.arguments)
                         if reply.is_error:
-                            errors.append({"task_id": task_id, "action": k, "tool": PLAN_TOOL, "text": _text(reply)})
+                            errors.append({"task_id": task_id, "action": k, "tool": call.name, "text": _text(reply)})
                         continue
                     if call.id.endswith(ADDRESS_ASK_SUFFIX):  # refused once by address_ask; never sent to the twin
                         before = session.events.count()
@@ -209,6 +221,7 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                 await client.call_tool("load_scenario", {"task_id": rec["task"]})
                 session, row = bank.session(), None
                 plans = plan_arguments([w["args"] for w in rec["writes"] if w["name"] == rules.DISPUTE])
+                requests = run_requests(rec["writes"])
                 for i, w in enumerate(rec["writes"]):
                     if w["name"].startswith("give:"):  # the run gave the customer a tool: the card-digits gate reads it
                         await client.call_tool("give_discoverable_user_tool",
@@ -217,6 +230,9 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                     if w["name"].startswith("U:"):  # the customer's own call
                         continue
                     user = str(w["args"].get("user_id", ""))
+                    if requests and w["name"] in REQUEST_TOOLS:  # recorded before record_requests existed
+                        await client.call_tool(REQUESTS_TOOL, requests)
+                        requests = None
                     if w["name"] == rules.DISPUTE and user in plans:
                         await client.call_tool(PLAN_TOOL, plans.pop(user))
                     if w["name"] == rules.REPLACE:  # recorded before address_ask: the address counts as confirmed

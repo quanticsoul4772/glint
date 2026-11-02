@@ -18,7 +18,7 @@ from collections.abc import Callable
 
 from tau2.data_model.message import ToolCall
 
-from glint.assist.banking import DISPUTE_HISTORY_TOOL, PLAN_TOOL, RETENTION_TOOL
+from glint.assist.banking import DISPUTE_HISTORY_TOOL, PLAN_TOOL, REQUEST_TOOLS, REQUESTS_TOOL, RETENTION_TOOL
 from glint.gates.rules import DISPUTE, REPLACE, parse_hidden_arguments, same_address
 
 WRAPPER = "call_discoverable_agent_tool"
@@ -66,6 +66,23 @@ def _hidden(call: ToolCall, tool: str) -> dict | None:
     return dict(args) if call.name == tool else None
 
 
+def request_arguments(calls: list[ToolCall]) -> dict | None:
+    """The record_requests arguments a conversation's own writes imply: one request per (action, target) among the
+    writes the request gate covers, for the conversation's customer. None when it makes none of those writes."""
+    user, items = None, []
+    for c in calls:
+        args = c.arguments or {}
+        inner = parse_hidden_arguments(args.get("arguments", "{}")) if c.name == WRAPPER else dict(args)
+        user = user or (inner or {}).get("user_id")
+        for tool, (action, target_arg) in REQUEST_TOOLS.items():
+            if (w := _hidden(c, tool)) is not None:
+                item = {"action": action, "target_id": str(w.get(target_arg) or ""),
+                        "customer_words": "(replay: the conversation makes this write)"}
+                if all((i["action"], i["target_id"]) != (item["action"], item["target_id"]) for i in items):
+                    items.append(item)
+    return {"user_id": user, "requests": items} if items and user else None
+
+
 def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
     """`calls` with a plan_disputes call before each user's first dispute filing (ids `<filing id>-plan`), and the
     dispute-history read before it when none came earlier (ids `<filing id>-history-unlock`, `<filing id>-history`).
@@ -73,8 +90,12 @@ def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
     record_retention_answer call (accepted false) an agent following the retention gate makes (id `<close id>-retention`):
     the conversation closes the account, so the customer declined the offer."""
     plans = plan_arguments([f for c in calls if (f := filing(c))])
-    out, planned, read, logged, answered = [], set(), False, set(), set()
+    requests = request_arguments(calls)
+    out, planned, read, logged, answered, recorded = [], set(), False, set(), set(), False
     for c in calls:
+        if requests and not recorded and any(_hidden(c, tool) is not None for tool in REQUEST_TOOLS):
+            recorded = True
+            out.append(ToolCall(id=f"{c.id}-requests", name=REQUESTS_TOOL, arguments=requests, requestor="assistant"))
         if (reason := _hidden(c, CLOSURE_REASON)) is not None:
             logged.add(reason.get("credit_card_account_id"))
         close = _hidden(c, CLOSE_CARD)

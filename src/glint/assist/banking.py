@@ -279,6 +279,40 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str, increase_deci
 
 PLAN_TOOL = "plan_disputes"
 RETENTION_TOOL = "record_retention_answer"
+REQUESTS_TOOL = "record_requests"
+# action -> (the write tools it covers, the argument naming its target)
+REQUEST_ACTIONS = {
+    "dispute_debit_transaction": (("file_debit_card_transaction_dispute_6281",), "transaction_id"),
+    "close_debit_card": (("close_debit_card_4721",), "card_id"),
+    "order_debit_card": (("order_debit_card_5739",), "account_id"),
+    "clear_fraud_alert_or_velocity_block": (("clear_debit_card_fraud_alert_4892",), "card_id"),
+    "temporary_limit_increase": (("request_temporary_debit_card_limit_increase_8374",), "card_id"),
+    "reset_or_change_pin": (("reset_debit_card_pin_6284", "change_debit_card_pin_6285"), "card_id"),
+    "pay_credit_card": (("pay_credit_card_from_checking_9182",), "credit_card_account_id"),
+    "correct_rewards": (("update_transaction_rewards_3847",), "transaction_id"),
+    "close_credit_card": (("close_credit_card_account_7834", "log_credit_card_closure_reason_4521"),
+                          "credit_card_account_id"),
+    "savings_interest_correction": (("apply_savings_account_credit_6831",), "account_id"),
+}
+REQUEST_TOOLS = {tool: (action, target) for action, (tools, target) in REQUEST_ACTIONS.items() for tool in tools}
+
+
+def record_requests(db, user_id: str, requests: list[dict]) -> dict:
+    """The account actions the customer asked for in this conversation, as the agent records them. Validates the user
+    and each action; never writes the database. A later record replaces this one."""
+    if user_id not in db.users.data:
+        return {"recorded": False, "error": f"no user {user_id!r}"}
+    out, errors = [], []
+    for r in requests if isinstance(requests, list) else []:
+        r = r if isinstance(r, dict) else {}
+        action, target = str(r.get("action", "")), str(r.get("target_id") or "")
+        if action not in REQUEST_ACTIONS:
+            errors.append(f"unknown action {action!r}; use one of {sorted(REQUEST_ACTIONS)}")
+            continue
+        out.append({"action": action, "target_id": target, "customer_words": str(r.get("customer_words", ""))})
+    if errors or not out:
+        return {"recorded": False, "error": "; ".join(errors) or "list at least one request"}
+    return {"recorded": True, "user_id": user_id, "requests": out}
 
 
 def record_retention_answer(db, credit_card_account_id: str, user_id: str, offer: str, accepted: bool,
