@@ -50,7 +50,6 @@ NO_RULE_REASONS = {
     "clear_debit_card_fraud_alert_4892": "the fraud score inputs are the user's answers",
     "reset_debit_card_pin_6284": "the PIN rules are checked by the tool; verification is gated",
     "change_debit_card_pin_6285": "the PIN rules are checked by the tool; verification is gated",
-    "request_temporary_debit_card_limit_increase_8374": "the amount and travel facts are the user's statement",
 }
 NO_RULE_YET = {
     "retail": (),
@@ -67,7 +66,8 @@ PHASE2 = {
         "log_verification", "change_user_email", "update_transaction_rewards_3847",
         "log_credit_card_closure_reason_4521", "apply_statement_credit_8472", "apply_credit_card_account_flag_6147",
         "close_credit_card_account_7834", "apply_checking_account_credit_5829", "submit_interest_discrepancy_report_7294",
-        "apply_savings_account_credit_6831", *debit.DEBIT_TOOLS,
+        "apply_savings_account_credit_6831",
+        "request_temporary_debit_card_limit_increase_8374", *debit.DEBIT_TOOLS,
         "transfer_to_human_agents", "give_discoverable_user_tool"),
 }
 RULED = {"retail": tuple(RETAIL_ACTIONS) + PHASE2["retail"], "airline": AIRLINE_GATED + PHASE2["airline"],
@@ -418,6 +418,8 @@ def _register_banking(reg: GateRegistry) -> None:
               ("submit_interest_discrepancy_report_7294", bank_rules.interest_report, ("bank_accounts_(general)_043/"
                "_044: the expected APY from the account's products (glint.gates.apy), the actual APY as paid, the "
                "difference, the credit applied first for the same amount.")),
+              ("request_temporary_debit_card_limit_increase_8374", bank_rules.temporary_limit, ("bank_accounts_(general)"
+               "_040: no overdraft fee in 30 days; one temporary increase per card per 24 hours.")),
               ("apply_savings_account_credit_6831", bank_rules.savings_credit, ("bank_accounts_(general)_043: an "
                "interest correction equal to the interest owed at the expected APY (glint.gates.apy), less any "
                "correction already applied today.")),
