@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from glint.assist.banking import FINAL_ORDER, OPEN_DISPUTE, TODAY, _tier
+from glint.gates import apy
 from glint.gates.bankdb import NOW_TEXT, as_date, days_since, money, within_year
 from glint.gates.core import GateResult, allow, deny
 
@@ -129,6 +130,51 @@ def _interest_basis(db, acc_id: str) -> tuple[float, float, list[dict]] | None:
     return money(latest.get("amount")), round(holdings - sum(money(t.get("amount")) for t in today), 2), today
 
 
+def _components_fact(parts: dict) -> str:
+    return (f"{parts['level']}: base {parts['base']}% + checking boost {parts['boost']}% + card bonus "
+            f"{parts['card_bonus']}% + relationship {parts['relationship_bonus']}% = {parts['expected_apy']}%")
+
+
+def savings_credit(db, a: dict) -> GateResult:
+    """bank_accounts_(general)_043: an interest correction is the difference between the interest at the expected
+    APY (glint.gates.apy) and the interest credited, less any correction already applied today. Fee refunds and
+    goodwill credits are not checked."""
+    source = "bank_accounts_(general)_043; glint.gates.apy"
+    acc_id = a.get("account_id", "")
+    if a.get("credit_type") != "interest_correction":
+        return allow("banking.savings_credit.not_interest", source, {"account_id": acc_id},
+                     reason="only interest corrections are checked")
+    basis = _interest_basis(db, acc_id) if db.accounts.data.get(acc_id) else None
+    computed = apy.expected_apy(db, acc_id) if basis else None
+    if basis is None or computed is None:
+        return allow("banking.savings_credit.not_compiled", source, {"account_id": acc_id},
+                     reason="no interest credit on record, or the account level is not compiled")
+    paid, balance, corrections = basis
+    expected, parts = computed
+    owed = round(round(balance * expected / 1200, 2) - paid, 2)
+    applied = round(paid * 12 / balance * 100, 3) if balance > 0 else expected
+    owed_alt = round(balance * (expected - applied) / 1200, 2)
+    already = round(sum(money(t.get("amount")) for t in corrections), 2)
+    remaining = round(owed - already, 2)
+    amount = money(a.get("amount"))
+    details = {"account_id": acc_id, "balance": balance, "interest_credited": paid, "owed": owed,
+               "already_corrected_today": already, "remaining": remaining, **parts}
+    facts = [_components_fact(parts), (f"interest at {expected}%: ${owed + paid:,.2f}; credited ${paid:,.2f}; "
+             f"owed ${owed:,.2f}; already corrected today ${already:,.2f}")]
+    if remaining <= 0.005:
+        return deny("banking.savings_credit.nothing_owed", source, "no interest correction is owed on this account",
+                    "Do not apply this credit. Tell the customer the interest credited matches the expected APY, or "
+                    "that the correction was already applied.", details,
+                    consequence="Nothing was credited.", facts=facts)
+    if abs(amount - remaining) > 0.015 and abs(amount - round(owed_alt - already, 2)) > 0.015:
+        return deny("banking.savings_credit.amount", source, "the interest correction is not the amount owed",
+                    f"Apply ${remaining:,.2f} (the interest at {expected}% less the interest credited"
+                    + (" and the correction already applied today" if already else "") + ").", details,
+                    consequence="Nothing was credited. One correct credit, then the report with the same amount.",
+                    facts=facts + [f"credit asked: ${amount:,.2f}"])
+    return allow("banking.savings_credit", source, details)
+
+
 def interest_report(db, a: dict) -> GateResult:
     """bank_accounts_(general)_043/_044: the report's actual APY is the one the account was paid at, its amount is the
     difference between the interest at the expected APY and the interest credited, and the credit is applied first,
@@ -151,6 +197,13 @@ def interest_report(db, a: dict) -> GateResult:
     details = {"account_id": acc_id, "balance": balance, "interest_credited": paid, "applied_apy": applied,
                "amount_at_expected_apy": owed, "corrections_today": [money(t.get("amount")) for t in corrections]}
     paid_fact = f"latest monthly interest credited: ${paid:,.2f} on a balance of ${balance:,.2f}"
+    computed = apy.expected_apy(db, acc_id)
+    if computed is not None and abs(expected - computed[0]) > 0.0015:
+        right, parts = computed
+        return deny("banking.interest_report.expected_apy", source, "the expected APY is not the one the account's "
+                    "products earn", f"Report expected_apy {right} and recompute the difference.",
+                    details | parts, consequence="Nothing was reported. The expected APY sets the amount owed.",
+                    facts=[_components_fact(parts), f"the report says {expected}%"])
     if applied is not None and abs(actual - applied) > 0.0015:
         return deny("banking.interest_report.actual_apy", source, "the actual APY is not the rate the account was paid at",
                     f"Report actual_apy {applied} (monthly interest x 12 / balance), then recompute the difference.",

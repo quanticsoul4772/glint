@@ -47,9 +47,6 @@ NO_RULE_REASONS = {
     "close_bank_account_7392": ("whether the user also plans to open an account that needs this one's tenure is "
                                 "not in the database"),
     "transfer_funds_between_bank_accounts_7291": "the amount and accounts are the user's choice",
-    "apply_savings_account_credit_6831": ("the interest correction amount needs the expected APY from the account "
-                                          "type's rate documents; the report gate checks the credit against the "
-                                          "report; the procedure gates require the lookups"),
     "clear_debit_card_fraud_alert_4892": "the fraud score inputs are the user's answers",
     "reset_debit_card_pin_6284": "the PIN rules are checked by the tool; verification is gated",
     "change_debit_card_pin_6285": "the PIN rules are checked by the tool; verification is gated",
@@ -70,7 +67,7 @@ PHASE2 = {
         "log_verification", "change_user_email", "update_transaction_rewards_3847",
         "log_credit_card_closure_reason_4521", "apply_statement_credit_8472", "apply_credit_card_account_flag_6147",
         "close_credit_card_account_7834", "apply_checking_account_credit_5829", "submit_interest_discrepancy_report_7294",
-        *debit.DEBIT_TOOLS,
+        "apply_savings_account_credit_6831", *debit.DEBIT_TOOLS,
         "transfer_to_human_agents", "give_discoverable_user_tool"),
 }
 RULED = {"retail": tuple(RETAIL_ACTIONS) + PHASE2["retail"], "airline": AIRLINE_GATED + PHASE2["airline"],
@@ -419,8 +416,11 @@ def _register_banking(reg: GateRegistry) -> None:
               ("apply_checking_account_credit_5829", bank_rules.checking_credit, ("bank_accounts_(general)_017: one "
                "credit per account per interaction, a 14-day cooldown, a fee refund within the fees charged.")),
               ("submit_interest_discrepancy_report_7294", bank_rules.interest_report, ("bank_accounts_(general)_043/"
-               "_044: the actual APY as paid, the difference from the expected APY, the credit applied first for the "
-               "same amount.")),
+               "_044: the expected APY from the account's products (glint.gates.apy), the actual APY as paid, the "
+               "difference, the credit applied first for the same amount.")),
+              ("apply_savings_account_credit_6831", bank_rules.savings_credit, ("bank_accounts_(general)_043: an "
+               "interest correction equal to the interest owed at the expected APY (glint.gates.apy), less any "
+               "correction already applied today.")),
               ("log_credit_card_closure_reason_4521", bank_rules.log_closure_reason, ("credit_card_account_logistics"
                "_003 step 1: closure eligibility before the reason and retention steps.")),
               ("close_credit_card_account_7834", bank_rules.close_card, ("credit_card_account_logistics_002/_003: "
