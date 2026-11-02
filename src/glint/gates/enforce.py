@@ -115,9 +115,9 @@ def write_tools(toolkit) -> set[str]:
     return {n for n in toolkit.tools if toolkit.tool_type(n) == ToolType.WRITE and n != WRAPPER}
 
 
-REPEAT_PREFIX = ("REPEAT: this exact call was already refused for the same reason. Do not send it again. Ask the "
-                 "customer how they want to proceed, or transfer to a human agent (transfer_to_human_agents) if it "
-                 "cannot be resolved.\n")
+REPEAT_NOTE = ("\n\nThis exact call was already refused for the same reason, so sending it again will not work. Ask "
+               "the customer how they want to proceed, or transfer to a human agent (transfer_to_human_agents) if it "
+               "cannot be resolved.")
 
 
 def attestation_classes(passed: list[str]) -> list[str]:
@@ -390,7 +390,7 @@ class Enforcer:
             key = (write[0], json.dumps(write[1], sort_keys=True, default=str), result.rule_id)
             repeat = key in env.tools.glint_denied  # the same call refused for the same rule before: escalate
             env.tools.glint_denied.add(key)
-            content = (REPEAT_PREFIX if repeat else "") + result.message(self.wording)
+            content = result.message(self.wording) + (REPEAT_NOTE if repeat else "")
             return ToolMessage(id=message.id, content=content, requestor=message.requestor, role="tool", error=True)
 
         def set_state(*args, **kwargs):  # τ²'s evaluator replays the trajectory here: those events say replay=true

@@ -463,8 +463,11 @@ def test_an_event_that_cannot_be_logged_turns_the_write_into_a_deny():
 def test_the_deny_message_carries_finding_facts_consequence_fix_and_verdict_and_rewrites_nothing():
     env, _ = _gated("retail")
     args = {"order_id": "#W4817420", "reason": "no longer needed"}
-    first, second = _call(env, "cancel_pending_order", **args), _call(env, "cancel_pending_order", **args)
+    first = _call(env, "cancel_pending_order", **args)
+    second = _call(_gated("retail")[0], "cancel_pending_order", **args)  # same call, fresh conversation
     assert first.content == second.content
+    repeat = _call(env, "cancel_pending_order", **args)  # the same call again in one conversation escalates
+    assert repeat.content.startswith(first.content) and "transfer_to_human_agents" in repeat.content
     lines = first.content.splitlines()
     assert [line.split(":", 1)[0] for line in lines[1:4]] == ["Rule", "What the check found", "Facts it used"]
     assert lines[1].startswith("Rule: retail.cancel (")
