@@ -511,7 +511,9 @@ def test_an_increase_verdict_stays_open_until_its_decision_and_replays_unchanged
         "verdict": "deny", "new_credit_limit": None, "denial_reason": verdict["denial_reason"]}}
     for k, a in enumerate(gold[at + 1:], at + 1):
         assert _ran(send(a.name, a.arguments, k))
-    assert env.tools.glint_verdicts == {} and "[open]" not in send("get_current_time", {}, "e").content
+    after = send("get_current_time", {}, "e").content
+    assert env.tools.glint_verdicts == {} and "check_credit_limit_increase said" not in after
+    assert "credit limit increase submitted and not decided" not in after
 
 
 def test_only_a_credit_limit_increase_holds_the_disputes():
