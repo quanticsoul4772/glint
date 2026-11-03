@@ -69,8 +69,8 @@ from glint.assist.banking import (
     waiver_due,
 )
 from glint.assist.tau2_tools import add_plan_tool
-from glint.gates.banking import RETENTION_CREDIT, closure_blockers
 from glint.gates.bankdb import increase_request_ids, undecided_increases
+from glint.gates.banking import RETENTION_CREDIT, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import (
