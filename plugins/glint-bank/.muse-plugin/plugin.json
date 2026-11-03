@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "glint-bank",
   "displayName": "Glint Bank",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A live τ²-bench bank as MCP tools, with every write checked by Glint's policy gates before it runs.",
   "compat": {
     "source": "native",
