@@ -13,7 +13,17 @@
 """
 from __future__ import annotations
 
-from glint.assist.banking import FINAL_ORDER, OPEN_DISPUTE, REQUEST_TOOLS, REQUESTS_TOOL, TODAY, _tier
+import json
+
+from glint.assist.banking import (
+    FINAL_ORDER,
+    OPEN_DISPUTE,
+    REQUEST_ALSO_COVERS,
+    REQUEST_TOOLS,
+    REQUESTS_TOOL,
+    TODAY,
+    _tier,
+)
 from glint.gates import apy
 from glint.gates.bankdb import NOW_TEXT, as_date, days_since, money, verified_today, within_year
 from glint.gates.core import GateResult, allow, deny
@@ -343,39 +353,90 @@ def close_card(db, a: dict) -> GateResult:
     return allow("banking.close_card", source, {"reasons_today": len(today), "reasons_past_year": len(earlier)})
 
 
+UNRECORDED = "banking.request.unrecorded"  # rule_id of a reversible write allowed and flagged without a covering request
+# Reversible writes the request gate allows and flags instead of refusing: a closure reason log and a debit card order.
+# Closes, payments and filings stay refused. Glint convention (research row 4: reports 3.6 and 3.8, memo M3, flag
+# before any hard tier); no policy clause.
+FLAGGED_TOOLS = ("log_credit_card_closure_reason_4521", "order_debit_card_5739")
+
+
+def _covers(db, tool: str, r: dict, action: str, target: str) -> bool:
+    """Whether the recorded request `r` covers `tool` on `target`: the tool's own action on that target (or on any), or
+    the action in REQUEST_ALSO_COVERS (a close_debit_card request covers the order on the closed card's account)."""
+    if r["action"] == action:
+        return not r["target_id"] or r["target_id"] == target
+    if REQUEST_ALSO_COVERS.get(tool) != r["action"]:
+        return False
+    card = db.debit_cards.data.get(r["target_id"]) if r["target_id"] else None
+    return not r["target_id"] or (card is not None and str(card.get("account_id") or "") == target)
+
+
+def _request_user(db, a: dict) -> str:
+    """The user a refused write acts for: its user_id argument, else the owner of the card or account it names, else
+    the customer verified in this conversation."""
+    if a.get("user_id"):
+        return str(a["user_id"])
+    for table in ("debit_cards", "accounts", "credit_card_accounts"):
+        rows = getattr(db, table).data
+        for value in a.values():
+            row = rows.get(value) if isinstance(value, str) else None
+            if row and row.get("user_id"):
+                return str(row["user_id"])
+    verified = [r.get("user_id") for r in db.verification_history.data.values()
+                if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
+    return str(verified[-1]) if verified else "<user_id>"
+
+
+def record_call(db, a: dict, action: str, target: str) -> str:
+    """The record_requests call that would cover this write, filled in but for the customer's words (research row 5,
+    reader 3 A1; Glint convention). The gate never sees the conversation, so the agent must confirm the customer asked
+    and supply their words."""
+    item = json.dumps({"action": action, "target_id": target, "customer_words": "<the customer's own words>"})
+    return f"{REQUESTS_TOOL}(user_id={_request_user(db, a)!r}, requests=[{item}])"
+
+
 def requested(tool: str):
     """A gate for `tool`: the write is one the customer asked for, per the agent's record_requests record (a write the
-    record does not cover is an action nobody requested; on the wrong record, the refusal names the requested one)."""
+    record does not cover is an action nobody requested; on the wrong record, the refusal names the requested one).
+    Every refusal carries the filled-in record_requests call. A reversible write (FLAGGED_TOOLS) the record does not
+    cover is allowed and flagged as UNRECORDED instead of refused."""
     action, target_arg = REQUEST_TOOLS[tool]
 
     def gate(toolkit, a: dict) -> GateResult:
         source = "glint request record (record_requests): act only on what the customer asked for"
         record = getattr(toolkit, "glint_requests", None)
         target = str(a.get(target_arg) or "")
-        if record is None:
-            return deny("banking.request.no_record", source, "the customer's requests are not recorded yet",
-                        f"Call {REQUESTS_TOOL}(user_id, requests=[...]) with every account action the customer asked "
-                        "for (action, the id it targets, their words), then make this write if it is one of them.",
-                        {"tool": tool, "target": target},
-                        consequence="Nothing was changed. Writes are made only for requests on record.",
-                        facts=[f"{tool} on {target or '(no target)'}: no request record in this conversation"])
-        same_action = [r for r in record if r["action"] == action]
-        if any(not r["target_id"] or r["target_id"] == target for r in same_action):
+        if record is not None and any(_covers(toolkit.db, tool, r, action, target) for r in record):
             return allow("banking.request", source, {"tool": tool, "action": action, "target": target})
-        asked = "; ".join(f"{r['action']} on {r['target_id'] or 'any'}" for r in record)
-        if same_action:
-            wanted = ", ".join(r["target_id"] for r in same_action)
-            return deny("banking.request.other_target", source, f"the customer asked for {action} on {wanted}, "
-                        f"not on {target}", f"Make the write on {wanted}, the record the customer named; if they meant "
-                        f"{target} too, confirm with them and add it with {REQUESTS_TOOL}.",
-                        {"tool": tool, "target": target, "requested_targets": wanted},
-                        consequence="Nothing was changed on the record the customer did not name.",
-                        facts=[f"requests on record: {asked}"])
-        return deny("banking.request.not_requested", source, f"the customer did not ask for {action}",
-                    f"Do not make this write unless the customer asks for it; if they do, add it with "
-                    f"{REQUESTS_TOOL} first.", {"tool": tool, "target": target, "action": action},
-                    consequence="Nothing was changed. An action nobody requested is not made.",
-                    facts=[f"requests on record: {asked}"])
+        call = record_call(toolkit.db, a, action, target)
+        if record is None:
+            result = deny("banking.request.no_record", source, "the customer's requests are not recorded yet",
+                          f"If the customer asked for this, record it first: {call}, with every other account action "
+                          "they asked for, then make this write.", {"tool": tool, "target": target},
+                          consequence="Nothing was changed. Writes are made only for requests on record.",
+                          facts=[f"{tool} on {target or '(no target)'}: no request record in this conversation"])
+        else:
+            asked = "; ".join(f"{r['action']} on {r['target_id'] or 'any'}" for r in record)
+            same_action = [r for r in record if r["action"] == action]
+            if same_action:
+                wanted = ", ".join(r["target_id"] for r in same_action)
+                result = deny("banking.request.other_target", source, f"the customer asked for {action} on {wanted}, "
+                              f"not on {target}", f"Make the write on {wanted}, the record the customer named; if they "
+                              f"meant {target} too, confirm with them and add it: {call}.",
+                              {"tool": tool, "target": target, "requested_targets": wanted},
+                              consequence="Nothing was changed on the record the customer did not name.",
+                              facts=[f"requests on record: {asked}"])
+            else:
+                result = deny("banking.request.not_requested", source, f"the customer did not ask for {action}",
+                              f"Do not make this write unless the customer asks for it; if they do, add it first: "
+                              f"{call}.", {"tool": tool, "target": target, "action": action},
+                              consequence="Nothing was changed. An action nobody requested is not made.",
+                              facts=[f"requests on record: {asked}"])
+        if tool in FLAGGED_TOOLS:
+            return allow(UNRECORDED, "Glint convention: a reversible write runs and is flagged for review",
+                         {"tool": tool, "target": target, "action": action, "would_deny": result.rule_id},
+                         reason=result.reason)
+        return result
     return gate
 
 

@@ -39,7 +39,14 @@ from loguru import logger
 from mcp.client.client import Client
 from tau2.data_model.message import ToolCall
 
-from glint.assist.banking import ADDRESS_TOOL, PLAN_TOOL, REQUEST_TOOLS, REQUESTS_TOOL, RETENTION_TOOL
+from glint.assist.banking import (
+    ADDRESS_TOOL,
+    DISPUTE_ANSWERS_TOOL,
+    PLAN_TOOL,
+    REQUEST_TOOLS,
+    REQUESTS_TOOL,
+    RETENTION_TOOL,
+)
 from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
 from glint.gates.replayplan import plan_arguments, with_address_confirmations, with_plans
@@ -105,7 +112,8 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                 calls = with_address_confirmations(with_plans(gold))
                 for call in calls:
                     k, action = call.id.removeprefix("gold-"), call
-                    if call.name in (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, ADDRESS_TOOL):  # the twin has none
+                    # Glint's tools: the twin has none
+                    if call.name in (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL):
                         reply = await client.call_tool(call.name, call.arguments)
                         if reply.is_error:
                             errors.append({"task_id": task_id, "action": k, "tool": call.name, "text": _text(reply)})

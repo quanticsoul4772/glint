@@ -89,6 +89,43 @@ def denied_runs(events: list[dict]) -> set[tuple[str, str]]:
             if e["type"] == "gate.fired" and not e["payload"].get("replay") and e["payload"]["decision"] != "allow"}
 
 
+HELD_THEN_ALLOWED = "held_then_allowed"
+
+
+def _run_of(payload: dict) -> tuple[str, str, str]:
+    """The run an event belongs to: τ²'s simulation id, task and trial (the Enforcer's context)."""
+    return (str(payload.get("simulation_id")), str(payload.get("task_id")), str(payload.get("trial")))
+
+
+def held_then_allowed(events: list[dict]) -> list[dict]:
+    """The "held, then allowed" attestation class (fix-research 2026-11-02 N1; design 2026-11-02 §3; Glint
+    convention): each live write the gates allowed after an earlier live refusal of the same tool on the same record
+    (every `*_id` argument both calls carry is equal, same_target) in the same run. Computed from the gate log alone:
+    a write.attested event carries no arguments, so the allowed write's arguments are those of the latest live
+    gate.fired event for that tool in that run (a write's gates run one after another and log before its attestation).
+    Returns one row per such write: task_id, trial, simulation_id, tool, args and the earlier refusals' rule_ids."""
+    last_args: dict[tuple, dict] = {}
+    refused: dict[tuple, list[tuple[dict | None, str]]] = {}
+    out = []
+    for e in events:
+        p = e["payload"]
+        if e["type"] not in ("gate.fired", "write.attested") or p.get("replay"):
+            continue
+        run, tool = _run_of(p), p.get("tool")
+        if e["type"] == "gate.fired":
+            last_args[run + (tool,)] = p.get("args")
+            if p["decision"] != "allow":
+                refused.setdefault(run + (tool,), []).append((p.get("args"), p.get("rule_id")))
+            continue
+        args = last_args.get(run + (tool,))
+        rules = [rule for denied, rule in refused.get(run + (tool,), [])
+                 if denied is not None and args is not None and same_target(denied, args)]
+        if rules:
+            out.append({"simulation_id": run[0], "task_id": run[1], "trial": run[2], "tool": tool, "args": args,
+                        "classes": list(p.get("classes") or []) + [HELD_THEN_ALLOWED], "refused_by": rules})
+    return out
+
+
 def summarize(events: list[dict], sims: list[dict]) -> dict:
     """The arm's gate summary from its gate log's events and its saved simulations."""
     writes, denies = decisions(events)
@@ -96,7 +133,7 @@ def summarize(events: list[dict], sims: list[dict]) -> dict:
     attested = Counter("+".join(e["payload"]["classes"]) for e in events
                        if e["type"] == "write.attested" and not e["payload"].get("replay"))
     s = {"writes": writes, "denies": sum(denies.values()), "denies_by_rule": dict(sorted(denies.items())),
-         "attested": dict(sorted(attested.items())),
+         "attested": dict(sorted(attested.items())), HELD_THEN_ALLOWED: len(held_then_allowed(events)),
          "runs": len(sims), "runs_with_deny": 0, "error_limit_runs": 0, "error_limit_runs_with_deny": 0,
          "error_limit_errors": 0, "error_limit_deny_errors": 0}
     for sim in sims:
@@ -119,6 +156,8 @@ def line(label: str, s: dict) -> str:
                 f"their {s['error_limit_errors']} errors were gate denies")
     if s.get("attested"):
         out += "; allowed writes by what checked them: " + ", ".join(f"{k} {n}" for k, n in s["attested"].items())
+    if s.get(HELD_THEN_ALLOWED):
+        out += f"; held, then allowed {s[HELD_THEN_ALLOWED]}"
     return out
 
 

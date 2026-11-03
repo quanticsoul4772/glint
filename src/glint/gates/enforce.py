@@ -59,16 +59,25 @@ from tau2.environment.toolkit import ToolType
 from glint.assist import as_flag
 from glint.assist.banking import (
     ADDRESS_TOOL,
+    CLOSURE_REASON_TOOL,
+    DISPUTE_ANSWERS_TOOL,
     ORDER_TOOL,
     PLAN_TOOL,
     REQUESTS_TOOL,
     RETENTION_TOOL,
+    STATEMENT_CREDIT_TOOL,
     TODAY,
+    _date,
+    _tier,
+    closure_reasons,
     replacements_today,
+    waiver_call,
+    waiver_due,
 )
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates import aids
 from glint.gates.bankdb import increase_request_ids, undecided_increases
+from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import (
@@ -88,6 +97,7 @@ from glint.gates.rules import (
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
 VERDICT_TOOL = "check_credit_limit_increase"
+GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL)  # replies: no open items
 CHECK_TOOLS = ("check_card_dispute", "check_verification", VERDICT_TOOL)  # decision tools logged as check.recorded
 
 
@@ -119,6 +129,7 @@ def _open_items(tools) -> list[str]:
     if pending:
         items.append(f"[open] credit limit increase submitted and not decided yet: {', '.join(pending)} (the "
                      "required lookups, then approve or deny)")
+    items += _closure_items(tools)
     verified = [r.get("user_id") for r in db.verification_history.data.values()
                 if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
     if verified and getattr(tools, "glint_requests", "absent") is None:
@@ -126,7 +137,50 @@ def _open_items(tools) -> list[str]:
         # them; this reminder comes before the first account change instead of after a refusal
         items.append(f"[open] the customer's requests are not recorded yet: before any account change, call "
                      f"{REQUESTS_TOOL}(user_id={verified[-1]!r}, requests=[{{action, target_id, customer_words}}]) "
-                     "with every account action they asked for; each change is checked against that record")
+                     "with every account action they asked for; closes, payments and filings are refused until "
+                     "recorded, and a closure reason log or card order made without a record is flagged for review")
+    return items
+
+
+def _closure_items(tools) -> list[str]:
+    """Open steps of the credit card closure procedure (credit_card_account_logistics_003), per account still open:
+    a closure the request record names with no reason logged (step 3; skipped when a reason within the past year
+    skips retention, or when the account cannot close yet, step 1); the one-year annual fee waiver due and not
+    offered (step 4: annual_fee reason, a customer for 2+ years, tenure read as glint.assist.banking.customer_since,
+    an ambiguity tagged there); an accepted retention credit not applied (step 5, the card tier's amount). The agent
+    ignored shown open items in 7 v9 runs and in banking-test-gated 047 t1, so this reminds and never refuses."""
+    db, items = tools.db, []
+    accounts = db.credit_card_accounts.data
+    retention = getattr(tools, "glint_retention", {}) or {}
+    asked = [str(r.get("target_id") or "") for r in getattr(tools, "glint_requests", None) or []
+             if r.get("action") == "close_credit_card"]
+    logged_today = {str(r.get("credit_card_account_id")) for r in db.credit_card_closure_reasons.data.values()
+                    if _date(r.get("logged_at")) == TODAY}
+    cards = sorted({c for c in asked if c} | set(retention) | logged_today)
+    for card in cards:
+        acc = accounts.get(card)
+        if acc is None or str(acc.get("status", "")).upper() == "CLOSED":
+            continue
+        user = str(acc.get("user_id", ""))
+        today, earlier = closure_reasons(db, card)
+        answer = retention.get(card)
+        if card in asked and not today and not earlier and not closure_blockers(db, card):
+            items.append(f"[open] {card}: the customer asked to close it and no closure reason is logged: ask why and "
+                         f"log it with {CLOSURE_REASON_TOOL} before any retention offer or closure")
+        if (since := waiver_due(db, card)) is not None and not (answer and answer.get("fee_waiver_offered")):
+            items.append(f"[open] {card}: closing over the annual fee, a customer since {since:%m/%d/%Y} (2+ years): "
+                         "offer to waive the annual fee for one year before the retention offer; if they accept, "
+                         f"{waiver_call(card, user)}")
+        if answer and answer.get("accepted") and "point" not in str(answer.get("offer", "")).lower():
+            credited = any(r.get("credit_card_account_id") == card and r.get("credit_reason") == "retention_offer"
+                           and _date(r.get("transaction_date")) == TODAY
+                           for r in db.credit_card_transaction_history.data.values())
+            amount = RETENTION_CREDIT.get(_tier(str(acc.get("card_type", ""))))
+            if not credited:
+                items.append(f"[open] {card}: the customer accepted the retention offer ({answer.get('offer')}) and it "
+                             f"is not applied yet: {STATEMENT_CREDIT_TOOL}(user_id={user!r}, credit_card_account_id="
+                             f"{card!r}, amount={amount if amount is not None else 'the card tier amount'}, "
+                             "reason='retention_offer'); the account stays open")
     return items
 
 
@@ -141,16 +195,17 @@ REPEAT_NOTE = ("\n\nThis exact call was already refused for the same reason, so 
                "cannot be resolved.")
 
 
-def attestation_classes(passed: list[str]) -> list[str]:
+def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] = ()) -> list[str]:
     """What stood behind an allowed write, from the names of the gates that allowed it: 'rule_checked' (a policy rule
     on the write's values or state), 'customer_requested' (the request record covers it), or 'uncovered' (only the
-    procedure gates and a no_rule_yet allow)."""
+    procedure gates and a no_rule_yet allow). `flagged` names the request gates that allowed the write without a
+    covering request (bank_rules.UNRECORDED): those add 'request_unrecorded', never 'customer_requested'."""
     classes = []
     if any(not g.startswith(("no_rule_", "procedure_", "banking_request_")) for g in passed):
         classes.append("rule_checked")
-    if any(g.startswith("banking_request_") for g in passed):
+    if any(g.startswith("banking_request_") and g not in flagged for g in passed):
         classes.append("customer_requested")
-    return classes or ["uncovered"]
+    return (classes or ["uncovered"]) + (["request_unrecorded"] if flagged else [])
 
 
 class Enforcer:
@@ -187,7 +242,7 @@ class Enforcer:
                           "of the request is not affected.", facts=["`arguments` is not a JSON object"])
             self._log(tool, args, result, 0.0, replay, "unparsed")
             return result
-        final, passed = None, []
+        final, passed, flagged = None, [], []
         for gate in self.registry.for_tool(tool):
             if gate.toolkit and toolkit is None:
                 result, ms = deny("gate_error", gate.name, f"the check {gate.name!r} needs the environment's "
@@ -202,18 +257,20 @@ class Enforcer:
             if not result.allowed:
                 return result
             passed.append(gate.name)
+            if result.rule_id == UNRECORDED:
+                flagged.append(gate.name)
             final = final or result
         if final is None:  # attach() refuses an environment with an ungated write; this is a second line
             raise RuntimeError(f"write {tool} has no gate")
-        self._attest(tool, passed, replay)
+        self._attest(tool, passed, replay, flagged)
         return final
 
-    def _attest(self, tool: str, passed: list[str], replay: bool) -> None:
+    def _attest(self, tool: str, passed: list[str], replay: bool, flagged: list[str] | None = None) -> None:
         """A write.attested event for each allowed write: which kind of check stood behind it (attestation_classes).
         Never decides anything; a failure to log is logged, not raised."""
         try:
             self.events.emit("write.attested", {"domain": self.domain, "tool": tool,
-                                                "classes": attestation_classes(passed), "gates": passed,
+                                                "classes": attestation_classes(passed, flagged or ()), "gates": passed,
                                                 "replay": replay, **self.context()})
         except Exception:
             log.exception("the write.attested event was not logged")
@@ -359,6 +416,25 @@ class Enforcer:
                 "address_on_file": record.get("address_on_file"), "replay": replay, **self.context()})
         except Exception:
             log.exception("the address.recorded event was not logged")
+    def _record_dispute_answers(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
+        """Keep the customer's recorded answers to the two debit dispute questions, per card (the latest wins)."""
+        if call.requestor != "assistant" or call.name != DISPUTE_ANSWERS_TOOL or reply.error:
+            return
+        try:
+            answer = json.loads(reply.content)
+        except (TypeError, json.JSONDecodeError):
+            return
+        if not isinstance(answer, dict) or not as_flag(answer.get("recorded")):
+            return
+        answer["card_in_possession"] = as_flag(answer.get("card_in_possession"))  # τ² shows bools as "True"/"False"
+        env.tools.glint_dispute_answers[answer["card_id"]] = answer
+        try:
+            self.events.emit("dispute_answers.recorded", {
+                "domain": self.domain, "card_id": answer["card_id"], "card_in_possession": answer["card_in_possession"],
+                "pin_compromised": answer["pin_compromised"], "customer_words": answer["customer_words"][:200],
+                "replay": replay, **self.context()})
+        except Exception:
+            log.exception("the dispute_answers.recorded event was not logged")
 
     def _record_check(self, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """A check.recorded event for each decision-tool answer the agent got (check_card_dispute,
@@ -400,6 +476,7 @@ class Enforcer:
         env.tools.glint_denied = set()  # (tool, arguments, rule) of every refusal, for the repeat escalation
         env.tools.glint_requests = None  # the latest record_requests list (None: not recorded yet)
         env.tools.glint_retention = {}  # credit card account -> the recorded answer to the retention offer
+        env.tools.glint_dispute_answers = {}  # debit card -> the recorded answers to the two dispute questions
         env.tools.glint_verdicts = {}  # card -> the increase verdict check_credit_limit_increase gave, not filed yet
         env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
@@ -408,8 +485,7 @@ class Enforcer:
         env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
-            if (self.domain != "banking_knowledge" or message.requestor != "assistant"
-                    or message.name in (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, ADDRESS_TOOL)
+            if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in GLINT_RECORDS
                     or reply.error or str(reply.content).startswith("Error")):
                 return reply
             items = _open_items(env.tools)
@@ -427,6 +503,7 @@ class Enforcer:
                 self._record_read(env, message, reply)
                 self._record_plan(env, message, reply, state["replay"])
                 self._record_retention(env, message, reply, state["replay"])
+                self._record_dispute_answers(env, message, reply, state["replay"])
                 self._record_requests(env, message, reply, state["replay"])
                 self._record_address(env, message, reply, state["replay"])
                 self._record_verdict(env, message, reply)

@@ -68,7 +68,7 @@ def test_summary_counts_writes_denies_by_rule_and_error_limit_endings(tmp_path):
     assert s == {"writes": 4, "denies": 3, "denies_by_rule": {"banking.cli.approve": 1, "banking.dispute": 1,
                                                               "unparsed_arguments": 1},
                  "runs": 4, "runs_with_deny": 2, "error_limit_runs": 2, "error_limit_runs_with_deny": 1,
-                 "error_limit_errors": 20, "error_limit_deny_errors": 6, "attested": {}}
+                 "error_limit_errors": 20, "error_limit_deny_errors": 6, "attested": {}, "held_then_allowed": 0}
     assert summary.line("tools banking_knowledge", s) == (
         "GATES: tools banking_knowledge: 4 writes checked, 3 denied {'banking.cli.approve': 1, 'banking.dispute': 1, "
         "'unparsed_arguments': 1}; 2 of 4 runs had at least one deny; 2 runs ended on τ²'s error limit "

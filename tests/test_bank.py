@@ -65,7 +65,7 @@ def test_tool_list_is_the_toolkits_tools_with_their_schemas_and_annotations(serv
     env = bank.build_environment()
     tools = env.tools.get_tools()
     assert set(listed) == set(tools) | {bank.LOAD, bank.POLICY, bank.PLAN_TOOL, bank.RETENTION_TOOL, bank.REQUESTS_TOOL,
-                                         bank.ADDRESS_TOOL} and len(tools) == 16
+                                          bank.DISPUTE_ANSWERS_TOOL, bank.ADDRESS_TOOL} and len(tools) == 16
     for name, tool in tools.items():
         schema = tool.openai_schema["function"]
         assert listed[name].input_schema == schema["parameters"] and listed[name].description == schema["description"]
@@ -258,14 +258,14 @@ def test_selftest_round_trips_over_stdio_with_a_clean_stdout(capsys):
     """--selftest starts the server as a stdio subprocess and talks JSON-RPC to it: any stray stdout breaks it."""
     assert bank.main(["--selftest"]) == 0
     report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
-    assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 22  # 16 τ², 4 Glint record and plan tools, 2 server
+    assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 23  # 16 τ², 5 Glint records, 2 server
 
 
 def test_selftest_with_the_decision_tools_lists_them(capsys):
     """The plugin's server command passes --decision-tools; its self-test starts the server the same way."""
     assert bank.main(["--decision-tools", "--selftest"]) == 0
     report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
-    assert report["ok"] and bank.DECISION_TOOLS <= set(report["tools"]) and len(report["tools"]) == 26
+    assert report["ok"] and bank.DECISION_TOOLS <= set(report["tools"]) and len(report["tools"]) == 27
 
 
 def test_selftest_with_the_decision_tools_fails_when_they_are_missing(monkeypatch, capsys):
@@ -309,7 +309,7 @@ def test_every_stdout_line_of_the_stdio_server_is_json_rpc(tmp_path):
         proc.wait(timeout=30)
     messages = [json.loads(line) for line in lines]  # a stray print would raise here
     assert all(m["jsonrpc"] == "2.0" for m in messages)
-    assert len(messages[-2]["result"]["tools"]) == 22 and not messages[-1]["result"]["isError"]
+    assert len(messages[-2]["result"]["tools"]) == 23 and not messages[-1]["result"]["isError"]
 
 
 def test_selftest_fails_when_the_round_trip_does(monkeypatch, capsys):

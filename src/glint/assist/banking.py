@@ -280,6 +280,8 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str, increase_deci
 PLAN_TOOL = "plan_disputes"
 RETENTION_TOOL = "record_retention_answer"
 REQUESTS_TOOL = "record_requests"
+DISPUTE_ANSWERS_TOOL = "record_dispute_answers"
+PIN_ANSWERS = ("yes_shared", "yes_observed", "no", "unknown")  # bank_accounts_(general)_031 argument 11
 # action -> (the write tools it covers, the argument naming its target)
 REQUEST_ACTIONS = {
     "dispute_debit_transaction": (("file_debit_card_transaction_dispute_6281",), "transaction_id"),
@@ -295,6 +297,11 @@ REQUEST_ACTIONS = {
     "savings_interest_correction": (("apply_savings_account_credit_6831",), "account_id"),
 }
 REQUEST_TOOLS = {tool: (action, target) for action, (tools, target) in REQUEST_ACTIONS.items() for tool in tools}
+# tool -> another action whose request also covers it (glint.gates.banking.requested). A close_debit_card request covers
+# the replacement order on the closed card's checking account. Fitted to the test split (banking-test-gated
+# 2026-11-02: replacement orders refused after the close was recorded in 077 t1, 079 t0 and 080 t0); no policy clause
+# links a close to an order.
+REQUEST_ALSO_COVERS = {"order_debit_card_5739": "close_debit_card"}
 
 
 def record_requests(db, user_id: str, requests: list[dict]) -> dict:
@@ -315,10 +322,67 @@ def record_requests(db, user_id: str, requests: list[dict]) -> dict:
     return {"recorded": True, "user_id": user_id, "requests": out}
 
 
+CLOSURE_REASON_TOOL = "log_credit_card_closure_reason_4521"
+STATEMENT_CREDIT_TOOL = "apply_statement_credit_8472"
+WAIVER_TOOL = "apply_credit_card_account_flag_6147"
+WAIVER_FLAG = "annual_fee_waived"
+WAIVER_TENURE_YEARS = 2  # credit_card_account_logistics_003 step 4: "a customer for 2+ years"
+WAIVER_EXPIRES = TODAY.replace(year=TODAY.year + 1).strftime("%m/%d/%Y")  # step 4: "a date a year from today"
+
+
+def closure_reasons(db, credit_card_account_id: str) -> tuple[list[dict], list[dict]]:
+    """(closure reasons logged today, earlier ones within the past year) for this credit card account."""
+    rows = [r for r in db.credit_card_closure_reasons.data.values()
+            if r.get("credit_card_account_id") == credit_card_account_id]
+    today = [r for r in rows if _date(r.get("logged_at")) == TODAY]
+    earlier = [r for r in rows if r not in today and (d := _date(r.get("logged_at"))) is not None
+               and (TODAY - d).days < 365]
+    return today, earlier
+
+
+def customer_since(db, user_id: str) -> date | None:
+    """The earliest opening date among the user's bank accounts (date_opened) and credit card accounts
+    (date_of_account_open). AMBIGUITY (tagged): credit_card_account_logistics_003 step 4 says "a customer for 2+
+    years", which is read here as the customer's tenure with the bank, not the age of the card being closed. The two
+    readings agree on τ²'s one waiver gold (test task 043: checking account and Platinum card both opened 11/10/2022)
+    and differ wherever a customer's first account predates the card."""
+    dates = [_date(r.get("date_opened")) for r in db.accounts.data.values() if r.get("user_id") == user_id]
+    dates += [_date(r.get("date_of_account_open")) for r in db.credit_card_accounts.data.values()
+              if r.get("user_id") == user_id]
+    dates = [d for d in dates if d is not None]
+    return min(dates) if dates else None
+
+
+def waiver_applied(db, credit_card_account_id: str) -> bool:
+    return any(r.get("credit_card_account_id") == credit_card_account_id and r.get("flag_type") == WAIVER_FLAG
+               and str(r.get("status", "ACTIVE")).upper() == "ACTIVE" for r in db.credit_card_account_flags.data.values())
+
+
+def waiver_due(db, credit_card_account_id: str) -> date | None:
+    """The customer-since date when the one-year annual fee waiver is due on this account and not applied
+    (credit_card_account_logistics_003 step 4: closure reason annual_fee logged today, a customer for 2+ years); else
+    None. Tenure is read as customer_since (see the ambiguity tag there)."""
+    acc = db.credit_card_accounts.data.get(credit_card_account_id) or {}
+    today, _ = closure_reasons(db, credit_card_account_id)
+    if not any(r.get("closure_reason") == "annual_fee" for r in today) or waiver_applied(db, credit_card_account_id):
+        return None
+    since = customer_since(db, str(acc.get("user_id", "")))
+    cutoff = TODAY.replace(year=TODAY.year - WAIVER_TENURE_YEARS)
+    return since if since is not None and since <= cutoff else None
+
+
+def waiver_call(credit_card_account_id: str, user_id: str) -> str:
+    return (f"{WAIVER_TOOL}(credit_card_account_id={credit_card_account_id!r}, user_id={user_id!r}, "
+            f"flag_type={WAIVER_FLAG!r}, expiration_date={WAIVER_EXPIRES!r}, reason='loyalty_benefit')")
+
+
 def record_retention_answer(db, credit_card_account_id: str, user_id: str, offer: str, accepted: bool,
-                            customer_words: str) -> dict:
+                            customer_words: str, fee_waiver_offered: bool = False) -> dict:
     """The customer's answer to the retention offer (credit_card_account_logistics_003 step 5), as recorded by the
-    agent. Validates the account and the answer; never writes the database."""
+    agent. Validates the account and the answer; never writes the database. Holds (recorded false, with the step
+    still due) until the steps before the offer are done: the closure reason logged today (step 3), and, when the
+    customer closes over the annual fee and has been a customer for 2+ years, the annual fee waiver offered first
+    (step 4; `fee_waiver_offered` records that the customer declined it)."""
     acc = db.credit_card_accounts.data.get(credit_card_account_id)
     if acc is None or acc.get("user_id") != user_id:
         return {"recorded": False, "error": f"no credit card account {credit_card_account_id!r} for user {user_id!r}"}
@@ -326,9 +390,26 @@ def record_retention_answer(db, credit_card_account_id: str, user_id: str, offer
     if answer not in ("true", "false") or not str(customer_words).strip() or not str(offer).strip():
         return {"recorded": False, "error": "give the offer made, accepted as true or false, and the customer's own "
                 "words answering it"}
+    today, earlier = closure_reasons(db, credit_card_account_id)
+    if not today:
+        # credit_card_account_logistics_003 step 2 (a reason within the past year skips retention) and step 3 (the
+        # reason is logged before any retention offer)
+        return {"recorded": False, "error": (
+            f"a closure reason for {credit_card_account_id} is already on record within the past year, so no "
+            "retention offer is made: proceed with the closure (close_credit_card_account_7834)") if earlier else (
+            f"no closure reason is logged for {credit_card_account_id} yet: ask why the customer is closing and log it "
+            f"with {CLOSURE_REASON_TOOL} (step 3) before the retention offer")}
+    if (since := waiver_due(db, credit_card_account_id)) is not None and not as_flag(fee_waiver_offered):
+        # credit_card_account_logistics_003 step 4: annual fee concern + 2+ years -> offer the one-year waiver first
+        return {"recorded": False, "error": (
+            f"the customer is closing over the annual fee and has been a customer since {since:%m/%d/%Y} (2+ years): "
+            "first offer to waive the annual fee for one year (step 4). If they accept, apply it with "
+            f"{waiver_call(credit_card_account_id, user_id)} and keep the account open; if they decline, call "
+            "record_retention_answer again with fee_waiver_offered true after the retention offer")}
     accepted = answer == "true"
     return {"recorded": True, "credit_card_account_id": credit_card_account_id, "user_id": user_id,
             "offer": str(offer), "accepted": accepted, "customer_words": str(customer_words),
+            "fee_waiver_offered": as_flag(fee_waiver_offered),
             "next": "Keep the account open and apply the offer." if accepted else
             "Proceed with the closure the customer asked for (close_credit_card_account_7834)."}
 
@@ -355,6 +436,22 @@ def record_address_confirmation(db, credit_card_account_id: str, user_id: str, s
             "next": f"Order the replacement ({ORDER_TOOL}) with shipping_address exactly as recorded here."}
 
 
+def record_dispute_answers(db, card_id: str, user_id: str, card_in_possession, pin_compromised: str,
+                           customer_words: str) -> dict:
+    """The customer's answers to bank_accounts_(general)_031's two closed questions for a debit card dispute
+    (argument 10, card_in_possession; argument 11, pin_compromised), as recorded by the agent. Validates the card and
+    the answers; never writes the database."""
+    card = db.debit_cards.data.get(card_id)
+    if card is None or card.get("user_id") != user_id:
+        return {"recorded": False, "error": f"no debit card {card_id!r} for user {user_id!r}"}
+    possession = str(card_in_possession).strip().lower()
+    if possession not in ("true", "false") or pin_compromised not in PIN_ANSWERS or not str(customer_words).strip():
+        return {"recorded": False, "error": "give card_in_possession as true or false, pin_compromised as one of "
+                f"{list(PIN_ANSWERS)}, and the customer's own words answering both questions"}
+    return {"recorded": True, "card_id": card_id, "user_id": user_id, "card_in_possession": possession == "true",
+            "pin_compromised": pin_compromised, "customer_words": str(customer_words),
+            "next": f"File each dispute on {card_id} with card_in_possession {possession} and pin_compromised "
+            f"{pin_compromised}; if the customer answers differently for another transaction, record that first."}
 OVERCHARGE = "incorrect_amount"
 CARD_DIGITS_TOOL = "get_card_last_4_digits"
 

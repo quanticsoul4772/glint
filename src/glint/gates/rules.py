@@ -10,7 +10,8 @@ allows and says so in its rule_id; it never guesses. Writes no rule covers yet a
 Phase 2 (2026-10-28) adds the debit card rules (glint.gates.debit), the other banking writes (glint.gates.banking),
 the procedure gates (glint.gates.procedure: verification, recorded lookups, order, the transfer reason) and the
 airline and retail writes (glint.gates.travel). Rules are per write tool, never per task. Dispute planning
-(2026-10-28) adds the plan gate on credit card disputes (procedure.dispute_plan).
+(2026-10-28) adds the plan gate on credit card disputes (procedure.dispute_plan). The debit dispute rules (2026-11-02,
+glint.gates.debit) take file_debit_card_transaction_dispute_6281 off the no-rule list.
 """
 from __future__ import annotations
 
@@ -38,9 +39,6 @@ BANKING_GATED = (DISPUTE, REPLACE, SUBMIT, APPROVE, DENY)
 # Writes with no rule of their own yet: allowed, and logged under no_rule_yet (each with the reason it has none)
 NO_RULE_REASONS = {
     "example_agent_tool_0000": "a placeholder tool in the toolkit; no procedure uses it",
-    "file_debit_card_transaction_dispute_6281": ("its policy values (category, liability, provisional credit, "
-                                                 "card action) come from the user's account of what happened; the "
-                                                 "procedure gates still require verification and the lookups"),
     "set_debit_card_recurring_block_7382": "the merchant and the block are the user's request",
     "pay_credit_card_from_checking_9182": "the amount is the user's choice; the procedure gates require verification",
     "open_bank_account_4821": ("the account class follows the user's stated needs; the tool checks eligibility "
@@ -68,7 +66,7 @@ PHASE2 = {
         "log_credit_card_closure_reason_4521", "apply_statement_credit_8472", "apply_credit_card_account_flag_6147",
         "close_credit_card_account_7834", "apply_checking_account_credit_5829", "submit_interest_discrepancy_report_7294",
         "apply_savings_account_credit_6831",
-        "request_temporary_debit_card_limit_increase_8374", *debit.DEBIT_TOOLS,
+        "request_temporary_debit_card_limit_increase_8374", *debit.DEBIT_TOOLS, debit.DISPUTE,
         "transfer_to_human_agents", "give_discoverable_user_tool"),
 }
 RULED = {"retail": tuple(RETAIL_ACTIONS) + PHASE2["retail"], "airline": AIRLINE_GATED + PHASE2["airline"],
@@ -423,6 +421,22 @@ def _register_banking(reg: GateRegistry) -> None:
         reg.register(Gate(f"debit_{tool}_gate", (tool,), "Knowledge base bank_accounts_(general)_024: the activation "
                           "variant follows the card's issue_reason; the card is PENDING and unexpired.",
                           debit.activate(tool)))
+    # debit card disputes: the limit first (no corrected call can pass it), then the record, then the values
+    dispute_gates = (("open_limit", debit.dispute_open_limit, ("_031 requirement 4: no more open disputes per account "
+                      "than the checking tier allows."), False),
+                     ("answers", debit.dispute_answers, ("_031 arguments 10-11: card_in_possession and pin_compromised "
+                      "as the customer answered, recorded with record_dispute_answers."), True),
+                     ("earliest_duplicate", debit.dispute_earliest_duplicate, ("_031: the earliest of duplicate "
+                      "charges is disputed (same-day tie-break fitted to τ² gold)."), False),
+                     ("card_in_possession", debit.dispute_card_in_possession, ("_031 argument 10 (policy inference): a "
+                      "card closed as lost or stolen is not in the customer's possession."), False),
+                     ("provisional_credit", debit.dispute_provisional_credit, ("_032: provisional credit where every "
+                      "REQUIRED condition holds."), False),
+                     ("liability", debit.dispute_liability, "_031 liability tiers: the cap is 50, 500 or -1, never 0.",
+                      False))
+    for name, fn, purpose, toolkit in dispute_gates:
+        reg.register(Gate(f"debit_dispute_{name}_gate", (debit.DISPUTE,), f"Knowledge base bank_accounts_(general)"
+                          f"{purpose}", fn, toolkit=toolkit))
     others = (("log_verification", bank_rules.log_verification, ("Verification records the user's details as on "
                "file at the domain's current time.")),
               ("change_user_email", bank_rules.change_email, "An email change sets a different address."),
@@ -454,7 +468,8 @@ def _register_banking(reg: GateRegistry) -> None:
                       "record_retention_answer.", bank_rules.retention_answered, toolkit=True))
     for tool in REQUEST_TOOLS:
         reg.register(Gate(f"banking_request_{tool}", (tool,), "Act only on what the customer asked for: the "
-                          "write is covered by the record_requests record.", bank_rules.requested(tool),
+                          "write is covered by the record_requests record (a reversible write without one runs, "
+                          "flagged).", bank_rules.requested(tool),
                           toolkit=True))
     # procedure gates: every banking write acting for a user, and every write whose procedure names lookups
     reg.register(Gate("procedure_verified_gate", procedure.VERIFIED_WRITES, "Every procedure starts with a verified "
