@@ -32,10 +32,10 @@ All runs are on τ²-bench v1.0.1 with Muse Glimmer 30B at medium reasoning; bot
 | **Runs passed** | **7/40** | **7/40** | **11/40** |
 
 - **By task, sign test, two-sided:** against the 2026-11-02 gated run, 4 better (014, 043, 079, 102), 0 worse, 16 the same, p = 0.125; against alone, 3 better (043, 078, 079), 0 worse, 17 the same, p = 0.25. Neither is distinguishable from chance with 20 tasks; the gain may be chance.
-- **Endings:** alone 11-02: 33 customer stop, 7 context overflow (counted as failures); gated 11-02: 26 customer stop, 14 τ² step limit; gated 11-03: 34 customer stop, 6 step limit.
+- **Endings:** alone 11-02: 33 customer stop, 7 context overflow (counted as failures); gated 11-02: 26 customer stop, 14 τ² step limit; gated 11-03: 34 customer stop, 6 step limit (step-limit endings 14 → 6, may be chance, Fisher p = 0.07 two-sided).
 - **Context overflows do not drive the gap:** alone's 7 fell on tasks 022, 024, 029, 077, 080 (both runs) and 082, and both gated arms pass 0 runs on all six.
 - **task_083** cannot be passed by any agent (gold omits a required field). Out of 38 runs: alone 7/38, gated 11-02 7/38, gated 11-03 11/38.
-- **Not re-graded** with τ²'s offline evaluator (the 2026-11-02 re-grade differed from the recorded grade on 4 runs, below). Refusals by rule, false refusals, wrong values and the requested-vs-done grade are not yet analyzed.
+- **Not re-graded** with τ²'s offline evaluator (the 2026-11-02 re-grade differed from the recorded grade on 4 runs, below). Against alone's re-grade (10/40), by task 3 better, 1 worse (099), p = 0.63. Refusals by rule, false refusals, wrong values and the requested-vs-done grade are not yet analyzed.
 - **Spend:** $2.569 GPU (3,145 s, metered), $0.133 Meta (Muse Spark as the customer). Caps: GPU $6, Glimmer $1.5, Meta $0.5.
 
 ### What changed since the 2026-11-02 run
@@ -58,7 +58,7 @@ All runs are on τ²-bench v1.0.1 with Muse Glimmer 30B at medium reasoning; bot
 - The 14 step-limit runs: 10 are knowledge-base search loops with no refusal (the decision-tools setup, as before); 4 (077, 080 twice, 083) include refusals from several gates, the request record among them.
 - Reading: extra writes fell from 13 to 4; the request gate blocked 1 of them and the agent re-recorded others, so this may be chance (runs with an extra write 9/40 vs 3/40, Fisher p = 0.11 two-sided). Wrong values did not change. The pass rate did not change. Checked against the run data by the claims reviewer on 2026-11-02.
 - **Disclosures from reading every conversation of this run (fix research, 2026-11-02 to 11-03):**
-  - **18 refusals false against gold:** 17 by the request gate and 1 by verify once, which is not a policy rule either. By blinded policy labels, the request gate's 20 refusals were 16 policy-wrong and 4 ambiguous.
+  - **18 refusals false against gold:** 17 by the request gate and 1 by verify once, which is not a policy rule either. By policy labels, which could not be blinded for refused writes, the request gate's 20 refusals were 16 policy-wrong and 4 ambiguous.
   - **τ²'s offline re-grade** of the saved runs gives 8/40 gated and 10/40 alone, against 7/40 each as recorded (4 failed runs re-grade as passes: alone 043 t0, 099 t0, 099 t1; gated 099 t1). The cause is unknown. By run, Fisher p ≈ 0.79; by task, gated 1 better, 3 worse, sign test p = 0.63 (both two-sided).
   - **task_083 cannot be passed by any agent:** gold omits a required field, and arguments are compared as exact strings. Out of 38 runs the rates are 7/38 each.
   - **12 of the gated arm's 33 first errors were omissions** write gates cannot see: 6 missing gold writes and 6 non-write actions (a transfer, a referral link).
