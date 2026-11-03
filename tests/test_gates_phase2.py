@@ -918,3 +918,13 @@ def test_allowed_writes_are_attested_and_a_repeated_refusal_escalates():
     attested = [e["payload"]["classes"] for e in events.events("write.attested")]
     assert attested == [["rule_checked"]]  # the verification: a rule on its values
     assert "allowed writes by what checked them: rule_checked 1" in line("t", summarize(events.events(), []))
+
+
+def test_the_open_items_remind_the_agent_to_record_requests_before_the_first_change():
+    env, _, _ = _bank("task_084")
+    assert "requests are not recorded yet" not in _call(env, "get_current_time").content  # not verified yet
+    _verify(env, "a7c2f85d91")
+    assert "record_requests(user_id='a7c2f85d91'" in _call(env, "get_current_time").content
+    _call(env, "record_requests", user_id="a7c2f85d91", requests=[
+        {"action": "close_debit_card", "target_id": "dbc_82b5d1a6f3", "customer_words": "close it"}])
+    assert "requests are not recorded yet" not in _call(env, "get_current_time").content
