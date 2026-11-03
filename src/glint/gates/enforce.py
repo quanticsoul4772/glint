@@ -5,7 +5,8 @@
 instance's `get_response`. Only `requestor == "assistant"` calls to WRITE tools are gated; a banking
 `call_discoverable_agent_tool` is unwrapped and its hidden tool gated. On a deny the write does not run and the agent
 gets an error message carrying the rule, what the check found, the facts it used, why it matters, the next step
-and the verdict; arguments are never rewritten. τ²'s gold actions
+and the verdict; arguments are never rewritten. After an allowed write runs, a write.ran event records what the tool
+returned and the database hash after it (`_log_ran`). τ²'s gold actions
 go through `make_tool_call`, not `get_response`, so they stay ungated. A few GENERIC tools that end or change the
 conversation are gated like writes (rules.GATED_GENERIC: banking's transfer_to_human_agents).
 
@@ -352,6 +353,19 @@ class Enforcer:
         except Exception:
             log.exception("the write.attested event was not logged")
 
+    def _log_ran(self, env, tool: str, reply: ToolMessage, replay: bool) -> None:
+        """A write.ran event after each allowed write executed: what the tool returned ("ok", or "error" with the
+        start of its message) and the database hash after it (τ²'s Environment.get_db_hash), chained after the write's
+        gate.fired and write.attested events, so the log records the outcome as well as the decision. Never decides
+        anything (the write has already run); a failure to log is logged, not raised."""
+        ok = extend.ran(reply)
+        try:
+            self.events.emit("write.ran", {"domain": self.domain, "tool": tool, "status": "ok" if ok else "error",
+                                           **({} if ok else {"error": str(reply.content)[:200]}),
+                                           "db_hash": env.get_db_hash(), "replay": replay, **self.context()})
+        except Exception:
+            log.exception("the write.ran event was not logged")
+
     def _log(self, tool, args, result: GateResult, ms: float, replay: bool, gate: str) -> bool:
         try:
             self.events.emit("gate.fired", {
@@ -571,7 +585,9 @@ class Enforcer:
             call.result = result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
                 extend.run("before_write", call)
-                reply = extend.run_reply("after_write", call, original_response(message))
+                raw = original_response(message)
+                self._log_ran(env, write[0], raw, state["replay"])
+                reply = extend.run_reply("after_write", call, raw)
                 return extend.run_reply("reply", call, reply)
             asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
             if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
