@@ -32,6 +32,7 @@ from dataclasses import dataclass
 
 from glint.assist.banking import REQUEST_TOOLS
 from glint.gates import conversation as conv
+from glint.gates import extend
 from glint.gates.core import CANNOT_DECIDE, GateResult, deny
 from glint.gates.rules import REPLACE
 
@@ -283,3 +284,20 @@ class StageRunner:
         if refusal is None:
             flags.append("asked_confirmed")
         return refusal
+
+
+# The stages' enforcer option and records (glint.gates.extend).
+
+def _setup(enforcer, stages: Stages | None) -> None:
+    enforcer.stages = (StageRunner(stages, enforcer.events, enforcer.context)
+                       if stages is not None and stages.enabled else None)
+
+
+extend.option("stages", None, "a Stages() of conversation checks, model verifiers and an approver; off by default",
+              order=20, owner=__name__, setup=_setup,
+              manifest=lambda enforcer, stages: {"stages": stages.describe()} if enforcer.stages else {})
+
+
+@extend.hook("attach", order=20)
+def _init_records(enforcer, env) -> None:
+    StageRunner.init(env.tools)

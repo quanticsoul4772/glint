@@ -50,6 +50,12 @@ message history, so the decision replays unchanged), and the shipping address re
 record_address_confirmation (`glint_address_confirmed`). An account read's reply carries the one-credit-per-checking-
 account fact (bank_accounts_(general)_017) ahead of the open items.
 
+Extending the enforcer (glint.gates.extend). A new feature registers an option (its keyword of `Enforcer(...)`, default,
+one-line doc and gates.manifest keys) and hooks (ordered functions run when an environment is attached, before each
+call, after a read, before and after an allowed write, on every reply, and for extra open items) in its own module,
+instead of editing `Enforcer.__init__`, the gates.manifest call or `get_response`. The options and hooks of the
+features this module owns are registered at its end; glint.gates.stages and glint.gates.aids register theirs.
+
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": GateResult.message()} } to block a call (a PreToolUse deny
@@ -84,7 +90,8 @@ from glint.assist.banking import (
     waiver_due,
 )
 from glint.assist.tau2_tools import add_plan_tool
-from glint.gates import aids, debit
+from glint.gates import aids, debit, extend
+from glint.gates import stages as _stages  # noqa: F401  (registers the stages option and hook)
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, allow, assert_required, deny, run_gate
@@ -105,7 +112,6 @@ from glint.gates.rules import (
     manifest,
     parse_hidden_arguments,
 )
-from glint.gates.stages import StageRunner, Stages
 
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
@@ -232,20 +238,26 @@ def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] 
 
 
 class Enforcer:
-    def __init__(self, domain: str, events: EventLog, context: Callable[[], dict] | None = None,
-                 wording: str = "plain", stages: Stages | None = None, uncovered_reminder: bool = False):
-        """`stages` (glint.gates.stages) and `uncovered_reminder` (research appendix #15) are off by default; with
-        them off the enforcer behaves as before they existed."""
-        if wording not in WORDINGS:
-            raise ValueError(f"unknown deny wording {wording!r}; one of {WORDINGS}")
-        self.domain, self.events, self.context, self.wording = domain, events, context or (dict), wording
+    def __init__(self, domain: str, events: EventLog, context: Callable[[], dict] | None = None, **options):
+        """`options` are the registered options (glint.gates.extend.OPTIONS; each one's default and doc are where it
+        is registered). Each is set up in order after the gates are built, and the gates.manifest event carries the
+        keys each one adds."""
+        unknown = sorted(set(options) - set(extend.OPTIONS))
+        if unknown:
+            raise TypeError(f"Enforcer() got unknown options {unknown}; registered: {sorted(extend.OPTIONS)}")
+        self.domain, self.events, self.context = domain, events, context or (dict)
         self.registry = build_registry(domain)
         assert_required(self.registry, REQUIRED_GATES[domain], f"gates for {domain}")
-        self.stages = StageRunner(stages, events, self.context) if stages is not None and stages.enabled else None
-        self.uncovered_reminder = uncovered_reminder
-        extra = {"stages": stages.describe()} if self.stages else {}
-        extra |= {"uncovered_reminder": True} if uncovered_reminder else {}
-        self.events.emit("gates.manifest", manifest(domain, self.registry) | {"wording": wording} | extra)
+        values = {opt.name: options.get(opt.name, opt.default) for opt in extend.options()}
+        for opt in extend.options():
+            if opt.setup is None:
+                setattr(self, opt.name, values[opt.name])
+            else:
+                opt.setup(self, values[opt.name])
+        payload = manifest(domain, self.registry)
+        for opt in extend.options():
+            payload |= opt.manifest(self, values[opt.name]) if opt.manifest else {}
+        self.events.emit("gates.manifest", payload)
 
     def write_call(self, env, call: ToolCall) -> tuple[str, dict | None] | None:
         """(write tool, its arguments) when `call` is an assistant write, else None. Arguments are None when a hidden
@@ -531,59 +543,21 @@ class Enforcer:
         env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
         env.tools.glint_address_asked = set()  # cards whose replacement the address_ask gate refused once
-        env.tools.glint_uncovered = []  # (tool, target) of no_rule_yet writes that ran, with uncovered_reminder only
-        StageRunner.init(env.tools)
         env.tools.glint_address_confirmed = {}  # card -> the shipping address recorded with record_address_confirmation
-        env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
-        env.tools.glint_seen = []  # every assistant tool result that is not an error, for identifier provenance (N10)
-        history = {"before": {}}  # in τ²'s replay: tool message id -> the results before it (aids.seen_before)
-
-        def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
-            if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in GLINT_RECORDS
-                    or reply.error or str(reply.content).startswith("Error")):
-                return reply
-            items = _open_items(env.tools)
-            if message.name == WRAPPER:  # an account read carries the one-credit-per-account fact (row 14, doc 017)
-                args = message.arguments or {}
-                hidden = parse_hidden_arguments(args.get("arguments", "{}")) or {}
-                note = aids.credit_note(env.tools.db, str(args.get("agent_tool_name", "")), hidden)
-                items = [note, *items] if note else items
-            return reply.model_copy(update={"content": f"{reply.content}\n\n" + "\n".join(items)}) if items else reply
-
-        def seen(reply: ToolMessage) -> ToolMessage:
-            if aids.counts_as_seen(reply):
-                env.tools.glint_seen.append(str(reply.content))
-            return reply
+        extend.run("attach", self, env)  # each feature's own records (glint.gates.extend)
 
         def get_response(message: ToolCall) -> ToolMessage:
-            if state["replay"] and str(message.id) in history["before"]:  # judge on what the live check saw
-                env.tools.glint_seen = list(history["before"][str(message.id)])
-            write = self.write_call(env, message)
+            call = extend.Call(self, env, message, state["replay"])
+            extend.run("before_call", call)
+            call.write = write = self.write_call(env, message)
             if write is None:
-                reply = original_response(message)
-                self._record_read(env, message, reply)
-                self._record_plan(env, message, reply, state["replay"])
-                self._record_retention(env, message, reply, state["replay"])
-                self._record_dispute_answers(env, message, reply, state["replay"])
-                self._record_requests(env, message, reply, state["replay"])
-                self._record_address(env, message, reply, state["replay"])
-                self._record_verdict(env, message, reply)
-                self._record_check(message, reply, state["replay"])
-                return seen(with_open_items(message, reply))
-            result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
+                reply = extend.run_reply("after_read", call, original_response(message))
+                return extend.run_reply("reply", call, reply)
+            call.result = result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
-                before = increase_request_ids(env.tools.db) if write[0] == SUBMIT else None
-                reply = original_response(message)
-                if result.note:  # an allow's reminder (procedure.TRANSFER_UNCODED): deterministic, so it replays
-                    reply = reply.model_copy(update={"content": f"{reply.content}\n\n{result.note}"})
-                self._record_increase(env, *write, reply, before)
-                if not reply.error and not str(reply.content).startswith("Error"):
-                    env.tools.glint_ran.add(aids.write_key(*write))
-                    if self.uncovered_reminder and write[0] in NO_RULE_YET.get(self.domain, ()):
-                        target = next((str(v) for k, v in sorted((write[1] or {}).items())
-                                       if k.endswith("_id") and k != "user_id" and v), "")
-                        env.tools.glint_uncovered.append((write[0], target))
-                return seen(with_open_items(message, reply))
+                extend.run("before_write", call)
+                reply = extend.run_reply("after_write", call, original_response(message))
+                return extend.run_reply("reply", call, reply)
             asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
             if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
                 asked[result.rule_id].add(str((write[1] or {}).get("credit_card_account_id", "")))
@@ -596,12 +570,93 @@ class Enforcer:
         def set_state(*args, **kwargs):  # τ²'s evaluator replays the trajectory here: those events say replay=true
             state["replay"] = True
             messages = args[2] if len(args) > 2 else kwargs.get("message_history")
-            history["before"], texts = aids.seen_before(messages)
+            env.glint_seen_before, texts = aids.seen_before(messages)
             try:
                 return original_set_state(*args, **kwargs)
             finally:
                 state["replay"] = False
-                history["before"], env.tools.glint_seen = {}, list(texts)
+                env.glint_seen_before, env.tools.glint_seen = {}, list(texts)
 
         env.get_response, env.set_state, env.glint_enforcer = get_response, set_state, self
         return env
+
+
+# The options and hooks of the features this module owns (glint.gates.extend). A new feature registers its own in its
+# module instead of editing Enforcer.__init__, the manifest call or get_response.
+
+def _setup_wording(enforcer: Enforcer, wording: str) -> None:
+    if wording not in WORDINGS:
+        raise ValueError(f"unknown deny wording {wording!r}; one of {WORDINGS}")
+    enforcer.wording = wording
+
+
+extend.option("wording", "plain", "how a refusal is worded to the agent (glint.gates.core.WORDINGS)", order=10,
+              owner=__name__, setup=_setup_wording, manifest=lambda enforcer, wording: {"wording": wording})
+extend.option("uncovered_reminder", False, "research appendix #15: a [review] open item for each no_rule_yet write "
+              "that ran; off by default", order=30, owner=__name__,
+              manifest=lambda enforcer, on: {"uncovered_reminder": True} if on else {})
+
+
+@extend.hook("attach", order=10)
+def _init_uncovered(enforcer: Enforcer, env) -> None:
+    env.tools.glint_uncovered = []  # (tool, target) of no_rule_yet writes that ran, with uncovered_reminder only
+
+
+@extend.hook("after_read", order=10)
+def _after_read_records(call: extend.Call, reply: ToolMessage) -> None:
+    """The records every non-write call keeps, in this fixed order (their events keep the gate log's order)."""
+    e, env, message, replay = call.enforcer, call.env, call.message, call.replay
+    e._record_read(env, message, reply)
+    e._record_plan(env, message, reply, replay)
+    e._record_retention(env, message, reply, replay)
+    e._record_dispute_answers(env, message, reply, replay)
+    e._record_requests(env, message, reply, replay)
+    e._record_address(env, message, reply, replay)
+    e._record_verdict(env, message, reply)
+    e._record_check(message, reply, replay)
+
+
+@extend.hook("before_write", order=10)
+def _increase_snapshot(call: extend.Call) -> None:
+    call.scratch["increases_before"] = increase_request_ids(call.tools.db) if call.write[0] == SUBMIT else None
+
+
+@extend.hook("after_write", order=10)
+def _allow_note(call: extend.Call, reply: ToolMessage) -> ToolMessage | None:
+    """An allow's reminder (procedure.TRANSFER_UNCODED): deterministic, so it replays."""
+    note = call.result.note
+    return reply.model_copy(update={"content": f"{reply.content}\n\n{note}"}) if note else None
+
+
+@extend.hook("after_write", order=20)
+def _increase_record(call: extend.Call, reply: ToolMessage) -> None:
+    call.enforcer._record_increase(call.env, *call.write, reply, call.scratch.get("increases_before"))
+
+
+@extend.hook("after_write", order=40)
+def _uncovered_write(call: extend.Call, reply: ToolMessage) -> None:
+    """research appendix #15 as a reminder, with Enforcer(uncovered_reminder=True) only (see _open_items)."""
+    tool, args = call.write
+    if not extend.ran(reply) or not call.enforcer.uncovered_reminder:
+        return
+    if tool in NO_RULE_YET.get(call.enforcer.domain, ()):
+        target = next((str(v) for k, v in sorted((args or {}).items()) if k.endswith("_id") and k != "user_id" and v),
+                      "")
+        call.tools.glint_uncovered.append((tool, target))
+
+
+@extend.hook("reply", order=10)
+def _with_open_items(call: extend.Call, reply: ToolMessage) -> ToolMessage | None:
+    """On banking, every reply that is not an error ends with the open items (module doc); records' replies carry
+    none. An account read carries the one-credit-per-account fact first (row 14, doc 017)."""
+    message = call.message
+    if (call.enforcer.domain != "banking_knowledge" or message.requestor != "assistant"
+            or message.name in GLINT_RECORDS or not extend.ran(reply)):
+        return None
+    items = _open_items(call.tools) + extend.open_items(call)
+    if message.name == WRAPPER:
+        args = message.arguments or {}
+        hidden = parse_hidden_arguments(args.get("arguments", "{}")) or {}
+        note = aids.credit_note(call.tools.db, str(args.get("agent_tool_name", "")), hidden)
+        items = [note, *items] if note else items
+    return reply.model_copy(update={"content": f"{reply.content}\n\n" + "\n".join(items)}) if items else None
