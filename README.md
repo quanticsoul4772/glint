@@ -9,11 +9,13 @@
 [![tests: 909 passed (local, 2026-11-03)](https://img.shields.io/badge/tests-909%20passed%20%28local%2C%202026--11--03%29-brightgreen)](docs/testing-strategy.md)
 [![license MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-<!-- GIF placeholder (block, fix, pass; under 10 MB), produced by the video build: ![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](video/demo.gif) -->
+![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](docs/demo.gif)
 
-**[Watch (2:31)](https://youtu.be/56g7D-g_iNI)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
+**[Watch (2:43)](https://youtu.be/UGEJxiTa5-c)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
 
 Glint is write authorization for AI agents that touch money. Every account change the agent attempts goes through a gate before it runs; where the bank's written policy has a rule, the gate applies it as code to the live account records. An allowed write runs. A refused write does not run, and the agent gets the rule, the facts and the fix. Every decision lands in a hash-chained, tamper-evident log. Built on Meta's open-weight Muse Glimmer 30B, Muse Spark and Muse Code.
+
+**Built during the hackathon (Oct 26 – Nov 4, 2026):** all of Glint's code, written from the first commit `952dd30` (2026-10-26; history rewritten Oct 31 with authors and dates kept). τ²-bench data and Astryx's theme scales are third-party; see [Built during the event](#built-during-the-event). **Best Build on Meta Open Weight Models:** the agent is Muse Glimmer 30B, Meta open weights, self-hosted on Modal with vLLM; Glint also runs inside Meta's LlamaFirewall 1.0.3 as a custom scanner (scanner-level test on 2026-11-03: a $4,000 credit-limit increase blocked, $2,500 allowed; a host agent loop stopping the call was not tested).
 
 ## Why it matters
 - **Agents are getting payment access.** Visa (Intelligent Commerce, April 30, 2025) and Mastercard (Agent Pay, April 29, 2025) launched programs that let AI agents pay ([Retail TouchPoints](https://www.retailtouchpoints.com/topics/payments/visa-mastercard-paypal-dive-into-agentic-era-with-tools-that-help-consumers-use-ai-to-buy)). 64% of larger US banks were testing or deploying agentic AI, against 38% of smaller ones (SoundHound-commissioned Arizent/American Banker survey, n=201, [Nasdaq/GlobeNewswire](https://www.nasdaq.com/press-release/research-finds-two-three-us-banking-executives-believe-agentic-ai-will-change-how)).
@@ -26,7 +28,7 @@ Glint is write authorization for AI agents that touch money. Every account chang
 2. **Refusals carry the rule, the facts and the fix, so the agent can recover.** This is not described in competitors' docs ([AgentCore Policy](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/policy/overview.html) describes allow/deny; [ToolGuard](https://pypi.org/project/toolguard/0.1.19/) describes raising alerts).
 3. **The refusal and its hash-chained, tamper-evident record come from one gate.**
 4. **The first policy layer found measured with and without on τ²-bench banking** (ToolGuard's paper evaluates the airline domain only, [arXiv 2507.16459](https://arxiv.org/html/2507.16459v1)).
-5. **Built on Meta's open-weight stack.** It ships a LlamaFirewall custom-scanner adapter ([docs/llamafirewall.md](docs/llamafirewall.md)).
+5. **Built on Meta's open-weight stack.** It runs inside Meta's LlamaFirewall 1.0.3 as a custom scanner (scanner-level test; [docs/llamafirewall.md](docs/llamafirewall.md)).
 
 | Approach | What it checks | Deterministic? | Explains the fix? | Tamper-evident record? |
 |---|---|---|---|---|
@@ -99,7 +101,7 @@ An agent that can move money is only as safe as its worst call. A 30B model hold
 | **Muse Glimmer 30B** (open weights) | The agent: it proposes every write, and the gates decide | **Self-hosted** on Modal with vLLM (bf16, A100-80GB, 131K context, scale to zero) by `glint.glimmer_serve`, with a health wait, fail-fast boot-log watching, a GPU cap enforced during the session and a retried stop. Every comparison reported here ran on it, except the first retail and airline draws (DeepInfra's hosted Glimmer). `glint.atem` re-parses its tool calls from the raw token stream: the hosted parser turned string arguments such as zip codes into numbers | Use of Meta AI tooling; technical depth |
 | **Muse Spark** (Meta Model API) | The simulated customer in τ²-bench (and judge of its natural-language checks), and the agent in the Muse Code demo | Every τ² run reported here; the Muse Code run of 2026-10-31 | Use of Meta AI tooling; demo |
 | **Muse Code** + the [glint-bank plugin](plugins/glint-bank/README.md) | A live τ² bank over MCP with every write gated, plus Glint's decision tools | Checked 2026-10-31 on plugin 0.2.1, headless (`muse exec`): the server reached `ready` with 23 tools; read-only tools ran without approval; a $4,000 increase denied and $2,500 allowed, with the session and call ids matching Muse Code's hook. `/start <task_id>` loads a scenario | Use of Meta AI tooling; demo |
-| **LlamaFirewall** scanner adapter | Glint's gate decision as a LlamaFirewall custom scanner (`glint.integrations.llamafirewall_scanner`) | Unit-tested against a fake module with LlamaFirewall 1.0.3's names, and on one real `Enforcer`; not yet run inside LlamaFirewall ([docs/llamafirewall.md](docs/llamafirewall.md)) | Use of Meta AI tooling; technical depth |
+| **LlamaFirewall** custom scanner | Glint's gate decision as a LlamaFirewall custom scanner (`glint.integrations.llamafirewall_scanner`) | Unit-tested against a fake module, and run inside LlamaFirewall 1.0.3 on CPU on 2026-11-03 (training task_054: a $4,000 increase BLOCK, $2,500 ALLOW, credit-limit requests unchanged by the scans); a host agent loop stopping the call was not tested ([docs/llamafirewall.md](docs/llamafirewall.md)) | Use of Meta AI tooling; technical depth |
 
 ## Business case
 - **Buyers:**
@@ -117,7 +119,7 @@ An agent that can move money is only as safe as its worst call. A 30B model hold
 - **A gate checks only what its rules encode.** On those 59 tasks, 31% of live write decisions (206 of 660) were writes no rule covered. *Answer:* every such write is allowed and logged as `no_rule_yet` with the reason, enforcement refuses to start unless every write tool has a gate, and rules have since been added for savings interest and debit disputes ([The gates](#the-gates)).
 - **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard. *Answer:* both arms run on the same backend and seeds in every comparison except the 2026-11-03 test-split rerun (gated arm only, cross-day), reported by task.
 - **The demos are illustrations.** The desk's pairs are selected, and the Muse Code run was scripted. *Answer:* the desk shows each task's real pass counts beside the pair, and the replays run without a GPU for anyone to check.
-- **The LlamaFirewall adapter has not run inside LlamaFirewall,** and interactive Muse Code is not shown to work (headless is). *Answer:* both are stated in [docs/llamafirewall.md](docs/llamafirewall.md) and [Limitations in detail](#limitations-in-detail).
+- **LlamaFirewall was tested at the scanner level only** (a host agent loop stopping the call was not tested), and interactive Muse Code is not shown to work (headless is). *Answer:* both are stated in [docs/llamafirewall.md](docs/llamafirewall.md) and [Limitations in detail](#limitations-in-detail).
 
 ## What the gates are shown to do
 
