@@ -1,5 +1,249 @@
 [
  {
+  "set": "banking-test-gated",
+  "title": "Banking test split, every write gated (the one gated read of the split)",
+  "role": "tuned",
+  "note": "\u03c4\u00b2's 20 banking test tasks, k=2, Glimmer alone vs Glimmer with the gates and decision tools, on the code after PRs 20-25 (the request record, the retention answer, the savings interest rules). Some debit rules were written from this split's failures on 2026-10-28. Passes 7/40 vs 7/40 (by task 2 better, 2 worse). Writes that differ from \u03c4\u00b2's expected ones: 34 alone vs 25 gated, extra writes 13 vs 4 (by task 5 fewer, 2 more; may be chance); wrong values 21 vs 21. 14 gated runs hit \u03c4\u00b2's step limit (10 knowledge-base search loops, 4 with request-record refusals); alone had 7 context overflows. Glimmer on Modal.",
+  "tasks": [
+   {
+    "task": "banking_knowledge-task_004",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_014",
+    "alone": "2/2",
+    "tools": "1/2",
+    "change": "worse",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_015",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_020",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_022",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_024",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_029",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_036",
+    "alone": "2/2",
+    "tools": "2/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_043",
+    "alone": "0/2",
+    "tools": "1/2",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_047",
+    "alone": "1/2",
+    "tools": "1/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_060",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_074",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_077",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_078",
+    "alone": "0/2",
+    "tools": "1/2",
+    "change": "improved",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_079",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_080",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 2,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_082",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 1,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_083",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_099",
+    "alone": "0/2",
+    "tools": "0/2",
+    "change": "tied",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   },
+   {
+    "task": "banking_knowledge-task_102",
+    "alone": "2/2",
+    "tools": "1/2",
+    "change": "worse",
+    "overflows": 0,
+    "empty_replies": 0,
+    "infra_errors": 0,
+    "glint_errors": 0,
+    "no_data_reason": null
+   }
+  ],
+  "by_task": {
+   "improved": 2,
+   "tied": 16,
+   "worse": 2,
+   "no data": 0
+  },
+  "runs": {
+   "alone": [
+    7,
+    40
+   ],
+   "tools": [
+    7,
+    40
+   ]
+  }
+ },
+ {
   "set": "banking-unseen-v10-gated",
   "title": "Banking, 59 unseen tasks, gates plus the search fix (tuned on their failures)",
   "role": "tuned",
@@ -1529,7 +1773,7 @@
   "set": "banking-test",
   "title": "Banking test split, read once (current tools, no gates)",
   "role": "held-out",
-  "note": "\u03c4\u00b2's 20 untouched banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute or credit-limit step, and a decision tool was called in 1 of 80 runs, so this shows the tools neither helped nor hurt tasks they were not built for. By task: 1 improved, 18 tied, 1 worse. No gated run on this split. k=4. Glimmer on Modal.",
+  "note": "\u03c4\u00b2's 20 banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute or credit-limit step, and a decision tool was called in 1 of 80 runs, so this shows the tools neither helped nor hurt tasks they were not built for. By task: 1 improved, 18 tied, 1 worse. No gated run on this split. k=4. Glimmer on Modal.",
   "tasks": [
    {
     "task": "banking_knowledge-task_004",
