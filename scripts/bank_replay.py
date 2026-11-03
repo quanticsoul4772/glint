@@ -39,10 +39,17 @@ from loguru import logger
 from mcp.client.client import Client
 from tau2.data_model.message import ToolCall
 
-from glint.assist.banking import DISPUTE_ANSWERS_TOOL, PLAN_TOOL, REQUEST_TOOLS, REQUESTS_TOOL, RETENTION_TOOL
+from glint.assist.banking import (
+    ADDRESS_TOOL,
+    DISPUTE_ANSWERS_TOOL,
+    PLAN_TOOL,
+    REQUEST_TOOLS,
+    REQUESTS_TOOL,
+    RETENTION_TOOL,
+)
 from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
-from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, plan_arguments, with_address_asks, with_plans
+from glint.gates.replayplan import plan_arguments, with_address_confirmations, with_plans
 
 # the recorded runs the wrong check reads: banking12's runs of task_040/041/051/054 from the failure review of
 # 2026-10-28, trimmed to the fields used and kept in the repo so a clean checkout can run it
@@ -100,24 +107,16 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                     raise RuntimeError(f"load_scenario({task_id}) failed: {_text(loaded)}")
                 session, twin = bank.session(), build_environment(task)
                 actions = task.evaluation_criteria.actions or [] if task.evaluation_criteria else []
-                users = twin.tools.db.users.data
-                calls = with_address_asks(with_plans([ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments,
-                                                               requestor=a.requestor) for k, a in enumerate(actions)]),
-                                          lambda u, users=users: (users.get(u) or {}).get("address"))
+                gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
+                        for k, a in enumerate(actions)]
+                calls = with_address_confirmations(with_plans(gold))
                 for call in calls:
                     k, action = call.id.removeprefix("gold-"), call
                     # Glint's tools: the twin has none
-                    if call.name in (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL):
+                    if call.name in (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL):
                         reply = await client.call_tool(call.name, call.arguments)
                         if reply.is_error:
                             errors.append({"task_id": task_id, "action": k, "tool": call.name, "text": _text(reply)})
-                        continue
-                    if call.id.endswith(ADDRESS_ASK_SUFFIX):  # refused once by address_ask; never sent to the twin
-                        before = session.events.count()
-                        await client.call_tool(call.name, call.arguments)
-                        if [d["rule_id"] for d in _denies(session, before)][:1] != [rules.ADDRESS_ASK]:
-                            errors.append({"task_id": task_id, "action": k, "tool": call.name,
-                                           "text": "the inserted order was not refused by address_ask"})
                         continue
                     ungated = twin.get_response(call)
                     if action.requestor != "assistant":
