@@ -22,15 +22,17 @@ from pathlib import Path
 from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
-from glint import declare
+from glint import declare, paths
 from glint.assist.banking import REQUEST_ACTIONS
 from glint.gates import extend
 from glint.gates.rules import parse_hidden_arguments
 
 log = logging.getLogger("glint.gates")
-WRAPPER = declare.WRAPPER
+# glint.declare imports glint.gates, so it may be partly initialized here: read its names at call time, never at import
 REMINDERS = ("declare",)  # the reminders (Enforcer(reminders=...)); each only adds [open] lines, never refuses
-CLAUSES = declare.CLAUSE_DIR / "reconciled.json"  # package data: an installed Glint has it too
+# package data: an installed Glint has it too. Read from glint.paths, not glint.declare: this module loads while
+# glint.declare is still importing (declare -> gates -> enforce -> reminders), before declare defines CLAUSE_DIR
+CLAUSES = paths.CLAUSE_DIR / "reconciled.json"
 # appendix #69 (reader 3 K5; B2 §1): a step-limit warning listing the open items. Glint convention: the gates see tool
 # calls only, never τ²'s step count, so the trigger counts the calls τ²'s evaluator replays (a lower bound on steps)
 STEP_WARN_NOTE = ("[open] this conversation is near its step limit: finish the open items above (or tell the customer "
@@ -65,7 +67,7 @@ def _trace(env, call: ToolCall, reply: ToolMessage, replayed: bool) -> None:
     if call.requestor != "assistant" or not replayed or reply.error or str(reply.content).startswith("Error"):
         return
     name, args = call.name, call.arguments or {}
-    if name == WRAPPER:
+    if name == declare.WRAPPER:
         name, args = str(args.get("agent_tool_name", "")), parse_hidden_arguments(args.get("arguments", "{}"))
     if args is not None:
         env.tools.glint_trace.append({"tool": name, "args": args})

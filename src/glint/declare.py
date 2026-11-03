@@ -28,14 +28,15 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from importlib import resources
 from pathlib import Path
 
+from glint import paths
 from glint.gates.rules import parse_hidden_arguments
 from glint.gates.summary import norm, run_calls
 
-# the blind clause lists and their reconciliation: package data, so an installed (non-editable) Glint has them
-CLAUSE_DIR = Path(str(resources.files("glint") / "clauses"))
+# the blind clause lists and their reconciliation: package data (glint.paths.CLAUSE_DIR, kept there to avoid an
+# import cycle with glint.gates.reminders)
+CLAUSE_DIR = paths.CLAUSE_DIR
 
 TEMPLATES = ("existence", "absence", "at_most", "response", "precedence", "not_succession", "not_coexistence",
              "responded_existence", "value")
