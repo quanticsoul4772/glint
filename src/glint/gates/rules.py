@@ -17,9 +17,9 @@ from __future__ import annotations
 import json
 
 from glint.assist import airline, as_flag, banking, retail
-from glint.assist.banking import REQUEST_TOOLS
+from glint.assist.banking import ADDRESS_TOOL, REQUEST_TOOLS
+from glint.gates import aids, debit, procedure, travel
 from glint.gates import banking as bank_rules
-from glint.gates import debit, procedure, travel
 from glint.gates.bankdb import undecided_increases
 from glint.gates.core import NO_RULE, Gate, GateRegistry, GateResult, allow, deny
 
@@ -330,6 +330,10 @@ def expedite_fee_text(card_type: str | None) -> str:
 # order to another address shows the agent asked and goes through. Replays insert the refused order before gold's
 # orders to the address on file (glint.gates.replayplan).
 ADDRESS_ASK, ADDRESS_SOURCE = "banking.replacement.address_ask", "credit_card_replacements_001"
+# Row 8 of the 2026-11-02 fix research: the customer's confirmed address, recorded with record_address_confirmation
+# (env.tools.glint_address_confirmed), satisfies the ask with no refused order; an order to another address than the
+# recorded one is refused (same clause)
+ADDRESS_MISMATCH = "banking.replacement.address_mismatch"
 
 
 def same_address(given, on_file) -> bool:
@@ -346,12 +350,22 @@ def _replacement(toolkit, a: dict) -> GateResult:
                     "increase first, then order the replacement.", details, consequence=procedure.INCREASE_FIRST,
                     facts=[f"undecided increase requests for {card}: {', '.join(map(str, pending))}"])
     on_file = (toolkit.db.users.data.get(str(a.get("user_id", ""))) or {}).get("address")
-    if (on_file and same_address(a.get("shipping_address"), on_file)
+    confirmed = getattr(toolkit, "glint_address_confirmed", {}).get(card)
+    if confirmed is not None and not same_address(a.get("shipping_address"), confirmed):
+        return deny(ADDRESS_MISMATCH, ADDRESS_SOURCE, "this order ships somewhere other than the address the customer "
+                    f"confirmed ({ADDRESS_TOOL})", f"Order to the confirmed address ({confirmed}), or ask the customer "
+                    f"again and record the new address with {ADDRESS_TOOL}.", details | {"confirmed": confirmed},
+                    consequence="Nothing was ordered. A replacement card cannot be redirected after it ships.",
+                    facts=[f"shipping_address given: {a.get('shipping_address')!r}",
+                           f"address the customer confirmed: {confirmed!r}"])
+    if (on_file and confirmed is None and same_address(a.get("shipping_address"), on_file)
             and card not in getattr(toolkit, "glint_address_asked", set())):
         return deny(ADDRESS_ASK, ADDRESS_SOURCE, "this order ships to the address on file, and the policy says to "
                     "confirm the shipping address with the customer first (primary or alternate)", "Ask the customer "
                     f"whether to ship the new card to the address on file ({on_file}) or to another address, with any "
-                    "unit or suite. Then order to the address they give; the repeat to the address on file is allowed.",
+                    f"unit or suite, and record their answer with {ADDRESS_TOOL}(credit_card_account_id, user_id, "
+                    "shipping_address, customer_words). Then order to that address; the repeat to the address on file "
+                    "is also allowed.",
                     details | {"address_on_file": on_file}, consequence="Asked once per card: an order to another "
                     "address, or a repeat to the address on file, goes through.",
                     facts=[f"shipping_address given: {a.get('shipping_address')!r}", f"address on file: {on_file!r}",
@@ -463,6 +477,11 @@ def _register_banking(reg: GateRegistry) -> None:
     reg.register(Gate("procedure_give_card_digits_gate", ("give_discoverable_user_tool",), "credit_cards_(general)"
                       "_014: the customer looks up the card's digits only when its account record does not show "
                       "them.", procedure.give_card_digits, toolkit=True))
+    # a deny-only convention with no policy clause (fix research 2026-11-02, N2; glint.gates.aids), registered last so
+    # every policy gate's refusal comes first. Named procedure_* so an allow counts as no rule check
+    for tool in sorted(set(REQUIRED_GATES["banking_knowledge"]) - set(aids.DUPLICATE_EXEMPT)):
+        reg.register(Gate(f"procedure_duplicate_{tool}", (tool,), "Glint convention, no clause: the same write with "
+                          "identical arguments runs once per conversation.", aids.duplicate(tool), toolkit=True))
 
 
 def build_registry(domain: str) -> GateRegistry:

@@ -331,6 +331,30 @@ def record_retention_answer(db, credit_card_account_id: str, user_id: str, offer
             "offer": str(offer), "accepted": accepted, "customer_words": str(customer_words),
             "next": "Keep the account open and apply the offer." if accepted else
             "Proceed with the closure the customer asked for (close_credit_card_account_7834)."}
+
+
+ADDRESS_TOOL = "record_address_confirmation"
+
+
+def record_address_confirmation(db, credit_card_account_id: str, user_id: str, shipping_address: str,
+                                customer_words: str) -> dict:
+    """The shipping address the customer confirmed for a replacement card (credit_card_replacements_001: "Confirm the
+    shipping address with the customer (primary or alternate, including any unit or suite information)"), as recorded
+    by the agent. Validates the account, the address and the customer's words; never writes the database."""
+    acc = db.credit_card_accounts.data.get(credit_card_account_id)
+    if acc is None or acc.get("user_id") != user_id:
+        return {"recorded": False, "error": f"no credit card account {credit_card_account_id!r} for user {user_id!r}"}
+    if not str(shipping_address).strip() or not str(customer_words).strip():
+        return {"recorded": False, "error": "give the shipping address the customer confirmed, with any unit or suite, "
+                "and the customer's own words confirming it"}
+    on_file = (db.users.data.get(user_id) or {}).get("address")
+    same = " ".join(str(shipping_address).lower().split()) == " ".join(str(on_file or "").lower().split())
+    return {"recorded": True, "credit_card_account_id": credit_card_account_id, "user_id": user_id,
+            "shipping_address": str(shipping_address), "address_on_file": same,
+            "customer_words": str(customer_words),
+            "next": f"Order the replacement ({ORDER_TOOL}) with shipping_address exactly as recorded here."}
+
+
 OVERCHARGE = "incorrect_amount"
 CARD_DIGITS_TOOL = "get_card_last_4_digits"
 
