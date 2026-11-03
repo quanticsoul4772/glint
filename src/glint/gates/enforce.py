@@ -53,7 +53,7 @@ from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
 from glint.assist import as_flag
-from glint.assist.banking import ORDER_TOOL, PLAN_TOOL, REQUESTS_TOOL, RETENTION_TOOL, replacements_today
+from glint.assist.banking import ORDER_TOOL, PLAN_TOOL, REQUESTS_TOOL, RETENTION_TOOL, TODAY, replacements_today
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
@@ -106,6 +106,14 @@ def _open_items(tools) -> list[str]:
     if pending:
         items.append(f"[open] credit limit increase submitted and not decided yet: {', '.join(pending)} (the "
                      "required lookups, then approve or deny)")
+    verified = [r.get("user_id") for r in db.verification_history.data.values()
+                if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
+    if verified and getattr(tools, "glint_requests", "absent") is None:
+        # banking-test-gated (2026-11-02): the request gate refused 17 writes τ² expects before the agent recorded
+        # them; this reminder comes before the first account change instead of after a refusal
+        items.append(f"[open] the customer's requests are not recorded yet: before any account change, call "
+                     f"{REQUESTS_TOOL}(user_id={verified[-1]!r}, requests=[{{action, target_id, customer_words}}]) "
+                     "with every account action they asked for; each change is checked against that record")
     return items
 
 
