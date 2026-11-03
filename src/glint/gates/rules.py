@@ -440,7 +440,8 @@ def _register_banking(reg: GateRegistry) -> None:
                       "record_retention_answer.", bank_rules.retention_answered, toolkit=True))
     for tool in REQUEST_TOOLS:
         reg.register(Gate(f"banking_request_{tool}", (tool,), "Act only on what the customer asked for: the "
-                          "write is covered by the record_requests record.", bank_rules.requested(tool),
+                          "write is covered by the record_requests record (a reversible write without one runs, "
+                          "flagged).", bank_rules.requested(tool),
                           toolkit=True))
     # procedure gates: every banking write acting for a user, and every write whose procedure names lookups
     reg.register(Gate("procedure_verified_gate", procedure.VERIFIED_WRITES, "Every procedure starts with a verified "
