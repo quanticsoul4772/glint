@@ -373,14 +373,20 @@ def test_gold_replay_through_mcp_has_no_false_refusal_and_matches_the_ungated_tw
     report = _run(bank_replay.gold)
     untouched = set(json.loads(gate_replay.BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
     assert report["tasks"] == 77 and len(untouched) == 20 and not untouched & set(bank_replay.train_task_ids())
-    assert report["false_refusals"] == [] and report["also_rejected"] == []
+    # exactly one expected refusal and one hash mismatch, both task_091: its entry-tier replacement after a
+    # fraud_suspected closure is refused by debit.order.entry_wait, so its database differs from the ungated twin.
+    # Owner's decision (2026-11-03): every fix on by default; the 48-hour wait follows doc 029, which conflicts with
+    # doc 031 (029 vs 031). Any other refusal or mismatch still fails this test.
+    assert [(f["task_id"], f["tool"], f["rule_id"]) for f in report["false_refusals"]] == [
+        ("task_091", "order_debit_card_5739", "debit.order.entry_wait")]
+    assert report["also_rejected"] == []
     # task_005's gold logs a placeholder verification and then changes an unverified user's email (gate_replay lists
     # it apart): its two gold writes are denied, so only its database differs from the twin's
     assert [(p["task_id"], p["rule_id"]) for p in report["placeholder_gold"]] == [
         ("task_005", "banking.verification.user"), ("task_005", "procedure.verified")]
-    assert report["gold_writes"] == report["allowed"] + 2 > 250
+    assert report["gold_writes"] == report["allowed"] + 3 > 250  # task_005's two writes and task_091's order
     assert report["placeholder_hash_differs"] == ["task_005"]
-    assert report["hash_mismatches"] == [] and report["result_mismatches"] == []
+    assert [m["task_id"] for m in report["hash_mismatches"]] == ["task_091"] and report["result_mismatches"] == []
 
 
 def test_replay_environments_record_the_hidden_reads_gold_makes_as_taus_runner_does():
