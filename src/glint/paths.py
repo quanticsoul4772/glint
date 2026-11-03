@@ -9,7 +9,13 @@ local secrets file; it defaults to the folder that contains this repo. The layou
 from __future__ import annotations
 
 import os
+from importlib import resources
 from pathlib import Path
+
+# the blind clause lists and their reconciliation: package data, so an installed (non-editable) Glint has them. Kept
+# here, in a module that imports nothing from Glint, so glint.declare and glint.gates.reminders can both read it at
+# import time without an import cycle (declare -> gates -> enforce -> reminders -> declare).
+CLAUSE_DIR = Path(str(resources.files("glint") / "clauses"))
 
 
 def _default_home() -> Path:
