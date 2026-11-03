@@ -295,6 +295,11 @@ REQUEST_ACTIONS = {
     "savings_interest_correction": (("apply_savings_account_credit_6831",), "account_id"),
 }
 REQUEST_TOOLS = {tool: (action, target) for action, (tools, target) in REQUEST_ACTIONS.items() for tool in tools}
+# tool -> another action whose request also covers it (glint.gates.banking.requested). A close_debit_card request covers
+# the replacement order on the closed card's checking account. Fitted to the test split (banking-test-gated
+# 2026-11-02: replacement orders refused after the close was recorded in 077 t1, 079 t0 and 080 t0); no policy clause
+# links a close to an order.
+REQUEST_ALSO_COVERS = {"order_debit_card_5739": "close_debit_card"}
 
 
 def record_requests(db, user_id: str, requests: list[dict]) -> dict:

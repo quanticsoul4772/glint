@@ -70,7 +70,7 @@ from glint.assist.banking import (
 )
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates.bankdb import increase_request_ids, undecided_increases
-from glint.gates.banking import RETENTION_CREDIT, closure_blockers
+from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import (
@@ -129,7 +129,8 @@ def _open_items(tools) -> list[str]:
         # them; this reminder comes before the first account change instead of after a refusal
         items.append(f"[open] the customer's requests are not recorded yet: before any account change, call "
                      f"{REQUESTS_TOOL}(user_id={verified[-1]!r}, requests=[{{action, target_id, customer_words}}]) "
-                     "with every account action they asked for; each change is checked against that record")
+                     "with every account action they asked for; closes, payments and filings are refused until "
+                     "recorded, and a closure reason log or card order made without a record is flagged for review")
     return items
 
 
@@ -186,16 +187,17 @@ REPEAT_NOTE = ("\n\nThis exact call was already refused for the same reason, so 
                "cannot be resolved.")
 
 
-def attestation_classes(passed: list[str]) -> list[str]:
+def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] = ()) -> list[str]:
     """What stood behind an allowed write, from the names of the gates that allowed it: 'rule_checked' (a policy rule
     on the write's values or state), 'customer_requested' (the request record covers it), or 'uncovered' (only the
-    procedure gates and a no_rule_yet allow)."""
+    procedure gates and a no_rule_yet allow). `flagged` names the request gates that allowed the write without a
+    covering request (bank_rules.UNRECORDED): those add 'request_unrecorded', never 'customer_requested'."""
     classes = []
     if any(not g.startswith(("no_rule_", "procedure_", "banking_request_")) for g in passed):
         classes.append("rule_checked")
-    if any(g.startswith("banking_request_") for g in passed):
+    if any(g.startswith("banking_request_") and g not in flagged for g in passed):
         classes.append("customer_requested")
-    return classes or ["uncovered"]
+    return (classes or ["uncovered"]) + (["request_unrecorded"] if flagged else [])
 
 
 class Enforcer:
@@ -232,7 +234,7 @@ class Enforcer:
                           "of the request is not affected.", facts=["`arguments` is not a JSON object"])
             self._log(tool, args, result, 0.0, replay, "unparsed")
             return result
-        final, passed = None, []
+        final, passed, flagged = None, [], []
         for gate in self.registry.for_tool(tool):
             if gate.toolkit and toolkit is None:
                 result, ms = deny("gate_error", gate.name, f"the check {gate.name!r} needs the environment's "
@@ -247,18 +249,20 @@ class Enforcer:
             if not result.allowed:
                 return result
             passed.append(gate.name)
+            if result.rule_id == UNRECORDED:
+                flagged.append(gate.name)
             final = final or result
         if final is None:  # attach() refuses an environment with an ungated write; this is a second line
             raise RuntimeError(f"write {tool} has no gate")
-        self._attest(tool, passed, replay)
+        self._attest(tool, passed, replay, flagged)
         return final
 
-    def _attest(self, tool: str, passed: list[str], replay: bool) -> None:
+    def _attest(self, tool: str, passed: list[str], replay: bool, flagged: list[str] | None = None) -> None:
         """A write.attested event for each allowed write: which kind of check stood behind it (attestation_classes).
         Never decides anything; a failure to log is logged, not raised."""
         try:
             self.events.emit("write.attested", {"domain": self.domain, "tool": tool,
-                                                "classes": attestation_classes(passed), "gates": passed,
+                                                "classes": attestation_classes(passed, flagged or ()), "gates": passed,
                                                 "replay": replay, **self.context()})
         except Exception:
             log.exception("the write.attested event was not logged")
