@@ -1,0 +1,7 @@
+# Rule changes from the banking test split (PRs #29-#44)
+
+Moved here from the README on 2026-11-03, unchanged except for link paths.
+
+- **The request gate (PR #29):** reversible writes (reason logs, orders) are allowed and flagged instead of refused when no request is recorded; closes, payments and filings are still refused. A refusal now carries the filled-in `record_requests` call. A debit card close request covers the replacement order. Sources: the allow-and-flag and the filled-in call are Glint conventions; the close-covers-order mapping is fitted to the test split (tasks 077, 079, 080), with no policy clause linking a close to an order. All three came from the test split's 20 request-gate refusals on 2026-11-02. PR #41 added a `request_gate` switch (on by default) that removes the request gate entirely.
+- **Every fix on by default since PR #44,** each with an off switch: the 48-hour entry-tier wait applied after a closure for suspected fraud too, the checking-credit amount deny, constrained values, the uncovered-write reminder, the declare reminder, the step-limit warning, the search diagnosis and the optional stages (the stages run nothing until a model is configured).
+- **The one known refusal of training gold:** with the entry-wait deny on, the gold replay (in-sample) refuses task_091's debit card order after a closure for suspected fraud (doc 029 sets a 48-hour wait; doc 031 conflicts). The replay scripts print it as KNOWN (decided) and do not count it as a false refusal.
