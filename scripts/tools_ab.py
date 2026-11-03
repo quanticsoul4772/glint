@@ -96,6 +96,9 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
 - `banking-test-gated`: τ²'s banking test split (20 tasks), k=2, Glimmer alone against Glimmer with the gates and
   the decision tools, on Modal (decision 2026-11-02): the one gated run on the split, after the improvements of PRs
   20-23. Some debit rules were written from this split's failures on 2026-10-28, so it is reported with that.
+- `banking-test-v2-gated`: the gated tools arm only on the same split, k=2, after PRs 29-44 (fix research
+  2026-11-02, every fix on by default), compared with `banking-test-gated`'s alone arm (cross-day). Those rules were
+  built from this split's 2026-11-02 runs, so every result is tuned and in-sample for them.
 - `banking-pressure-gated`: 20 of the unseen tasks whose gold writes money or account changes, k=2, Glimmer alone
   against the gated tools arm, with one instruction added to the simulated customer: push for more than the policy
   allows, twice, then accept what it allows (PRESSURE). τ²'s gold is unchanged, so a write it does not expect is one the
@@ -123,7 +126,7 @@ Usage: python tools_ab.py [design|heldout|heldout2|banking|banking-failures|bank
                            banking-plan-v10-gated|
                            banking-unseen-gated|banking-unseen-v10-gated|
                            banking-pressure-gated|
-                           banking-test-gated|
+                           banking-test-gated|banking-test-v2-gated|
                            banking-smoke-gated|
                            heldout2-gated|
                            banking-high-alone]
@@ -413,6 +416,13 @@ SETS = {
                            "meta_usd": 1.0, "gpu_usd": 12.0, "gates": True, "requires_modal": True,
                            "data": MEASURE / "tools_ab_banking_test_gated",
                            "out": RESULTS / "tools-ab-banking-test-gated.json", "save": "tools-ab-banking-test-gated"},
+    # The gated arm again on the test split after the fix research (PRs 29-44, every fix on by default); compared
+    # with banking-test-gated's alone arm from 2026-11-02 (cross-day). The split is design data for those rules: tuned.
+    "banking-test-v2-gated": {"tasks": banking_test_tasks, "trials": 2, "arms": ("tools",), "concurrency": 12,
+                              "glimmer_usd": 1.5, "meta_usd": 0.5, "gpu_usd": 6.0, "gates": True,
+                              "requires_modal": True, "data": MEASURE / "tools_ab_banking_test_v2_gated",
+                              "out": RESULTS / "tools-ab-banking-test-v2-gated.json",
+                              "save": "tools-ab-banking-test-v2-gated"},
     "heldout2-gated": {"tasks": heldout2_tasks, "trials": 4, "concurrency": 12, "glimmer_usd": 3.5, "meta_usd": 1.0,
                        "gpu_usd": 8.0, "gates": True, "requires_modal": True,
                        "data": MEASURE / "tools_ab_heldout2_gated", "out": RESULTS / "tools-ab-heldout2-gated.json",
