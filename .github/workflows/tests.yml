@@ -32,3 +32,31 @@ jobs:
         run: uv run --no-sync python scripts/coverage_gate.py
       - name: Lint
         run: uv run --no-sync ruff check src tests scripts --line-length 120
+  # An installed (non-editable) Glint, not the source tree: build the wheel, install it into a fresh venv outside the
+  # checkout, then run the bank server's selftest and build an Enforcer (judge panel 2026-11-03, technical B15: an
+  # installed copy read its clause lists from the source tree and crashed at the first Enforcer).
+  installed-wheel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: glint
+      - uses: actions/checkout@v4
+        with:
+          repository: sierra-research/tau2-bench
+          ref: fc0055dc4e0a316c3f83133267fbd6faaa770992
+          path: vendor/tau2-bench
+      - uses: astral-sh/setup-uv@v6
+      - name: Build the wheel
+        run: uv build --wheel --out-dir dist glint
+      - name: Install it into a fresh venv (τ² from the pinned checkout)
+        run: |
+          uv venv wheel-venv --python 3.12
+          uv pip install --python wheel-venv/bin/python -e "vendor/tau2-bench[knowledge]" dist/glint-*.whl
+      - name: Selftest and an Enforcer from the installed package, run outside the checkout
+        run: |
+          mkdir -p "$RUNNER_TEMP/run" && cd "$RUNNER_TEMP/run"
+          export GLINT_HOME="$PWD"
+          "$GITHUB_WORKSPACE/wheel-venv/bin/python" -X utf8 -m glint.bank.server --decision-tools --selftest
+          "$GITHUB_WORKSPACE/wheel-venv/bin/python" -X utf8 -c "import glint; from glint.gates import Enforcer, EventLog; e = Enforcer('banking_knowledge', EventLog(':memory:')); assert 'site-packages' in glint.__file__ and e.declare_clauses, glint.__file__; print(glint.__file__, len(e.declare_clauses), 'reminder clauses')"

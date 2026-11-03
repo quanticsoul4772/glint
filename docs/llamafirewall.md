@@ -19,7 +19,7 @@ result = firewall.scan(assistant_message)   # an AssistantMessage carrying tool_
 
 Install `llamafirewall==1.0.3` into a separate virtual environment, never the run folder's `.venv`; it pulls in torch,
 transformers, codeshield and semgrep. Two known problems, found in the 2026-11-03 run:
-- **Run Glint from source (`PYTHONPATH=<repo>/src`), not as an installed package.** An installed copy fails on the first `Enforcer` because it reads `data-public/clauses/reconciled.json` from the source tree.
+- **The run used Glint from source (`PYTHONPATH=<repo>/src`).** An installed copy then failed on the first `Enforcer` because it read `data-public/clauses/reconciled.json` from the source tree. The clause lists now ship inside the package (`src/glint/clauses/`), and CI installs the wheel into a fresh venv and builds an `Enforcer`.
 - **Restore `mcp==2.3.0` after installing llamafirewall.** semgrep pins `mcp` 1.29.0, which Glint's bank server cannot use; the `glint[llamafirewall]` extra has the same conflict.
 
 ## Mapping

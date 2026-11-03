@@ -32,6 +32,9 @@ tau2 = { path = "../vendor/tau2-bench", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/glint"]
+# Hatch ships every file under the package that .gitignore keeps, so the package data the installed code reads is in
+# the wheel: the clause lists (src/glint/clauses, glint.declare.CLAUSE_DIR) and the desk's JSON files. CI's
+# installed-wheel job checks it (a folder named data/ would be dropped: .gitignore ignores data/)
 
 [tool.ruff]
 line-length = 120
