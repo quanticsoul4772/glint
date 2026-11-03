@@ -70,6 +70,7 @@ from glint.assist.banking import (
     waiver_due,
 )
 from glint.assist.tau2_tools import add_plan_tool
+from glint.gates import debit
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
@@ -133,7 +134,7 @@ def _open_items(tools) -> list[str]:
                      f"{REQUESTS_TOOL}(user_id={verified[-1]!r}, requests=[{{action, target_id, customer_words}}]) "
                      "with every account action they asked for; closes, payments and filings are refused until "
                      "recorded, and a closure reason log or card order made without a record is flagged for review")
-    return items
+    return items + debit.answer_items(tools)
 
 
 def _closure_items(tools) -> list[str]:

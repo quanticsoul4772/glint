@@ -11,8 +11,8 @@
 
 - file_debit_card_transaction_dispute_6281: bank_accounts_(general)_031 (the open-dispute limit by checking tier,
   pre-filing requirement 4; the earliest of duplicate charges; card_in_possession on a card closed as lost or stolen;
-  no liability cap of 0) and _032 (provisional credit where every REQUIRED condition holds), and the customer's
-  answers to _031's two closed questions as recorded with record_dispute_answers (`dispute_answers`).
+  no liability cap of 0) and _032 (provisional credit where every REQUIRED condition holds). The customer's answers
+  to _031's two closed questions, recorded with record_dispute_answers, are open items, not a gate (`answer_items`).
 
 Whether a card is lost for certain or only misplaced (freeze first, then decide) is the user's statement, not the
 database's, so no gate here requires a freeze before a close: τ²'s train tasks close without a freeze in 084 and
@@ -431,31 +431,43 @@ def dispute_liability(db, a: dict) -> GateResult:
     return allow("debit.dispute.liability", DISPUTE_SOURCE, {"customer_max_liability_amount": cap})
 
 
-def dispute_answers(toolkit, a: dict) -> GateResult:
-    """The filing's card_in_possession and pin_compromised (_031 arguments 10 and 11, closed questions the agent asks
-    the customer) equal the customer's latest answers for the card, as recorded with record_dispute_answers
-    (`toolkit.glint_dispute_answers`: card id -> the recorded answers; glint.gates.enforce)."""
-    source = DISPUTE_SOURCE + " arguments 10-11 (Glint record)"
-    card_id = a.get("card_id", "")
-    if toolkit.db.debit_cards.data.get(card_id) is None:
-        return _unknown_card("debit.dispute.answers", source, a)
-    answer = getattr(toolkit, "glint_dispute_answers", {}).get(card_id)
-    if answer is None:
-        return deny("debit.dispute.answers.not_recorded", source, "the customer's answers to the two dispute "
-                    "questions are not recorded for this card", f"Ask the customer {QUESTIONS}, call "
-                    f"{DISPUTE_ANSWERS_TOOL}(card_id, user_id, card_in_possession, pin_compromised, customer_words) "
-                    "with their answers, then file with them.", {"card_id": card_id},
-                    consequence="The filing waits only for the two answers; nothing else about the dispute changes.",
-                    facts=[f"card {card_id}: no recorded answers in this conversation"])
-    want = {"card_in_possession": answer["card_in_possession"], "pin_compromised": answer["pin_compromised"]}
-    got = {"card_in_possession": as_flag(a.get("card_in_possession")), "pin_compromised": a.get("pin_compromised")}
-    if got != want:
-        fix = _filed_with(a, card_in_possession=str(want["card_in_possession"]).lower(),
-                          pin_compromised=want["pin_compromised"])
-        return deny("debit.dispute.answers.mismatch", source, "the filing's answers differ from the customer's "
-                    "recorded answers", f"File it with {fix}; if the customer's answer for this transaction is "
-                    f"different, record it with {DISPUTE_ANSWERS_TOOL} first.", {"recorded": want, "given": got},
-                    consequence="Only the two answers change; the rest of the filing stands.",
-                    facts=[f"recorded for {card_id}: {want}", f"given: {got}",
-                           f"customer's words: {str(answer.get('customer_words', ''))[:200]}"])
-    return allow("debit.dispute.answers", source, want)
+def answer_items(tools) -> list[str]:
+    """Open items, not refusals (the owner's decision by parallax on PR 32, 2026-11-03), for _031's two closed
+    questions (arguments 10 and 11) as the customer's answers are recorded with record_dispute_answers
+    (`tools.glint_dispute_answers`: card id -> the latest recorded answers; glint.gates.enforce):
+    - a debit dispute the request record names and that is not filed yet, with no answers recorded for a card on its
+      account: ask the two questions and record the answers first;
+    - a debit dispute filed in this conversation (τ²'s tool stamps `submitted_at`; disputes from earlier conversations
+      carry `filing_date` instead) whose card has no recorded answers, or whose card_in_possession or pin_compromised
+      differs from them.
+    Deterministic: the record and the database are both rebuilt by τ²'s replay."""
+    db, answers, items = tools.db, getattr(tools, "glint_dispute_answers", {}), []
+    filed = {d.get("transaction_id") for d in db.debit_card_disputes.data.values()}
+    record = f"{DISPUTE_ANSWERS_TOOL}(card_id, user_id, card_in_possession, pin_compromised, customer_words)"
+    for r in getattr(tools, "glint_requests", None) or []:
+        tx = str(r.get("target_id") or "")
+        if r.get("action") != "dispute_debit_transaction" or tx in filed:
+            continue
+        account = (db.bank_account_transaction_history.data.get(tx) or {}).get("account_id")
+        cards = [k for k, c in db.debit_cards.data.items() if account and c.get("account_id") == account]
+        if not (any(k in answers for k in cards) if tx else answers):
+            items.append(f"[open] debit dispute {tx or '(requested)'} not filed yet: ask the customer {QUESTIONS}, "
+                         f"then record their answers with {record} and file with them")
+    for d in sorted(db.debit_card_disputes.data.values(), key=lambda d: str(d.get("dispute_id"))):
+        if not d.get("submitted_at"):
+            continue
+        card = d.get("card_id")
+        filed_with = {"card_in_possession": as_flag(d.get("card_in_possession")),
+                      "pin_compromised": d.get("pin_compromised")}
+        answer = answers.get(card)
+        if answer is None:
+            items.append(f"[open] debit dispute {d.get('dispute_id')} on {card} was filed with {filed_with} and no "
+                         f"answers are recorded for the card: confirm them with the customer and record them with "
+                         f"{record}")
+            continue
+        recorded = {"card_in_possession": answer["card_in_possession"], "pin_compromised": answer["pin_compromised"]}
+        if filed_with != recorded:
+            items.append(f"[open] debit dispute {d.get('dispute_id')} on {card} was filed with {filed_with}, which "
+                         f"differs from the customer's recorded answers {recorded}: confirm with the customer which "
+                         "are right")
+    return items
