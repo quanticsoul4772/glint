@@ -23,7 +23,11 @@
   Customer-side entries (a given user tool, the customer running it) are skipped: the server takes no customer calls,
   and no gate reads them.
 
+With --no-request-gate the server runs with the request gate off (research row 6: BankServer request_gate False),
+and no record_requests call is inserted or sent.
+
 Deterministic; no model, no network. Usage: python scripts/bank_replay.py [--recs PATH] [--json OUT]
+[--no-request-gate]
 """
 from __future__ import annotations
 
@@ -86,9 +90,9 @@ def _denies(session, before: int) -> list[dict]:
 
 # ---- V1: gold actions ---------------------------------------------------------------------------------------------
 
-async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> dict:
+async def gold(task_ids: list[str] | None = None, home: Path | None = None, request_gate: bool = True) -> dict:
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        bank = BankServer(home=home or Path(tmp), sid="gold-replay")
+        bank = BankServer(home=home or Path(tmp), sid="gold-replay", request_gate=request_gate)
         refusals, also_rejected, placeholder, placeholder_hashes, mismatches, errors = [], [], [], [], [], []
         writes = allowed = 0
         ids = task_ids or train_task_ids()
@@ -102,7 +106,8 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None) -> d
                 actions = task.evaluation_criteria.actions or [] if task.evaluation_criteria else []
                 users = twin.tools.db.users.data
                 calls = with_address_asks(with_plans([ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments,
-                                                               requestor=a.requestor) for k, a in enumerate(actions)]),
+                                                               requestor=a.requestor) for k, a in enumerate(actions)],
+                                                     request_gate),
                                           lambda u, users=users: (users.get(u) or {}).get("address"))
                 for call in calls:
                     k, action = call.id.removeprefix("gold-"), call
@@ -205,7 +210,7 @@ async def _send(client, name: str, args: dict):
     return await client.call_tool(WRAPPER, {"agent_tool_name": name, "arguments": json.dumps(args)})
 
 
-async def wrong(recs: list[dict], home: Path | None = None) -> dict:
+async def wrong(recs: list[dict], home: Path | None = None, request_gate: bool = True) -> dict:
     """Each recorded run of the EXPECTED tasks, its writes sent in order through the server on a fresh scenario until
     the first deny. That deny must carry the task's expected rule, or a procedure rule the recording supports
     (`skipped_in_recording`, or a write recorded as wrong or extra), as an error result that leaves the database
@@ -213,7 +218,7 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
     gold-labeled wrong writes."""
     stopped, not_stopped = [], []
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        bank = BankServer(home=home or Path(tmp), sid="wrong-replay")
+        bank = BankServer(home=home or Path(tmp), sid="wrong-replay", request_gate=request_gate)
         async with Client(bank.mcp_server()) as client:
             for rec in recs:
                 if rec.get("dom") != "banking_knowledge" or rec["task"] not in EXPECTED:
@@ -222,7 +227,7 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
                 await client.call_tool("load_scenario", {"task_id": rec["task"]})
                 session, row = bank.session(), None
                 plans = plan_arguments([w["args"] for w in rec["writes"] if w["name"] == rules.DISPUTE])
-                requests = run_requests(rec["writes"])
+                requests = run_requests(rec["writes"]) if request_gate else None
                 for i, w in enumerate(rec["writes"]):
                     if w["name"].startswith("give:"):  # the run gave the customer a tool: the card-digits gate reads it
                         await client.call_tool("give_discoverable_user_tool",
@@ -266,7 +271,10 @@ async def wrong(recs: list[dict], home: Path | None = None) -> dict:
 def main(argv: list[str]) -> int:
     logger.remove()
     recs_path = Path(argv[argv.index("--recs") + 1]) if "--recs" in argv else RECS
-    g = anyio.run(gold)
+    request_gate = "--no-request-gate" not in argv
+    if not request_gate:
+        print("request gate OFF (research row 6)")
+    g = anyio.run(gold, None, None, request_gate)
     print(f"gold: {g['tasks']} tasks, {g['gold_writes']} gold writes through MCP, {g['allowed']} allowed, "
           f"{len(g['false_refusals'])} false refusals, {len(g['also_rejected'])} denies τ²'s tool also rejects, "
           f"{len(g['placeholder_gold'])} denies of placeholder gold, "
@@ -282,7 +290,7 @@ def main(argv: list[str]) -> int:
         print(f"  HASH MISMATCH {m['task_id']}")
     for m in g["result_mismatches"]:
         print(f"  RESULT MISMATCH {m['task_id']} {m['tool']}: {m['text'][:160]}")
-    w = anyio.run(wrong, json.loads(recs_path.read_text(encoding="utf-8")))
+    w = anyio.run(wrong, json.loads(recs_path.read_text(encoding="utf-8")), None, request_gate)
     print(f"wrong writes: {len(w['stopped'])} runs stopped by a deny, {w['denied_as_expected']} of them with the "
           f"expected rule (error result, database unchanged); {len(w['not_stopped'])} runs with no deny")
     for r in w["stopped"]:

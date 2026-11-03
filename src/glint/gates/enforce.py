@@ -69,7 +69,7 @@ from glint.assist.banking import (
     waiver_call,
     waiver_due,
 )
-from glint.assist.tau2_tools import add_plan_tool
+from glint.assist.tau2_tools import add_plan_tool, drop_request_tool
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
@@ -95,10 +95,10 @@ GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL)
 CHECK_TOOLS = ("check_card_dispute", "check_verification", VERDICT_TOOL)  # decision tools logged as check.recorded
 
 
-def _open_items(tools) -> list[str]:
+def _open_items(tools, request_gate: bool = True) -> list[str]:
     """The customer's open items as the recorded plans, the increase record and the database show them: disputes
     planned and not filed, cards the customer chose to cancel and replace with no replacement ordered today, increases
-    submitted and not decided. Deterministic."""
+    submitted and not decided, and, with the request gate on, the request record not made yet. Deterministic."""
     db, items = tools.db, []
     for user, plan in sorted(getattr(tools, "glint_plans", {}).items()):
         filed = {r.get("transaction_id") for r in db.transaction_disputes.data.values() if r.get("user_id") == user}
@@ -126,7 +126,7 @@ def _open_items(tools) -> list[str]:
     items += _closure_items(tools)
     verified = [r.get("user_id") for r in db.verification_history.data.values()
                 if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
-    if verified and getattr(tools, "glint_requests", "absent") is None:
+    if request_gate and verified and getattr(tools, "glint_requests", "absent") is None:
         # banking-test-gated (2026-11-02): the request gate refused 17 writes τ² expects before the agent recorded
         # them; this reminder comes before the first account change instead of after a refusal
         items.append(f"[open] the customer's requests are not recorded yet: before any account change, call "
@@ -204,13 +204,18 @@ def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] 
 
 class Enforcer:
     def __init__(self, domain: str, events: EventLog, context: Callable[[], dict] | None = None,
-                 wording: str = "plain"):
+                 wording: str = "plain", request_gate: bool = True):
+        """`request_gate` False is research row 6 (fix-research-2026-11-02), a Glint convention: no banking request
+        gates, no request-record reminder among the open items, and record_requests taken off every attached
+        toolkit. On by default."""
         if wording not in WORDINGS:
             raise ValueError(f"unknown deny wording {wording!r}; one of {WORDINGS}")
         self.domain, self.events, self.context, self.wording = domain, events, context or (dict), wording
-        self.registry = build_registry(domain)
+        self.request_gate = request_gate
+        self.registry = build_registry(domain, request_gate)
         assert_required(self.registry, REQUIRED_GATES[domain], f"gates for {domain}")
-        self.events.emit("gates.manifest", manifest(domain, self.registry) | {"wording": wording})
+        self.events.emit("gates.manifest", manifest(domain, self.registry) | {"wording": wording,
+                                                                                 "request_gate": request_gate})
 
     def write_call(self, env, call: ToolCall) -> tuple[str, dict | None] | None:
         """(write tool, its arguments) when `call` is an assistant write, else None. Arguments are None when a hidden
@@ -448,6 +453,8 @@ class Enforcer:
 
         if self.domain == "banking_knowledge":
             add_plan_tool(env)
+            if not self.request_gate:
+                drop_request_tool(env)
         env.tools.glint_reads, env.tools.glint_plans, env.tools.glint_increases = set(), {}, {}
         env.tools.glint_denied = set()  # (tool, arguments, rule) of every refusal, for the repeat escalation
         env.tools.glint_requests = None  # the latest record_requests list (None: not recorded yet)
@@ -462,7 +469,7 @@ class Enforcer:
             if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in GLINT_RECORDS
                     or reply.error or str(reply.content).startswith("Error")):
                 return reply
-            items = _open_items(env.tools)
+            items = _open_items(env.tools, self.request_gate)
             return reply.model_copy(update={"content": f"{reply.content}\n\n" + "\n".join(items)}) if items else reply
 
         def get_response(message: ToolCall) -> ToolMessage:

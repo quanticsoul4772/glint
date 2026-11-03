@@ -38,7 +38,9 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   and dispute planning, with each deny in PR 86's layout (Reason, Purpose, Fix, Verdict; the facts joined into the
   Reason line, no consequence line).
   Against `banking-plan-gated`'s tools arm it separates the messages from the planning (decision 2026-10-29). Set
-  key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS).
+  key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS). Set key
+  `request_gate` (default true) false turns the banking request gate off (research row 6, fix-research-2026-11-02):
+  no request gates, no request-record reminder, no record_requests tool (glint.gates.Enforcer).
 - `banking-plan-v2-gated`: the tools arm of `banking-plan-gated` only, after the incorrect_amount dispute became a
   planned partial refund of the overcharge with the customer's choice winning and neutral asking (PR 101, PR 102). It is
   compared with `banking-plan-gated`'s arms from the same day (its base arm runs no gates, so these changes cannot
@@ -739,7 +741,7 @@ def _enforcer(cfg: dict, domain: str, data: Path) -> Enforcer | None:
         return None
     return Enforcer(domain, EventLog(data / f"gates-{domain}.sqlite"),
                     context=run_context,
-                    wording=cfg.get("deny_wording", "plain"))
+                    wording=cfg.get("deny_wording", "plain"), request_gate=cfg.get("request_gate", True))
 
 
 def rerun_command(argv: list[str] | None = None) -> str:

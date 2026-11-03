@@ -10,7 +10,10 @@ target is 0 false refusals. Gold never calls Glint's plan_disputes, which the ba
 credit card dispute: the replay inserts the call an agent following the gate's Fix makes (glint.gates.replayplan:
 the task's own gold filings, in gold's order) before the first filing, so the gate judges gold's order and flags. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
 
-Usage: python scripts/gate_replay.py [--log PATH] [--json OUT]
+With --no-request-gate the banking request gate is off (research row 6: glint.gates.Enforcer request_gate False)
+and no record_requests call is inserted.
+
+Usage: python scripts/gate_replay.py [--log PATH] [--json OUT] [--no-request-gate]
 """
 from __future__ import annotations
 
@@ -58,10 +61,10 @@ def _env(domain: str, task):
     return constructor()
 
 
-def replay(domain: str, tasks: list, events: EventLog) -> dict:
+def replay(domain: str, tasks: list, events: EventLog, request_gate: bool = True) -> dict:
     """Replay each task's gold actions; returns counts and the false refusals."""
     current = {"task_id": None}
-    enforcer = Enforcer(domain, events, context=lambda: dict(current))
+    enforcer = Enforcer(domain, events, context=lambda: dict(current), request_gate=request_gate)
     refusals, also_rejected, placeholder, writes, allowed, rules = [], [], [], 0, 0, Counter()
     for task in tasks:
         current["task_id"] = task.id
@@ -73,7 +76,7 @@ def replay(domain: str, tasks: list, events: EventLog) -> dict:
         gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
                 for k, a in enumerate(task.evaluation_criteria.actions or [] if task.evaluation_criteria else [])]
         users = env.tools.db.users.data if domain == "banking_knowledge" else {}
-        calls = (with_address_asks(with_plans(gold), lambda u, users=users: (users.get(u) or {}).get("address"))
+        calls = (with_address_asks(with_plans(gold, request_gate), lambda u, users=users: (users.get(u) or {}).get("address"))
                  if domain == "banking_knowledge" else gold)
         for call in calls:
             k = call.id.removeprefix("gold-")
@@ -124,7 +127,10 @@ def main(argv: list[str]) -> int:
     logger.remove()
     log_path = argv[argv.index("--log") + 1] if "--log" in argv else ":memory:"
     events = EventLog(log_path)
-    reports = [replay(d, tasks_of(d), events) for d in DOMAINS]
+    request_gate = "--no-request-gate" not in argv
+    if not request_gate:
+        print("request gate OFF (research row 6)")
+    reports = [replay(d, tasks_of(d), events, request_gate) for d in DOMAINS]
     events.verify()
     total = sum(len(r["false_refusals"]) for r in reports)
     for r in reports:

@@ -92,7 +92,7 @@ def request_arguments(calls: list[ToolCall]) -> dict | None:
     return {"user_id": user, "requests": items} if items and user else None
 
 
-def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
+def with_plans(calls: list[ToolCall], request_record: bool = True) -> list[ToolCall]:
     """`calls` with a plan_disputes call before each user's first dispute filing (ids `<filing id>-plan`), and the
     dispute-history read before it when none came earlier (ids `<filing id>-history-unlock`, `<filing id>-history`).
     Before each closure of a credit card account whose closure reason was logged earlier in the conversation, the
@@ -101,9 +101,11 @@ def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
     call carries fee_waiver_offered true: a conversation that closes after that reason had the customer decline what
     credit_card_account_logistics_003 step 4 offers (the waiver when due), which record_retention_answer requires.
     Before each debit card dispute filing whose card_in_possession and pin_compromised differ from the latest answers recorded for its card (none yet, at
-    the first), the record_dispute_answers call carrying the filing's own answers (id `<filing id>-answers`)."""
+    the first), the record_dispute_answers call carrying the filing's own answers (id `<filing id>-answers`).
+    With `request_record` (the request gate on), the record_requests call the conversation's own writes imply, before
+    the first write it covers (id `<write id>-requests`); off (research row 6), none: the tool is not offered."""
     plans = plan_arguments([f for c in calls if (f := filing(c))])
-    requests = request_arguments(calls)
+    requests = request_arguments(calls) if request_record else None
     out, planned, read, logged, answered, recorded = [], set(), False, set(), set(), False
     fee_reason = set()  # accounts whose logged closure reason is annual_fee
     answers: dict[str, tuple] = {}
