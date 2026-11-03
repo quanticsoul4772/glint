@@ -11,7 +11,7 @@
 
 ![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](docs/demo.gif)
 
-**[Watch (2:43)](https://youtu.be/UGEJxiTa5-c)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
+**[Watch (2:43)](https://youtu.be/jP8PEzjAamE)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
 
 Glint is write authorization for AI agents that touch money. Every account change the agent attempts goes through a gate before it runs; where the bank's written policy has a rule, the gate applies it as code to the live account records. An allowed write runs. A refused write does not run, and the agent gets the rule, the facts and the fix. Every decision lands in a hash-chained, tamper-evident log. Built on Meta's open-weight Muse Glimmer 30B, Muse Spark and Muse Code.
 
@@ -21,7 +21,7 @@ Glint is write authorization for AI agents that touch money. Every account chang
 - **Agents are getting payment access.** Visa (Intelligent Commerce, April 30, 2025) and Mastercard (Agent Pay, April 29, 2025) launched programs that let AI agents pay ([Retail TouchPoints](https://www.retailtouchpoints.com/topics/payments/visa-mastercard-paypal-dive-into-agentic-era-with-tools-that-help-consumers-use-ai-to-buy)). 64% of larger US banks were testing or deploying agentic AI, against 38% of smaller ones (SoundHound-commissioned Arizent/American Banker survey, n=201, [Nasdaq/GlobeNewswire](https://www.nasdaq.com/press-release/research-finds-two-three-us-banking-executives-believe-agentic-ai-will-change-how)).
 - **Risk controls decide which projects survive.** Gartner predicts over 40% of agentic AI projects will be canceled by the end of 2027, citing costs, unclear value or "inadequate risk controls" ([Gartner](https://www.gartner.com/en/newsroom/press-releases/2025-06-25-gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-canceled-by-end-of-2027)).
 - **Automated account actions are already an enforcement target (a non-AI parallel).** The CFPB's 2022 order against Wells Fargo, more than $2 billion in redress plus a $1.7 billion penalty (over $3.7 billion in all), cited account freezes in "more than 1 million instances" driven by "a faulty automated filter" ([CFPB](https://www.consumerfinance.gov/enforcement/actions/wells-fargo-bank-na-2022/)).
-- **Wrong account actions are expensive at scale.** Chargebacks: 261 million worth $33.8 billion in 2025 (Mastercard and Datos Insights estimate, [Mastercard](https://b2b.mastercard.com/news-and-insights/blog/what-s-the-true-cost-of-a-chargeback-in-2025)).
+- **Wrong account actions are expensive at scale.** Chargebacks: 261 million worth $33.8 billion in 2025 (Mastercard and Datos Insights estimate, [Mastercard](https://www.mastercard.com/content/dam/mccom/shared/news-and-trends/insights/2025/2025-global-chargebacks-outlook/pdf/2025-state-of-chargebacks-report.pdf)).
 
 ## What makes it different
 1. **Deterministic enforcement of written business policy, before the write.**
