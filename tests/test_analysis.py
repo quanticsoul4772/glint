@@ -328,3 +328,9 @@ def test_the_gated_test_split_set_runs_both_arms_on_the_untouched_split_with_gat
     assert cfg["gates"] and cfg["requires_modal"] and cfg["trials"] == 2 and "arms" not in cfg
     assert cfg["tasks"]() == tools_ab.banking_test_tasks() and len(cfg["tasks"]()["banking_knowledge"]) == 20
     assert cfg["data"] != tools_ab.SETS["banking-test"]["data"]  # never the ungated split run's folder
+    # the gated arm again after PRs 29-44 (back-on-track step 4): tools arm only, its own folder, smaller caps
+    v2 = tools_ab.SETS["banking-test-gated-v2"]
+    assert v2["gates"] and v2["requires_modal"] and v2["trials"] == 2 and v2["arms"] == ("tools",)
+    assert v2["tasks"]() == tools_ab.banking_test_tasks()
+    assert v2["data"] not in (cfg["data"], tools_ab.SETS["banking-test"]["data"])
+    assert (v2["gpu_usd"], v2["glimmer_usd"], v2["meta_usd"]) == (6.0, 1.5, 0.5)
