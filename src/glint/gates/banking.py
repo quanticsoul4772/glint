@@ -6,7 +6,8 @@
 - update_transaction_rewards_3847: only for a transaction whose cash back dispute is resolved and approved
   (credit_cards_(general)_004); otherwise the user files the dispute with their own tool.
 - apply_checking_account_credit_5829: once per account per conversation, a 14-day cooldown, and a fee refund no
-  larger than the fees on the account (bank_accounts_(general)_017).
+  larger than the fees on the account (bank_accounts_(general)_017); the net-correction amount where the account's fee
+  schedule is compiled (glint.gates.fees: flagged, not refused, by default).
 - Credit card closure (credit_card_account_logistics_002/_003): the eligibility checks before a reason is logged or
   the account is closed; a logged reason before a closure, a fee waiver or a retention credit; the retention credit
   amount by card tier.
@@ -25,6 +26,7 @@ from glint.assist.banking import (
     _tier,
 )
 from glint.gates import apy
+from glint.gates import fees as fee_rules
 from glint.gates.bankdb import NOW_TEXT, as_date, days_since, money, verified_today, within_year
 from glint.gates.core import GateResult, allow, deny
 
@@ -130,7 +132,9 @@ def checking_credit(db, a: dict) -> GateResult:
                         consequence="The account takes one credit per conversation, so the single credit must "
                         "carry the full corrected amount.",
                         facts=[f"refund asked: ${amount:,.2f}", f"fees charged to {acc_id}: ${fees:,.2f}"])
-    return allow("banking.checking_credit", source, details)
+    # _017's net-correction amount, where the account's fee schedule is compiled (glint.gates.fees; flagged, not
+    # refused, by default)
+    return fee_rules.credit_amount(db, a) or allow("banking.checking_credit", source, details)
 
 
 def _interest_basis(db, acc_id: str) -> tuple[float, float, list[dict]] | None:
