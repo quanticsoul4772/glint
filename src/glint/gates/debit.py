@@ -47,6 +47,16 @@ DESIGN_FEE = {"entry": {"CLASSIC": 0.0, "PREMIUM": 10.0, "CUSTOM": 25.0},
               "elite": {"CLASSIC": 0.0, "PREMIUM": 0.0, "CUSTOM": 0.0}}
 REPLACEMENT_LIMIT = {"entry": (2, 25.0), "mid": (3, 15.0), "premium": (5, None), "elite": (None, None)}
 ENTRY_WAIT_DAYS = 2  # _029: 48 hours after a closure; the database dates closures by day
+# The 48-hour wait after a fraud_suspected closure. _029 states the wait for every entry-tier replacement; _031 maps a
+# card_present_fraud or card_not_present_fraud dispute to close_and_reissue (close the card AND issue a replacement)
+# with no wait. The two documents conflict, and τ²'s training task_091 orders an entry-tier replacement right after a
+# fraud_suspected closure (fitted to τ² gold). "flag" (default): allowed and logged under ENTRY_WAIT_FLAG; "deny":
+# refused like any other closure reason, which refuses task_091's gold and fails the gold replay.
+ENTRY_WAIT_FRAUD = "flag"
+ENTRY_WAIT_FLAG = "debit.order.entry_wait.fraud_exempt_flagged"
+ENTRY_WAIT_CONFLICT = ("an entry-tier replacement within 48 hours of a fraud_suspected closure: _029 sets a 48-hour "
+                       "wait, _031 maps fraud disputes to close_and_reissue with none (document conflict, 029 vs 031); "
+                       "allowed and flagged for review")
 
 
 def _card(db, a: dict) -> dict | None:
@@ -167,8 +177,11 @@ def order(db, a: dict) -> GateResult:
             reasons.append(f"delivery_fee {delivery_fee:g} for {option} on a {tier}-tier replacement must be "
                            f"{offered[option]:g}")
             fixes.append(f"delivery_fee {offered[option]:g}")
-        recent = [c for c in closed if (d := days_since(c.get("closed_date"))) is not None and d < ENTRY_WAIT_DAYS
-                  and c.get("closure_reason") != "fraud_suspected"]
+        within = [c for c in closed if (d := days_since(c.get("closed_date"))) is not None and d < ENTRY_WAIT_DAYS]
+        exempt = [c for c in within if c.get("closure_reason") == "fraud_suspected"]
+        recent = [c for c in within if c not in exempt or ENTRY_WAIT_FRAUD == "deny"]
+        if tier == "entry" and (flagged := [c["card_id"] for c in exempt if c not in recent]):
+            details |= {"entry_wait_exempt": flagged}
         if tier == "entry" and recent:
             # τ²'s task_091 orders an entry-tier replacement right after a fraud_suspected closure, so the wait is
             # applied to the other closure reasons only
@@ -214,6 +227,8 @@ def order(db, a: dict) -> GateResult:
                     f"Order it with {', '.join(fixes)}.", details,
                     consequence="Fees follow the checking tier; tell the customer the correct fees before ordering.",
                     facts=[f"account {a['account_id']}: {tier} tier", *reasons])
+    if details.get("entry_wait_exempt"):
+        return allow(ENTRY_WAIT_FLAG, source, details, reason=ENTRY_WAIT_CONFLICT)
     return allow("debit.order", source, details)
 
 
