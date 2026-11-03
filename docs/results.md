@@ -2,8 +2,49 @@
 
 All runs are on τ²-bench v1.0.1 with Muse Glimmer 30B at medium reasoning; both arms of a comparison run with the same seeds on the same backend. Results are reported **by task**, because runs of one task are not independent. Tuned and untuned tasks are reported apart and never pooled. The README carries the headline; this page carries the detail. The Bank Desk's Results tab shows the same numbers per task.
 
+## Banking test split, gated arm after the fix research (2026-11-03)
+`banking-test-v2-gated`: τ²'s 20 banking test tasks, k=2, 40 runs, the gated tools arm only, Glimmer on Modal, on main at 7bf75cb (PRs #29-#45; every fix on by default since #44), run 2026-11-03. Compared with `banking-test-gated` (2026-11-02, both arms, commit 72143cd, below): a cross-day comparison, since the alone arm was not rerun.
+
+**Tuned and in-sample.** After the 2026-11-02 run every conversation of it was read, and the rules of PRs #29-#44 were designed from it (the project's rule-change log, in the research record outside this repo, lists each change, its evidence and the tasks it tuned). Nothing here is a held-out result, and no held-out banking test result is possible from here on: the split has been run three times (2026-10-28 ungated, 2026-11-02, 2026-11-03).
+
+| Task | Alone 11-02 | Gated 11-02 | Gated 11-03 |
+|---|---|---|---|
+| task_004 | 0 | 0 | 0 |
+| task_014 | 2 | 1 | 2 |
+| task_015 | 0 | 0 | 0 |
+| task_020 | 0 | 0 | 0 |
+| task_022 | 0 | 0 | 0 |
+| task_024 | 0 | 0 | 0 |
+| task_029 | 0 | 0 | 0 |
+| task_036 | 2 | 2 | 2 |
+| task_043 | 0 | 1 | 2 |
+| task_047 | 1 | 1 | 1 |
+| task_060 | 0 | 0 | 0 |
+| task_074 | 0 | 0 | 0 |
+| task_077 | 0 | 0 | 0 |
+| task_078 | 0 | 1 | 1 |
+| task_079 | 0 | 0 | 1 |
+| task_080 | 0 | 0 | 0 |
+| task_082 | 0 | 0 | 0 |
+| task_083 | 0 | 0 | 0 |
+| task_099 | 0 | 0 | 0 |
+| task_102 | 2 | 1 | 2 |
+| **Runs passed** | **7/40** | **7/40** | **11/40** |
+
+- **By task, sign test, two-sided:** against the 2026-11-02 gated run, 4 better (014, 043, 079, 102), 0 worse, 16 the same, p = 0.125; against alone, 3 better (043, 078, 079), 0 worse, 17 the same, p = 0.25. Neither is distinguishable from chance with 20 tasks; the gain may be chance.
+- **Endings:** alone 11-02: 33 customer stop, 7 context overflow (counted as failures); gated 11-02: 26 customer stop, 14 τ² step limit; gated 11-03: 34 customer stop, 6 step limit.
+- **Context overflows do not drive the gap:** alone's 7 fell on tasks 022, 024, 029, 077, 080 (both runs) and 082, and both gated arms pass 0 runs on all six.
+- **task_083** cannot be passed by any agent (gold omits a required field). Out of 38 runs: alone 7/38, gated 11-02 7/38, gated 11-03 11/38.
+- **Not re-graded** with τ²'s offline evaluator (the 2026-11-02 re-grade differed from the recorded grade on 4 runs, below). Refusals by rule, false refusals, wrong values and the requested-vs-done grade are not yet analyzed.
+- **Spend:** $2.569 GPU (3,145 s, metered), $0.133 Meta (Muse Spark as the customer). Caps: GPU $6, Glimmer $1.5, Meta $0.5.
+
+### What changed since the 2026-11-02 run
+- **The request gate (PR #29):** reversible writes (reason logs, orders) are allowed and flagged when no request is recorded; closes, payments and filings are still refused. A refusal carries the filled-in `record_requests` call. A debit card close request covers the replacement order. The first two are Glint conventions; the close-covers-order mapping is fitted to the test split (tasks 077, 079, 080). All three came from the split's 20 request-gate refusals.
+- **Every fix on by default since PR #44,** each with an off switch (the 48-hour entry-tier wait after a closure for suspected fraud, the checking-credit amount deny, constrained values, the uncovered-write reminder, the declare reminder, the step-limit warning, the search diagnosis, the optional stages, which run nothing until a model is configured).
+- **The one known refusal of training gold:** the gold replay (in-sample) refuses task_091's debit card order under that 48-hour wait (doc 029 sets the wait; doc 031 conflicts); 286 of the 289 gold writes are allowed, the other 2 refusals being task_005's placeholder verification. It is reported, not exempted.
+
 ## Banking test split, every write gated (2026-11-02)
-`banking-test-gated`: τ²'s 20 banking test tasks, k=2, Glimmer alone (ungated) against Glimmer with the gates and decision tools, both on Modal, same seeds, on the code after PRs 20-25 (verify once and the other policy conditions, the retention answer, the request record, attestation and repeat escalation, the savings interest rules). The split was read once ungated on 2026-10-28, and some debit rules were written from its failures then; this is its one gated read (decision 2026-11-02), reversing the 2026-10-28 decision that a gated run there would be circular. Spend: $5.58 GPU (metered upper bound), $0.27 Meta. Before it, `banking-smoke-gated` (6 design tasks, k=1, gated arm only, $0.84 GPU) checked that Glimmer calls the new recording tools: it did in all 6 runs, and it found that each record erased the previous one (fixed in PR 25).
+`banking-test-gated`: τ²'s 20 banking test tasks, k=2, Glimmer alone (ungated) against Glimmer with the gates and decision tools, both on Modal, same seeds, on the code after PRs 20-25 (verify once and the other policy conditions, the retention answer, the request record, attestation and repeat escalation, the savings interest rules). The split was read once ungated on 2026-10-28, and some debit rules were written from its failures then; this was its first gated read (decision 2026-11-02; corrected: this said its one gated read, but its conversations were then read and became design data for PRs #29-#44, and a second gated run followed on 2026-11-03, above), reversing the 2026-10-28 decision that a gated run there would be circular. Spend: $5.58 GPU (metered upper bound), $0.27 Meta. Before it, `banking-smoke-gated` (6 design tasks, k=1, gated arm only, $0.84 GPU) checked that Glimmer calls the new recording tools: it did in all 6 runs, and it found that each record erased the previous one (fixed in PR 25).
 
 | | Glimmer alone | Glint |
 |---|---|---|
@@ -16,6 +57,11 @@ All runs are on τ²-bench v1.0.1 with Muse Glimmer 30B at medium reasoning; bot
 - 45 refusals: the request record 20 (17 refusals of 13 writes τ² expects, false against gold until the agent recorded the request; 12 of those writes then ran matching τ²'s, 1 ended at the step limit), procedure lookups 10 (all followed), frozen card before a closure 5, address confirmation 4, entry-tier order wait 3 (another card), verify once 1 (a repeated verification; the first was already logged), checking credit once 1, pending transactions 1. Judged refusals 35, of them 18 false against gold (17 request record, 1 verify once).
 - The 14 step-limit runs: 10 are knowledge-base search loops with no refusal (the decision-tools setup, as before); 4 (077, 080 twice, 083) include refusals from several gates, the request record among them.
 - Reading: extra writes fell from 13 to 4; the request gate blocked 1 of them and the agent re-recorded others, so this may be chance (runs with an extra write 9/40 vs 3/40, Fisher p = 0.11 two-sided). Wrong values did not change. The pass rate did not change. Checked against the run data by the claims reviewer on 2026-11-02.
+- **Disclosures from reading every conversation of this run (fix research, 2026-11-02 to 11-03):**
+  - **18 refusals false against gold:** 17 by the request gate and 1 by verify once, which is not a policy rule either. By blinded policy labels, the request gate's 20 refusals were 16 policy-wrong and 4 ambiguous.
+  - **τ²'s offline re-grade** of the saved runs gives 8/40 gated and 10/40 alone, against 7/40 each as recorded (4 failed runs re-grade as passes: alone 043 t0, 099 t0, 099 t1; gated 099 t1). The cause is unknown. By run, Fisher p ≈ 0.79; by task, gated 1 better, 3 worse, sign test p = 0.63 (both two-sided).
+  - **task_083 cannot be passed by any agent:** gold omits a required field, and arguments are compared as exact strings. Out of 38 runs the rates are 7/38 each.
+  - **12 of the gated arm's 33 first errors were omissions** write gates cannot see: 6 missing gold writes and 6 non-write actions (a transfer, a referral link).
 
 ## Live gate decisions across the four gated banking sets
 An evaluation of every live gate decision in the four gated banking sets (v9 design data, `banking-unseen-gated` analyzed from its lean copy, `banking-unseen-v10-gated`, `banking-pressure-gated`), made 2026-11-01 from the recorded runs and gate logs and recounted 2026-11-02 (the scripts and notes are in the project's research record, outside this repo, so these numbers are recomputable from the run data but not from the repository alone). Two regimes: the 12 tasks the gates were developed on (v9), and the 59 tasks no gate rule came from (the unseen set, v10 and the pressure set; v10 and the pressure set are design data for the search fix, not for the gates). The gate log holds 978 write decisions (318 + 660), 14 more than the 964 write calls in the runs τ² saved as results (11 calls in 7 unseen-set runs not saved as results, and 3 log records whose call was not saved); the 113 refusals are the table's 109 denied write calls plus 4 refused transfers to a human agent, which are not write calls.
@@ -113,16 +159,16 @@ Tuned tasks are those whose runs or correct answers shaped the gates, the plan o
   - 081 trial 0 ended on τ²'s error limit after 10 gate refusals, 2 of them address asks; 081 trials 2 and 3 ended on τ²'s step limit.
   - The address confirmation (new in v9) refused 14 times; the agent followed its fix 9 times, and 3 of the runs it refused in failed. The 4 refusals of transfers to a human agent were all in failed runs.
   - 2 runs overflowed the context (051, 081) and are counted as failures.
-  - Replaying τ²'s expected actions for all 77 banking training tasks through the gates: 289 expected writes, 0 refusals false against the policy text and 2 against τ²'s gold (both task_005's, whose expected actions change the email of a user verified with placeholder data; the same case is the one false live refusal in the four-set evaluation above), and the database matches the ungated replay, with the plan and ask-once steps an agent following the gates adds.
+  - Replaying τ²'s expected actions for all 77 banking training tasks through the gates (in-sample): 289 expected writes, 0 refusals false against the policy text and 2 against τ²'s gold (both task_005's, whose expected actions change the email of a user verified with placeholder data; the same case is the one false live refusal in the four-set evaluation above), and the database matches the ungated replay, with the plan and ask-once steps an agent following the gates adds.
 - **Later code:** PR 148 and PR 149 changed refusal wording and which requests count as a credit limit increase after v9 ran; none of their cases occurred in v9's runs.
 - **Scoring checked:** re-scoring every gated arm with τ²'s own evaluator, offline and with the same read log, gives the live result for every run (checked through v5).
 
-## Banking test split: no gain (read once, Oct 28)
+## Banking test split: no gain (first read, Oct 28)
 τ²'s untouched banking test split: all 20 tasks, k=4, both arms on Modal. The tools arm had the decision tools without gates. The run's 12 infrastructure errors were rerun with their own seeds, on a later commit (2e9aa21; the main run was 466ca72).
 - 10/80 without the tools vs 10/80 with. By task: 1 improved (047: 0/4 → 1/4), 1 worse (036: 4/4 → 3/4), 18 tied; 15 tasks fail every run in both arms.
 - Only task_080 has a dispute or credit-limit step, and a decision tool was called in 1 of the 80 runs (036, trial 2). The split shows the tools neither helped nor hurt tasks they were not built for. It does not measure the tools on their own kind of task.
 - Context overflows: 16 runs alone, 12 with the tools; they count as failures.
-- There is no gated run on this split (decision 2026-10-28): the phase-2 debit rules were motivated by its failures, so a gated run there would be circular.
+- The 2026-10-28 decision was to have no gated run on this split, because the phase-2 debit rules were motivated by its failures. It was reversed on 2026-11-02: the split has gated runs on 2026-11-02 and 2026-11-03 (above), and it is design data for the rules of PRs #29-#44 (corrected: this said there is no gated run on this split).
 
 ## Superseded: banking on earlier tool code
 Before the 7789817 verdict fixes; kept for the record, because the Bank Desk's replay pairs come from these runs. Results moved a lot between runs at this k.
