@@ -276,16 +276,23 @@ class Enforcer:
             return None
         return name, args
 
-    def check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None) -> GateResult:
+    def check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None,
+              record: bool = True) -> GateResult:
         """Run every gate on the write; the first deny wins. Each gate's decision is logged as gate.fired. A gate with
         `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`. The returned allow carries every
-        passing gate's note, which get_response appends to the tool's reply."""
+        passing gate's note, which get_response appends to the tool's reply. `record` False logs no gate.fired and no
+        write.attested event: a check that does not run the write (the LlamaFirewall scanner,
+        glint.integrations.llamafirewall_scanner), whose allowed call is checked, logged and attested again when it
+        runs through the wrapper (defect 6, 2026-11-03: it was attested twice)."""
+        def log_(*event) -> bool:
+            return self._log(*event) if record else True
+
         if args is None:
             result = deny("unparsed_arguments", "glint.gates.enforce", "the hidden tool's arguments could not be "
                           "read, so no check could judge the write", "Pass `arguments` as a JSON object string.",
                           consequence="The tool was not called. Retrying with readable arguments is enough; the rest "
                           "of the request is not affected.", facts=["`arguments` is not a JSON object"])
-            self._log(tool, args, result, 0.0, replay, "unparsed")
+            log_(tool, args, result, 0.0, replay, "unparsed")
             return result
         final, passed, flagged, uncoded, notes, extra = None, [], [], [], [], []
         stages = self.stages if toolkit is not None else None
@@ -298,7 +305,7 @@ class Enforcer:
                                   consequence=CANNOT_DECIDE, facts=["toolkit: none"]), 0.0
             else:
                 result, ms = run_gate(gate, toolkit if gate.toolkit else db, args, wait=replay)
-            if not self._log(tool, args, result, ms, replay, gate.name):
+            if not log_(tool, args, result, ms, replay, gate.name):
                 result = deny("audit_failed", gate.name, f"the check {gate.name!r} ran but its decision could not "
                               "be logged, and no write runs without a logged decision", "Check the gate log file.",
                               consequence=CANNOT_DECIDE, facts=["the gate.fired event was not written"])
@@ -321,10 +328,11 @@ class Enforcer:
         if stages:
             refusal, classes = stages.review(toolkit, tool, args, replay)
             if refusal is not None:
-                self._log(tool, args, refusal, 0.0, replay, f"stage_{refusal.rule_id}")
+                log_(tool, args, refusal, 0.0, replay, f"stage_{refusal.rule_id}")
                 return refusal
             extra += classes
-        self._attest(tool, passed, replay, flagged, uncoded, extra)
+        if record:
+            self._attest(tool, passed, replay, flagged, uncoded, extra)
         final = final or allow("stage.asked_confirmed", "glint.gates.stages", {"tool": tool})
         return replace(final, note="\n\n".join(notes))
 

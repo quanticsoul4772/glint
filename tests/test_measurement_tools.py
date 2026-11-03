@@ -3,6 +3,8 @@ glint.gates.summary.held_then_allowed), the offline requested-vs-done grader (ro
 scripts/requested_done.py) and the read-only measures (N4, N5, N9, N12, glint.measures). Runs are fixture
 simulations in τ²'s saved format; gate logs are temporary EventLogs."""
 import json
+from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 import requested_done
@@ -12,6 +14,15 @@ from glint.gates import EventLog, GateResult, summary
 
 WRAPPER = "call_discoverable_agent_tool"
 DENY = GateResult("deny", "r", "p", "f", "banking.request.no_record", "s").message()
+
+
+def bank_db(cards: dict | None = None, reasons: dict | None = None) -> SimpleNamespace:
+    """The two tables the grader reads from a task's initial database: debit cards and closure reasons."""
+    return SimpleNamespace(debit_cards=SimpleNamespace(data=cards or {}),
+                           credit_card_closure_reasons=SimpleNamespace(data=reasons or {}))
+
+
+DB = bank_db()
 
 
 def hidden(tool: str, **args) -> dict:
@@ -93,7 +104,7 @@ def test_requested_done_and_extra_writes_against_the_record():
               turn(hidden("close_debit_card_4721", card_id="c1")),
               turn(hidden("pay_credit_card_from_checking_9182", credit_card_account_id="cc1")),  # nobody asked
               turn(hidden("order_debit_card_5739", account_id="a1"), DENY, error=True))  # refused: not done
-    g = grade.grade(run)
+    g = grade.grade(run, DB)
     assert not g["no_record"] and g["done"] == 2
     assert [r["action"] for r in g["requested_not_done"]] == ["order_debit_card"]
     assert [w["tool"] for w in g["done_not_requested"]] == ["pay_credit_card_from_checking_9182"]
@@ -103,7 +114,7 @@ def test_a_run_without_a_record_lists_its_request_tool_writes_as_unrecorded():
     run = sim(turn(plain("record_requests"), json.dumps({"recorded": False, "error": "x"})),
               turn(plain("record_requests"), "not json"),
               turn(hidden("close_debit_card_4721", card_id="c1")), turn(hidden("log_verification", user_id="u1")))
-    g = grade.grade(run)
+    g = grade.grade(run, DB)
     assert g["no_record"] and [w["tool"] for w in g["unrecorded"]] == ["close_debit_card_4721"]
 
 
@@ -115,21 +126,21 @@ def test_card_closure_needs_the_reason_and_the_closure_unless_the_offer_was_acce
     run = sim(req, turn(hidden("log_credit_card_closure_reason_4521", credit_card_account_id="cc1")), accept,
               turn(hidden("log_credit_card_closure_reason_4521", credit_card_account_id="cc2")),
               turn(hidden("update_transaction_rewards_3847", transaction_id="t9")))  # untargeted request covers it
-    g = grade.grade(run)
+    g = grade.grade(run, DB)
     assert [(r["target_id"], r["tool"]) for r in g["requested_not_done"]] == [("cc1", "close_credit_card_account_7834")]
     assert g["required_not_done"] == [{"rule": "retention offer accepted and not applied "
                                        "(credit_card_account_logistics_003 step 5)", "target_id": "cc2"}]
     applied = sim(*[req, accept, turn(hidden("apply_statement_credit_8472", credit_card_account_id="cc2"))])
-    assert grade.grade(applied)["required_not_done"] == []
+    assert grade.grade(applied, DB)["required_not_done"] == []
 
 
 def test_planned_disputes_must_be_filed():
     plan = json.dumps({"user_id": "u1", "order": [{"transaction_id": "t1"}, {"transaction_id": "t2"}, "junk"]})
     run = sim(turn(plain("plan_disputes"), plan), turn(plain("plan_disputes"), "[1]"),
               turn(hidden("file_credit_card_transaction_dispute_4829", transaction_id="t1")))
-    g = grade.grade(run)
+    g = grade.grade(run, DB)
     assert [r["target_id"] for r in g["required_not_done"]] == ["t2"]
-    t = grade.totals([g, grade.grade(sim())])
+    t = grade.totals([g, grade.grade(sim(), DB)])
     assert t["runs"] == 2 and t["required_not_done"] == 1 and t["runs_required_not_done"] == 1
     assert t["runs_with_record"] == 0
 
@@ -140,13 +151,58 @@ def test_the_script_prints_each_arm_and_its_findings(tmp_path, capsys):
     run = sim(turn(hidden("close_debit_card_4721", card_id="c1")))
     (folder / "tools-banking_knowledge.json").write_text(json.dumps({"simulations": [run, sim(task="task_2")]}),
                                                          encoding="utf-8")
-    assert requested_done.main([str(folder)]) == 0
+    asked = []
+
+    def db_of(task_id: str):
+        asked.append(task_id)
+        return DB
+
+    assert requested_done.main([str(folder)], db_of) == 0
     out = capsys.readouterr().out
     assert "'runs': 2" in out and "task_1 t0: unrecorded 1: close_debit_card_4721" in out
-    assert requested_done.main([str(folder), "--quiet", "--domain", "banking_knowledge"]) == 0
+    assert asked == ["task_1", "task_2"]  # each run is graded with its own task's initial database
+    assert requested_done.main([str(folder), "--quiet", "--domain", "banking_knowledge"], db_of) == 0
     assert "task_1 t0" not in capsys.readouterr().out
     assert requested_done.main([]) == 2
     assert requested_done.main([str(tmp_path)]) == 1
+
+
+def test_a_close_debit_card_request_covers_the_order_on_the_closed_cards_account():
+    """Defect 1 (2026-11-03): the grader ignored REQUEST_ALSO_COVERS and counted the replacement order as extra.
+    It now applies the request gate's own test (glint.gates.banking._covers)."""
+    db = bank_db(cards={"c1": {"account_id": "a1"}})
+    order = turn(hidden("order_debit_card_5739", account_id="a1"))
+    run = sim(turn(plain("record_requests"), recorded(("close_debit_card", "c1"))),
+              turn(hidden("close_debit_card_4721", card_id="c1")), order)
+    g = grade.grade(run, db)
+    assert g["done_not_requested"] == [] and g["requested_not_done"] == []
+    other = sim(turn(plain("record_requests"), recorded(("close_debit_card", "c1"))),
+                turn(hidden("order_debit_card_5739", account_id="a2")))  # another account: not covered
+    assert [w["args"] for w in grade.grade(other, db)["done_not_requested"]] == [{"account_id": "a2"}]
+    any_card = sim(turn(plain("record_requests"), recorded(("close_debit_card", ""))), order)
+    assert grade.grade(any_card, db)["done_not_requested"] == []  # an untargeted close covers any order
+    unknown = sim(turn(plain("record_requests"), recorded(("close_debit_card", "c9"))), order)
+    assert len(grade.grade(unknown, db)["done_not_requested"]) == 1  # a card the database does not hold
+
+
+def test_no_closure_reason_log_is_due_when_a_reason_is_already_on_record():
+    """Defect 4 (2026-11-03): credit_card_account_logistics_003 step 2 skips the reason log when a reason is on record
+    within the past year; the grader required it anyway."""
+    from glint.assist.banking import TODAY
+    req = turn(plain("record_requests"), recorded(("close_credit_card", "cc1")))
+    close = turn(hidden("close_credit_card_account_7834", credit_card_account_id="cc1"))
+    refused = GateResult("deny", "r", "p", "f", "banking.closure_reason.already_on_record", "s").message()
+    log = turn(hidden("log_credit_card_closure_reason_4521", credit_card_account_id="cc1"), refused, error=True)
+    assert grade.grade(sim(req, log, close), DB)["requested_not_done"] == []  # the run's log was refused as on record
+    recent, old = (TODAY - timedelta(days=30)).strftime("%m/%d/%Y"), (TODAY - timedelta(days=400)).isoformat()
+    held = bank_db(reasons={"r1": {"credit_card_account_id": "cc1", "logged_at": recent}})
+    assert grade.grade(sim(req, close), held)["requested_not_done"] == []  # the initial database holds a reason
+    for db in (DB, bank_db(reasons={"r1": {"credit_card_account_id": "cc1", "logged_at": old}}),
+               bank_db(reasons={"r1": {"credit_card_account_id": "cc2", "logged_at": recent}})):
+        missing = grade.grade(sim(req, close), db)["requested_not_done"]
+        assert [r["tool"] for r in missing] == ["log_credit_card_closure_reason_4521"]
+    other = turn(hidden("log_credit_card_closure_reason_4521", credit_card_account_id="cc2"), refused, error=True)
+    assert len(grade.grade(sim(req, other, close), DB)["requested_not_done"]) == 1  # refused on another card
 
 
 # ---- N4, N5, N9, N12 ----

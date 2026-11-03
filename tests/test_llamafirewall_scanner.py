@@ -33,7 +33,8 @@ class FakeEnforcer:
     def write_call(self, env, call: ToolCall):
         return (call.name, call.arguments) if call.name.startswith("write_") else None
 
-    def check(self, tool, args, db, replay=False, toolkit=None):
+    def check(self, tool, args, db, replay=False, toolkit=None, record=True):
+        assert record is False  # a scan never logs or attests (defect 6)
         self.checked.append((tool, args, db, replay, toolkit))
         return self.results.get(tool, allow("rule_ok", "doc_ok"))
 
@@ -191,13 +192,20 @@ def test_real_enforcer_blocks_a_write_before_verification_and_changes_nothing():
     _call(env, "unlock_discoverable_agent_tool", agent_tool_name="freeze_debit_card_3892")
     freeze = {"id": "f1", "function": {"name": "call_discoverable_agent_tool", "arguments": json.dumps(
         {"agent_tool_name": "freeze_debit_card_3892", "arguments": json.dumps({"card_id": "dbc_tm92c4d7e8_blue"})})}}
+    fired = len(events.events("gate.fired"))
     verdict = lfs.judge_tool_calls(enforcer, env, [freeze])
     assert verdict.decision == lfs.BLOCK and "has not been verified" in verdict.reason
     assert env.tools.db.debit_cards.data["dbc_tm92c4d7e8_blue"]["status"] == status  # nothing ran
-    assert events.events("gate.fired")[-1]["payload"]["decision"] == "deny"
+    assert len(events.events("gate.fired")) == fired  # a scan logs no gate.fired (defect 6)
     read = {"name": "get_user_information_by_id", "arguments": {"user_id": "x"}}
     assert lfs.judge_tool_calls(enforcer, env, [read]).decision == lfs.ALLOW
     _play(env, task, "freeze_debit_card_3892")  # gold up to the freeze: the user is verified now
+    fired, attested = len(events.events("gate.fired")), len(events.events("write.attested"))
     assert lfs.judge_tool_calls(enforcer, env, [freeze]).decision == lfs.ALLOW
     assert env.tools.db.debit_cards.data["dbc_tm92c4d7e8_blue"]["status"] == status  # a scan never runs the write
+    # an allowed scan neither logs nor attests: the write is attested once, when it runs through the wrapper
+    assert (len(events.events("gate.fired")), len(events.events("write.attested"))) == (fired, attested)
+    reply = env.get_response(ToolCall(id="f1", name="call_discoverable_agent_tool", requestor="assistant",
+                                      arguments=json.loads(freeze["function"]["arguments"])))
+    assert "was NOT executed" not in reply.content and len(events.events("write.attested")) == attested + 1
     assert isinstance(enforcer, Enforcer) and isinstance(events, EventLog)
