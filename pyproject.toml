@@ -55,6 +55,8 @@ omit = [
     "scripts/serve_smoke.py", "scripts/twin_pilot.py", "scripts/unedited_rerun.py", "scripts/usersim_check.py",
     # code that only runs on Modal: the GPU capture functions, and the desk's deploy wrapper (checked by deploy-desk)
     "src/glint/glimmer_modal.py", "src/glint/desk/modal_app.py",
+    # needs llamafirewall==1.0.3 in a separate venv (the 2026-11-03 live run shown in the video)
+    "scripts/lf_scan.py",
 ]
 
 [tool.coverage.report]

@@ -15,6 +15,7 @@ Run them from the repo root with `uv run python scripts/NAME.py` (each script's 
 | `wrong_writes.py` | Writes per arm that Glint's checks judge wrong, in every with/without comparison |
 | `export_results.py` | Regenerates the Bank Desk results tab (`src/glint/desk/results.json`) |
 | `export_scenarios.py` | Regenerates the Bank Desk replay pairs (`src/glint/desk/scenarios.json`) |
+| `lf_scan.py` | Glint's gates as a LlamaFirewall 1.0.3 custom scanner on task_054: a $4,000 increase is `BLOCK`, $2,500 is `ALLOW` (the 2026-11-03 run in the demo video). Needs `llamafirewall==1.0.3` in a separate venv; not run in CI |
 | `muse_check.py` | Did every expected MCP server start in a Muse Code run? |
 | `serve_smoke.py` | One tool-call request to Glimmer served on Modal, after the endpoint is ready |
 | `partition.py` | The one-time split of τ²'s train tasks (pilot / fit / reserve); the files it wrote are fixed |
