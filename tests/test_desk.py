@@ -51,6 +51,48 @@ def test_the_gated_pairs_come_first_and_ids_never_collide():
     assert gated["task_id"] == "task_054" and gated["tuned"] is True
 
 
+def test_the_desk_opens_on_the_untuned_unseen_pair_and_keeps_the_tuned_ones():
+    # regression (indie judge 2026-11-03): the desk loads the first scenario, which was the tuned task_054 pair
+    listing = client.get("/api/scenarios").json()
+    assert listing[0]["id"] == "task_045-unseen" and listing[0]["tuned"] is False
+    assert "list[0].id" in client.get("/").text
+    assert {"task_054-gates", "task_054", "task_038"} <= {s["id"] for s in listing}
+
+
+def test_every_task_tuned_for_the_gates_is_labeled_tuned():
+    # regression (claims judge 2026-11-03): task_052 showed tuned: false although by_task.TUNED lists it
+    import by_task
+    import export_scenarios
+
+    for listed in client.get("/api/scenarios").json():
+        s = client.get(f"/api/scenarios/{listed['id']}").json()
+        if s["task_id"] in by_task.TUNED:
+            assert s["tuned"] is True, s["id"]
+    for task_id, _folder, tuned in export_scenarios.SOURCES:
+        assert tuned or task_id not in by_task.TUNED, task_id
+
+
+def test_a_try_link_opens_the_try_tab():
+    # regression (indie judge 2026-11-03): the README's "Try the gate" link landed on the replay tab
+    page = client.get("/").text
+    assert '{"#try": "try", "#results": "results"}[location.hash]' in page
+    assert 'addEventListener("hashchange", fromHash)' in page
+
+
+def test_the_page_fits_a_phone():
+    # regression (indie judge 2026-11-03): at 390 px the page scrolled sideways to 744 px (desk) and 584 px (results)
+    page = client.get("/").text
+    assert "@media (max-width: 640px)" in page
+    assert "minmax(min(560px, 100%), 1fr)" in page
+
+
+def test_the_results_tab_gives_the_unseen_sets_matched_runs():
+    # regression (claims judge 2026-11-03): the tab showed 22/118 beside 19/108 instead of the matched 21 vs 19
+    lean = next(s for s in client.get("/api/results").json() if s["set"] == "banking-unseen-lean-gated")
+    assert lean["matched"] == {"runs": 108, "alone": 21, "tools": 19}
+    assert "matchedLine(s)" in client.get("/").text
+
+
 def test_the_picked_unseen_pair_carries_its_whole_set_result():
     s = client.get("/api/scenarios/task_045-unseen").json()
     assert s["picked"] is True and s["tuned"] is False
