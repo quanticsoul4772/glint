@@ -17,8 +17,10 @@ firewall = LlamaFirewall({Role.ASSISTANT: ["glint_gates"]})
 result = firewall.scan(assistant_message)   # an AssistantMessage carrying tool_calls
 ```
 
-Install with the optional extra: `uv sync --extra llamafirewall` (or `pip install "glint[llamafirewall]"`). The
-extra pulls in torch, transformers and codeshield. Do not install it into the run folder's `.venv`.
+Install `llamafirewall==1.0.3` into a separate virtual environment, never the run folder's `.venv`; it pulls in torch,
+transformers, codeshield and semgrep. Two known problems, found in the 2026-11-03 run:
+- **Run Glint from source (`PYTHONPATH=<repo>/src`), not as an installed package.** An installed copy fails on the first `Enforcer` because it reads `data-public/clauses/reconciled.json` from the source tree.
+- **Restore `mcp==2.3.0` after installing llamafirewall.** semgrep pins `mcp` 1.29.0, which Glint's bank server cannot use; the `glint[llamafirewall]` extra has the same conflict.
 
 ## Mapping
 
@@ -33,9 +35,9 @@ extra pulls in torch, transformers and codeshield. Do not install it into the ru
 - Both the OpenAI tool-call shape and a flat `{"name", "arguments"}` shape are read, because LlamaFirewall does not fix the shape of `tool_calls`.
 - Treating the two ask rules as holds is a Glint convention. Each refuses an order once so the agent asks the customer first (policy `credit_card_replacements_001`).
 
-The scanner only reads. It records nothing, so a hold repeats until the call runs through the gated environment. Each
-scan logs its `gate.fired` events like a live check, and a call the scanner allows is checked again when it runs
-through the environment's wrapper.
+The scanner only reads. It records nothing (since PR #43 it logs no `gate.fired` or `write.attested` events), so a
+hold repeats until the call runs through the gated environment, and a call the scanner allows is checked and recorded
+when it runs through the environment's wrapper.
 
 ## What was verified and what was not
 
@@ -50,6 +52,10 @@ Verified:
   - after gold's steps up to the freeze it is `ALLOW`;
   - the card is unchanged either way.
 
+- **A live LlamaFirewall run (2026-11-03, CPU, llamafirewall 1.0.3, Glint at 76f56df).** LlamaFirewall was configured with only the Glint scanner (no PromptGuard or AlignmentCheck model loaded) on τ² banking training task_054:
+  - a tool call submitting a $4,000 credit-limit increase was `BLOCK`, score 1.0, with Glint's refusal (`banking.cli.submit.reduce_amount`: the premium-tier maximum is $2,500);
+  - the same call for $2,500 was `ALLOW`, score 0.0;
+  - the database's credit-limit requests were the same before and after, so neither scan ran the write.
+
 Not verified:
-- **A live LlamaFirewall run.** The package was never installed or imported, so this integration has not been run inside LlamaFirewall itself.
 - **Blocking before execution in a host agent loop.** Whether a host stops a single tool call on the scanner's `BLOCK` depends on the host calling `LlamaFirewall.scan` before it runs the call. This is design §9's open question, and it remains open.
