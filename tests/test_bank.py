@@ -265,7 +265,7 @@ def test_selftest_with_the_decision_tools_lists_them(capsys):
     """The plugin's server command passes --decision-tools; its self-test starts the server the same way."""
     assert bank.main(["--decision-tools", "--selftest"]) == 0
     report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
-    assert report["ok"] and bank.DECISION_TOOLS <= set(report["tools"]) and len(report["tools"]) == 25
+    assert report["ok"] and bank.DECISION_TOOLS <= set(report["tools"]) and len(report["tools"]) == 26
 
 
 def test_selftest_with_the_decision_tools_fails_when_they_are_missing(monkeypatch, capsys):
@@ -309,7 +309,7 @@ def test_every_stdout_line_of_the_stdio_server_is_json_rpc(tmp_path):
         proc.wait(timeout=30)
     messages = [json.loads(line) for line in lines]  # a stray print would raise here
     assert all(m["jsonrpc"] == "2.0" for m in messages)
-    assert len(messages[-2]["result"]["tools"]) == 21 and not messages[-1]["result"]["isError"]
+    assert len(messages[-2]["result"]["tools"]) == 22 and not messages[-1]["result"]["isError"]
 
 
 def test_selftest_fails_when_the_round_trip_does(monkeypatch, capsys):
