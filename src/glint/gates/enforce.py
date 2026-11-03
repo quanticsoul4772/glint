@@ -38,6 +38,11 @@ check_credit_limit_increase is GENERIC with mutates_state=True so the replay reb
 038 trial 3 each made the plan and filed none of its disputes before the customer ended the conversation. The items are a function of what the replay rebuilds, so a write's
 reply, footer included, replays unchanged.
 
+Two options are off by default (research fix-research-2026-11-02 appendix). `stages` (glint.gates.stages) adds
+conversation checks, model verifiers and a human approver around the gates. `uncovered_reminder` (#15) adds a
+"[review]" open item for each no_rule_yet write that ran; it reminds instead of refusing, because refusing those writes
+would refuse every training-gold write on the no_rule_yet tools.
+
 Since 2026-11-03 (fix research 2026-11-02; glint.gates.aids) it also keeps the writes that ran (`glint_ran`, for the
 duplicate-write deny) and the shipping address recorded with record_address_confirmation (`glint_address_confirmed`). An account read's reply carries the one-credit-per-checking-
 account fact (bank_accounts_(general)_017) ahead of the open items.
@@ -79,7 +84,7 @@ from glint.assist.tau2_tools import add_plan_tool, drop_request_tool
 from glint.gates import aids, debit
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
-from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
+from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, allow, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.procedure import TRANSFER_UNCODED
 from glint.gates.rules import (
@@ -89,12 +94,15 @@ from glint.gates.rules import (
     DISPUTE,
     EXPEDITE_ASK,
     GATED_GENERIC,
+    NO_RULE_REASONS,
+    NO_RULE_YET,
     REQUIRED_GATES,
     SUBMIT,
     build_registry,
     manifest,
     parse_hidden_arguments,
 )
+from glint.gates.stages import StageRunner, Stages
 
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
@@ -132,6 +140,12 @@ def _open_items(tools, request_gate: bool = True) -> list[str]:
         items.append(f"[open] credit limit increase submitted and not decided yet: {', '.join(pending)} (the "
                      "required lookups, then approve or deny)")
     items += _closure_items(tools)
+    for tool, target in getattr(tools, "glint_uncovered", []):
+        # research appendix #15 (fail closed on writes no rule covers) as a reminder: a refusal would refuse every
+        # training-gold write on the no_rule_yet tools; Enforcer(uncovered_reminder=True) only, off by default
+        items.append(f"[review] {tool} ran on {target or '(no target)'} with no policy rule checking it "
+                     f"({NO_RULE_REASONS.get(tool, 'no rule yet')}): confirm with the customer that it is what they "
+                     "asked for")
     verified = [r.get("user_id") for r in db.verification_history.data.values()
                 if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
     if request_gate and verified and getattr(tools, "glint_requests", "absent") is None:
@@ -216,18 +230,24 @@ def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] 
 
 class Enforcer:
     def __init__(self, domain: str, events: EventLog, context: Callable[[], dict] | None = None,
-                 wording: str = "plain", request_gate: bool = True):
+                 wording: str = "plain", request_gate: bool = True, stages: Stages | None = None,
+                 uncovered_reminder: bool = False):
         """`request_gate` False is research row 6 (fix-research-2026-11-02), a Glint convention: no banking request
         gates, no request-record reminder among the open items, and record_requests taken off every attached
-        toolkit. On by default."""
+        toolkit. On by default. `stages` (glint.gates.stages) and `uncovered_reminder` (research appendix #15) are off
+        by default; with them off the enforcer behaves as before they existed."""
         if wording not in WORDINGS:
             raise ValueError(f"unknown deny wording {wording!r}; one of {WORDINGS}")
         self.domain, self.events, self.context, self.wording = domain, events, context or (dict), wording
         self.request_gate = request_gate
         self.registry = build_registry(domain, request_gate)
         assert_required(self.registry, REQUIRED_GATES[domain], f"gates for {domain}")
-        self.events.emit("gates.manifest", manifest(domain, self.registry) | {"wording": wording,
-                                                                                 "request_gate": request_gate})
+        self.stages = StageRunner(stages, events, self.context) if stages is not None and stages.enabled else None
+        self.uncovered_reminder = uncovered_reminder
+        extra = {"stages": stages.describe()} if self.stages else {}
+        extra |= {"uncovered_reminder": True} if uncovered_reminder else {}
+        self.events.emit("gates.manifest", manifest(domain, self.registry) | {
+            "wording": wording, "request_gate": request_gate} | extra)
 
     def write_call(self, env, call: ToolCall) -> tuple[str, dict | None] | None:
         """(write tool, its arguments) when `call` is an assistant write, else None. Arguments are None when a hidden
@@ -254,7 +274,10 @@ class Enforcer:
                           "of the request is not affected.", facts=["`arguments` is not a JSON object"])
             self._log(tool, args, result, 0.0, replay, "unparsed")
             return result
-        final, passed, flagged, uncoded, notes = None, [], [], [], []
+        final, passed, flagged, uncoded, notes, extra = None, [], [], [], [], []
+        stages = self.stages if toolkit is not None else None
+        if stages:
+            stages.prime(toolkit, tool, args, replay)
         for gate in self.registry.for_tool(tool):
             if gate.toolkit and toolkit is None:
                 result, ms = deny("gate_error", gate.name, f"the check {gate.name!r} needs the environment's "
@@ -267,7 +290,11 @@ class Enforcer:
                               "be logged, and no write runs without a logged decision", "Check the gate log file.",
                               consequence=CANNOT_DECIDE, facts=["the gate.fired event was not written"])
             if not result.allowed:
-                return result
+                if stages is None or (result := stages.on_deny(toolkit, tool, args, result, replay)) is not None:
+                    return result
+                extra.append("asked_confirmed")  # research #16: the customer agreed to the asked write
+                passed.append(gate.name)
+                continue
             passed.append(gate.name)
             if result.rule_id == UNRECORDED:
                 flagged.append(gate.name)
@@ -276,19 +303,26 @@ class Enforcer:
             if result.note:
                 notes.append(result.note)
             final = final or result
-        if final is None:  # attach() refuses an environment with an ungated write; this is a second line
+        if final is None and not extra:  # attach() refuses an environment with an ungated write; a second line
             raise RuntimeError(f"write {tool} has no gate")
-        self._attest(tool, passed, replay, flagged, uncoded)
+        if stages:
+            refusal, classes = stages.review(toolkit, tool, args, replay)
+            if refusal is not None:
+                self._log(tool, args, refusal, 0.0, replay, f"stage_{refusal.rule_id}")
+                return refusal
+            extra += classes
+        self._attest(tool, passed, replay, flagged, uncoded, extra)
+        final = final or allow("stage.asked_confirmed", "glint.gates.stages", {"tool": tool})
         return replace(final, note="\n\n".join(notes))
 
     def _attest(self, tool: str, passed: list[str], replay: bool, flagged: list[str] | None = None,
-                uncoded: list[str] | None = None) -> None:
+                uncoded: list[str] | None = None, extra: list[str] | None = None) -> None:
         """A write.attested event for each allowed write: which kind of check stood behind it (attestation_classes).
         Never decides anything; a failure to log is logged, not raised."""
         try:
             self.events.emit("write.attested", {"domain": self.domain, "tool": tool,
-                                                "classes": attestation_classes(passed, flagged or (), uncoded or ()),
-                                                "gates": passed,
+                                                "classes": attestation_classes(passed, flagged or (), uncoded or ())
+                                                + sorted(set(extra or ())), "gates": passed,
                                                 "replay": replay, **self.context()})
         except Exception:
             log.exception("the write.attested event was not logged")
@@ -501,6 +535,8 @@ class Enforcer:
         env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
         env.tools.glint_address_asked = set()  # cards whose replacement the address_ask gate refused once
+        env.tools.glint_uncovered = []  # (tool, target) of no_rule_yet writes that ran, with uncovered_reminder only
+        StageRunner.init(env.tools)
         env.tools.glint_address_confirmed = {}  # card -> the shipping address recorded with record_address_confirmation
         env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
 
@@ -538,6 +574,10 @@ class Enforcer:
                 self._record_increase(env, *write, reply, before)
                 if not reply.error and not str(reply.content).startswith("Error"):
                     env.tools.glint_ran.add(aids.write_key(*write))
+                    if self.uncovered_reminder and write[0] in NO_RULE_YET.get(self.domain, ()):
+                        target = next((str(v) for k, v in sorted((write[1] or {}).items())
+                                       if k.endswith("_id") and k != "user_id" and v), "")
+                        env.tools.glint_uncovered.append((write[0], target))
                 return with_open_items(message, reply)
             asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
             if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice

@@ -19,7 +19,7 @@ import json
 
 from glint.assist import airline, as_flag, banking, retail
 from glint.assist.banking import ADDRESS_TOOL, REQUEST_TOOLS
-from glint.gates import aids, debit, procedure, travel
+from glint.gates import aids, constraints, debit, procedure, travel
 from glint.gates import banking as bank_rules
 from glint.gates.bankdb import undecided_increases
 from glint.gates.core import NO_RULE, Gate, GateRegistry, GateResult, allow, deny
@@ -526,6 +526,7 @@ def build_registry(domain: str, request_gate: bool = True) -> GateRegistry:
     for tool in NO_RULE_YET[domain]:
         reg.register(Gate(f"no_rule_{tool}", (tool,), "Every write is logged; no policy rule covers this one yet.",
                           _no_rule(tool)))
+    constraints.register(reg, domain)  # off unless constraints.ENABLED
     return reg
 
 
