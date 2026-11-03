@@ -54,18 +54,25 @@ from tau2.environment.toolkit import ToolType
 
 from glint.assist import as_flag
 from glint.assist.banking import (
+    CLOSURE_REASON_TOOL,
     DISPUTE_ANSWERS_TOOL,
     ORDER_TOOL,
     PLAN_TOOL,
     REQUESTS_TOOL,
     RETENTION_TOOL,
+    STATEMENT_CREDIT_TOOL,
     TODAY,
+    _date,
+    _tier,
+    closure_reasons,
     replacements_today,
+    waiver_call,
+    waiver_due,
 )
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates import debit
 from glint.gates.bankdb import increase_request_ids, undecided_increases
-from glint.gates.banking import UNRECORDED
+from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
 from glint.gates.rules import (
@@ -117,6 +124,7 @@ def _open_items(tools) -> list[str]:
     if pending:
         items.append(f"[open] credit limit increase submitted and not decided yet: {', '.join(pending)} (the "
                      "required lookups, then approve or deny)")
+    items += _closure_items(tools)
     verified = [r.get("user_id") for r in db.verification_history.data.values()
                 if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
     if verified and getattr(tools, "glint_requests", "absent") is None:
@@ -127,6 +135,48 @@ def _open_items(tools) -> list[str]:
                      "with every account action they asked for; closes, payments and filings are refused until "
                      "recorded, and a closure reason log or card order made without a record is flagged for review")
     return items + debit.answer_items(tools)
+
+
+def _closure_items(tools) -> list[str]:
+    """Open steps of the credit card closure procedure (credit_card_account_logistics_003), per account still open:
+    a closure the request record names with no reason logged (step 3; skipped when a reason within the past year
+    skips retention, or when the account cannot close yet, step 1); the one-year annual fee waiver due and not
+    offered (step 4: annual_fee reason, a customer for 2+ years, tenure read as glint.assist.banking.customer_since,
+    an ambiguity tagged there); an accepted retention credit not applied (step 5, the card tier's amount). The agent
+    ignored shown open items in 7 v9 runs and in banking-test-gated 047 t1, so this reminds and never refuses."""
+    db, items = tools.db, []
+    accounts = db.credit_card_accounts.data
+    retention = getattr(tools, "glint_retention", {}) or {}
+    asked = [str(r.get("target_id") or "") for r in getattr(tools, "glint_requests", None) or []
+             if r.get("action") == "close_credit_card"]
+    logged_today = {str(r.get("credit_card_account_id")) for r in db.credit_card_closure_reasons.data.values()
+                    if _date(r.get("logged_at")) == TODAY}
+    cards = sorted({c for c in asked if c} | set(retention) | logged_today)
+    for card in cards:
+        acc = accounts.get(card)
+        if acc is None or str(acc.get("status", "")).upper() == "CLOSED":
+            continue
+        user = str(acc.get("user_id", ""))
+        today, earlier = closure_reasons(db, card)
+        answer = retention.get(card)
+        if card in asked and not today and not earlier and not closure_blockers(db, card):
+            items.append(f"[open] {card}: the customer asked to close it and no closure reason is logged: ask why and "
+                         f"log it with {CLOSURE_REASON_TOOL} before any retention offer or closure")
+        if (since := waiver_due(db, card)) is not None and not (answer and answer.get("fee_waiver_offered")):
+            items.append(f"[open] {card}: closing over the annual fee, a customer since {since:%m/%d/%Y} (2+ years): "
+                         "offer to waive the annual fee for one year before the retention offer; if they accept, "
+                         f"{waiver_call(card, user)}")
+        if answer and answer.get("accepted") and "point" not in str(answer.get("offer", "")).lower():
+            credited = any(r.get("credit_card_account_id") == card and r.get("credit_reason") == "retention_offer"
+                           and _date(r.get("transaction_date")) == TODAY
+                           for r in db.credit_card_transaction_history.data.values())
+            amount = RETENTION_CREDIT.get(_tier(str(acc.get("card_type", ""))))
+            if not credited:
+                items.append(f"[open] {card}: the customer accepted the retention offer ({answer.get('offer')}) and it "
+                             f"is not applied yet: {STATEMENT_CREDIT_TOOL}(user_id={user!r}, credit_card_account_id="
+                             f"{card!r}, amount={amount if amount is not None else 'the card tier amount'}, "
+                             "reason='retention_offer'); the account stays open")
+    return items
 
 
 def write_tools(toolkit) -> set[str]:
