@@ -8,9 +8,12 @@
 [![coverage 97% (96.86%, PR #45 run)](https://img.shields.io/badge/coverage-97%25-brightgreen)](docs/testing-strategy.md "coverage 97% (96.86%, PR #45 run)")
 [![license MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+### ▶ [Hackathon submission video: Glint demo (2:36)](https://youtu.be/Da2YCnBoEfk)
+Meta Global AI Developer Hackathon · Indie track · Push the Frontier
+
 ![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](docs/demo.gif)
 
-**[Watch (2:36)](https://youtu.be/Da2YCnBoEfk)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run/#try)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
+**[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run/#try)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
 
 Glint is write authorization for AI agents that touch money. Every account change the agent attempts goes through a gate before it runs; where the bank's written policy has a rule, the gate applies it as code to the live account records. An allowed write runs. A refused write does not run, and the agent gets the rule, the facts and the fix. Every decision, and the result of every allowed write, lands in a hash-chained log; it is tamper-evident when keyed and its head is kept off the machine (glint-bank keys it by default; the measured runs' logs are unkeyed). Built on Meta's open-weight Muse Glimmer 30B (the agent, self-hosted), with Muse Spark (Meta Model API) as the simulated customer, a Muse Code plugin and a LlamaFirewall scanner.
 
