@@ -18,7 +18,8 @@ from pathlib import Path
 CRITICAL_GOAL, OTHER_GOAL = 90.0, 70.0
 CRITICAL = {"src/glint/meter.py", "src/glint/runlog.py", "src/glint/calllog.py", "src/glint/glimmer_serve.py",
             "src/glint/desk/live.py", "scripts/tools_ab.py", "scripts/export_results.py",
-            "scripts/export_scenarios.py", "scripts/gate_labels.py", "scripts/wrong_writes.py"}
+            "scripts/export_scenarios.py", "scripts/gate_labels.py", "scripts/wrong_writes.py",
+            "src/glint/grade.py", "src/glint/measures.py", "scripts/requested_done.py"}
 FLOORS: dict[str, float] = {}  # every module met its goal on 2026-10-27; a module that drops below its goal
 # fails the gate (add a floor here only for new code that starts below its goal)
 
