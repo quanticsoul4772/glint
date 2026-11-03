@@ -493,8 +493,10 @@ def _register_banking(reg: GateRegistry) -> None:
                       "_014: the customer looks up the card's digits only when its account record does not show "
                       "them.", procedure.give_card_digits, toolkit=True))
     # deny-only conventions with no policy clause (fix research 2026-11-02, N2 and N10; glint.gates.aids), registered
-    # last so every policy gate's refusal comes first. Named procedure_* so an allow counts as no rule check
-    for tool in sorted(REQUIRED_GATES["banking_knowledge"]):
+    # last so every policy gate's refusal comes first. Named procedure_* so an allow counts as no rule check. Only on
+    # writes another gate already covers, so the boot check still names a write with no gate of its own
+    covered = sorted({t for g in reg.gates() for t in g.tools})
+    for tool in covered:
         if tool not in aids.DUPLICATE_EXEMPT:
             reg.register(Gate(f"procedure_duplicate_{tool}", (tool,), "Glint convention, no clause: the same write "
                               "with identical arguments runs once per conversation.", aids.duplicate(tool),
