@@ -51,6 +51,8 @@ class GateResult:
     details: dict = field(default_factory=dict)
     consequence: str = ""
     facts: tuple[str, ...] = ()
+    # an allow's reminder to the agent: appended to the tool's reply (glint.gates.enforce); empty on most allows
+    note: str = ""
 
     @property
     def allowed(self) -> bool:
@@ -71,8 +73,8 @@ class GateResult:
                 f"\nWhat to do next: {self.fix}\nVerdict: {verdict}")
 
 
-def allow(rule_id: str, source: str, details: dict | None = None, reason: str = "") -> GateResult:
-    return GateResult("allow", reason=reason, rule_id=rule_id, source=source, details=details or {})
+def allow(rule_id: str, source: str, details: dict | None = None, reason: str = "", note: str = "") -> GateResult:
+    return GateResult("allow", reason=reason, rule_id=rule_id, source=source, details=details or {}, note=note)
 
 
 def deny(rule_id: str, source: str, reason: str, fix: str, details: dict | None = None, *, consequence: str,
@@ -173,5 +175,5 @@ def run_gate(gate: Gate, db, args: dict, wait: bool = False) -> tuple[GateResult
                             consequence=result.consequence or CANNOT_DECIDE,
                             facts=result.facts or (f"the deny is missing {missing}",))
     result = GateResult(result.decision, result.reason, gate.purpose, result.fix, result.rule_id,
-                        result.source or gate.name, result.details, result.consequence, result.facts)
+                        result.source or gate.name, result.details, result.consequence, result.facts, result.note)
     return result, (time.perf_counter() - start) * 1000

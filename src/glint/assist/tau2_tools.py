@@ -19,6 +19,10 @@ SEARCH_WARN = 60  # knowledge-base calls in one conversation before the run log 
 # KB_search/grep calls after which new searches get kb.diagnosis instead of documents (appendix #72); None: off. A
 # tools_ab set turns it on with the key `search_compact_after`.
 SEARCH_COMPACT_AFTER: int | None = None
+# knowledge-base calls with no write between them before the search-loop guard adds the open items (see _guard).
+# scripts/search_guard_count.py on recorded train runs (in-sample, 2026-11-03): at 20, banking-unseen-v10-gated's tools
+# arm fires in 82 of 118 runs (6 of them passing), banking12-plan-v9-gated's in 3 of 40 tuned runs (none passing)
+SEARCH_GUARD = 20
 
 
 class AssistedRetailTools(RetailTools):
@@ -208,10 +212,10 @@ class DisputePlanTools(ToolKitBase):
                                customer_words: str) -> dict:
         """Record the customer's answers to the two questions a debit card dispute asks (knowledge base
         bank_accounts_(general)_031), before filing it: "Do you still have your physical debit card in your
-        possession?" and "Do you believe your PIN may have been compromised?". A debit dispute filing is checked
-        against the latest record for its card: no filing without one, and its card_in_possession and
-        pin_compromised must equal the recorded answers. Call it again if the customer answers differently for
-        another transaction. It does not change the database.
+        possession?" and "Do you believe your PIN may have been compromised?". File each debit dispute with
+        the card_in_possession and pin_compromised recorded for its card; a requested dispute with no recorded
+        answers, or a filing that differs from them, is listed in the open items. Call it again if the customer
+        answers differently for another transaction. It does not change the database.
 
         Args:
             card_id: The debit card the dispute is filed on.
@@ -252,6 +256,27 @@ class DisputePlanTools(ToolKitBase):
             dict: recorded, the requests as recorded; or an error.
         """
         return banking.record_requests(self.db, user_id, requests)
+
+    @is_tool(ToolType.GENERIC, mutates_state=True)
+    def record_address_confirmation(self, credit_card_account_id: str, user_id: str, shipping_address: str,
+                                    customer_words: str) -> dict:
+        """Record the shipping address the customer confirmed for a replacement credit card, before ordering it. The
+        replacement procedure (knowledge base credit_card_replacements_001) says to confirm the shipping address with
+        the customer (primary or alternate, including any unit or suite). Ask the customer where to ship the new card,
+        then call this with the address they confirm. The order is checked against it: it must ship to the address
+        recorded here. It does not change the database.
+
+        Args:
+            credit_card_account_id: The credit card account being replaced.
+            user_id: The customer's user id.
+            shipping_address: The full address the customer confirmed, with any unit or suite.
+            customer_words: The customer's own words confirming the address, quoted.
+
+        Returns:
+            dict: recorded, the address as recorded, whether it is the address on file, and the next step; or an error.
+        """
+        return banking.record_address_confirmation(self.db, credit_card_account_id, user_id, shipping_address,
+                                                   customer_words)
 
 
 class BankingDecisionTools(DisputePlanTools):
@@ -295,8 +320,9 @@ class BankingDecisionTools(DisputePlanTools):
         Returns:
             The best document's text and the other documents' titles, IDs and best-matching paragraphs
         """
-        return self._search("KB_search", query, self._kb_pipeline.retrieve, lambda results: kb.format_results(
-            self._kb_pipeline, results, kb.query_score(query), "No relevant documents found."))
+        return self._guard(self._search("KB_search", query, self._kb_pipeline.retrieve, lambda results:
+                                        kb.format_results(self._kb_pipeline, results, kb.query_score(query),
+                                                          "No relevant documents found.")))
 
     @is_tool(ToolType.READ)
     def grep(self, pattern: str) -> str:
@@ -312,8 +338,9 @@ class BankingDecisionTools(DisputePlanTools):
         Returns:
             The first document's text and the other matching documents' titles, IDs and best paragraphs
         """
-        return self._search("grep", pattern, self._grep_pipeline.retrieve, lambda results: kb.format_results(
-            self._grep_pipeline, results, kb.pattern_score(pattern), f"No matches found for pattern: {pattern}"))
+        return self._guard(self._search("grep", pattern, self._grep_pipeline.retrieve, lambda results:
+                                        kb.format_results(self._grep_pipeline, results, kb.pattern_score(pattern),
+                                                          f"No matches found for pattern: {pattern}")))
 
     def _search(self, tool: str, query: str, retrieve, render) -> str:
         """A search's answer, or for a repeat of an earlier search in this conversation a short pointer to what it
@@ -363,7 +390,34 @@ class BankingDecisionTools(DisputePlanTools):
             The document's title and the requested characters, with where the next page starts
         """
         self._count_search()
-        return kb.read_page(self._kb_pipeline, doc_id, offset)
+        return self._guard(kb.read_page(self._kb_pipeline, doc_id, offset))
+
+    def use_tool(self, tool_name: str, **kwargs):
+        """τ²'s use_tool, noting each write that ran (a WRITE tool, a hidden one unwrapped, whose result is not an
+        error): the search-loop guard counts knowledge-base calls since the last one. A write a gate refused never
+        reaches here, so it does not count."""
+        result = super().use_tool(tool_name, **kwargs)
+        name = str(kwargs.get("agent_tool_name", "")) if tool_name == "call_discoverable_agent_tool" else tool_name
+        if (name != "call_discoverable_agent_tool" and self.has_tool(name) and self.tool_type(name) == ToolType.WRITE
+                and not str(result).startswith("Error")):
+            self.__dict__["_glint_since_write"] = 0
+        return result
+
+    def _guard(self, answer: str) -> str:
+        """The search-loop guard (fix research 2026-11-02, row 15; an inference from reader 3 R3, not a policy rule):
+        every SEARCH_GUARD knowledge-base calls with no write between them, the answer ends with the customer's open
+        items (glint.gates.enforce._open_items: what the recorded plans, verdicts and requests show) and the next step.
+        The search still answers; nothing is refused."""
+        n = self.__dict__["_glint_since_write"] = self.__dict__.get("_glint_since_write", 0) + 1
+        if n % SEARCH_GUARD:
+            return answer
+        from glint.gates.enforce import _open_items  # enforce imports this module
+
+        items = _open_items(self)
+        return (f"{answer}\n\n[guard] {n} knowledge-base calls (KB_search, grep, KB_read) since the last account change "
+                "ran in this conversation. " + ("Open items:\n" + "\n".join(items) if items else
+                "No open items are recorded.") + "\nStop searching and act: make the change the documents already "
+                "found allow, ask the customer what is still unknown, or tell them what cannot be done.")
 
     def _count_search(self) -> None:
         """One WARNING line, to stderr (the run log), when this conversation reaches SEARCH_WARN knowledge-base calls:
