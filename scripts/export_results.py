@@ -15,6 +15,7 @@ logger.remove()  # τ² logs its registry at DEBUG on import
 
 import by_task
 import tools_ab  # after the log setup above
+from glint.runlog import NOT_RESULTS
 
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "results.json"
 TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading these tasks' runs
@@ -22,17 +23,33 @@ TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading
 # since 2026-10-30 031, 051 and 052
 TUNED_GATES = set(by_task.TUNED)
 # a tools-only set -> the set whose base arm it is compared with (same tasks, trials and seeds; checked in main)
-BASE_FROM = {"banking-plan-v9-gated": "banking-plan-gated", "banking-unseen-v10-gated": "banking-unseen-gated"}
+BASE_FROM = {"banking-plan-v9-gated": "banking-plan-gated", "banking-unseen-v10-gated": "banking-unseen-gated",
+             "banking-test-v2-gated": "banking-test-gated"}
 GATED_NOTE = ("Glint's decision tools with every write gated (a denied write does not run), on the code at PR 147, "
               "against the ungated arm without tools of banking-plan-gated (same 12 tasks, seeds and backend). Eight "
               "earlier reported gated versions are in docs/results.md; v9 is the latest, and every version is "
               "compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count "
               "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
+# The banking test split is design data: some debit rules came from its failures on 2026-10-28, and the rules of
+# PRs 29-44 were designed from its 2026-11-02 gated run. Every set on it is labeled tuned or design, never held-out.
+TEST_SPLIT_DESIGN = ("The rules of PRs 29-44 were designed from this split's 2026-11-02 gated run, so the split is "
+                     "design data and no held-out banking test result is possible from here on.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
-    ("banking-test-gated", True, "Banking test split, every write gated (the one gated read of the split)", "tuned",
+    ("banking-test-v2-gated", True,
+     "Banking test split, gated arm after the rules designed from it (2026-11-03; tuned, in-sample)", "tuned",
+     ("τ²'s 20 banking test tasks, k=2, the gated tools arm only, on the code with every fix on (main at 7bf75cb, PRs "
+      "29-45). Its alone column is the 2026-11-02 alone arm of the run below: a cross-day comparison, and the alone "
+      "arm was not rerun. Tuned and in-sample: " + TEST_SPLIT_DESIGN + " Passes 11/40 vs alone's 7/40, by task 3 "
+      "better, 0 worse (sign test p = 0.25, two-sided); may be chance. Against τ²'s offline re-grade of the alone "
+      "arm (10/40), 3 better, 1 worse (p = 0.63). Not re-graded. Step-limit endings 6 (the 2026-11-02 gated arm: 14). "
+      "The gate refused 40 writes; 25 refused a write τ² expects, and 4 of those 25 were false against gold "
+      "(request, verification once x2, closure reason). Glimmer on Modal.")),
+    ("banking-test-gated", True, "Banking test split, every write gated (2026-11-02; design data for PRs 29-44)",
+     "tuned",
      ("τ²'s 20 banking test tasks, k=2, Glimmer alone vs Glimmer with the gates and decision tools, on the "
       "code after PRs 20-25 (the request record, the retention answer, the savings interest rules). Some debit "
-      "rules were written from this split's failures on 2026-10-28. Passes 7/40 vs 7/40 (by task 2 better, 2 worse). "
+      "rules were written from this split's failures on 2026-10-28, and every conversation of this run was then "
+      "read: " + TEST_SPLIT_DESIGN + " Passes 7/40 vs 7/40 (by task 2 better, 2 worse). "
       "Writes that differ from τ²'s expected ones: 34 alone vs 25 gated, extra writes 13 vs 4 (by task 5 fewer, 2 "
       "more; may be chance); wrong values 21 vs 21. 14 gated runs hit τ²'s step limit (10 knowledge-base "
       "search loops, 4 with request-record refusals); alone had 7 context overflows. Glimmer on Modal.")),
@@ -60,11 +77,12 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
       "their runs and correct answers (052 went from 0/4 in v7 and v8 to 3/4 after the open item for an unfiled "
       "increase verdict, which came from its failures). Do not read as general evidence. " + GATED_NOTE),
      lambda task: task in TUNED_GATES),
-    ("banking-test", True, "Banking test split, read once (current tools, no gates)", "held-out",
-     ("τ²'s 20 banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute "
+    ("banking-test", True, "Banking test split, first read 2026-10-28 (decision tools, no gates; now design data)",
+     "design",
+     ("τ²'s 20 banking test tasks, first read on 2026-10-28, then untouched. Only task_080 has a dispute "
       "or credit-limit step, and a decision tool was called in 1 of 80 runs, so this shows the tools neither helped "
-      "nor hurt tasks they were not built for. By task: 1 improved, 18 tied, 1 worse. No gated run on this split. "
-      "k=4. Glimmer on Modal.")),
+      "nor hurt tasks they were not built for. By task: 1 improved, 18 tied, 1 worse. The split has since had gated "
+      "runs on 2026-11-02 and 2026-11-03 (above). " + TEST_SPLIT_DESIGN + " k=4. Glimmer on Modal.")),
     ("heldout2", True, "Retail and airline, held-out tasks (current tools)", "held-out",
      ("A fresh random draw of 10 retail and 10 airline tasks, excluding the design tasks, the whole failure "
       "inventory and the first draw; no tool change came from these tasks. Run on the current tools. By task: 2 "
@@ -117,6 +135,27 @@ def with_base(report: dict, cfg: dict, base_cfg: dict) -> dict:
     return {key: arms | {"base": base[key]["base"]} for key, arms in report.items() if "base" in base.get(key, {})}
 
 
+def counted(cfg: dict, arm: str) -> dict:
+    """{(domain-task, trial): passed} for the arm's runs that count as results (trials below k; infrastructure,
+    evaluation and cap stops left out), the same runs tools_ab.analyze counts."""
+    runs = {}
+    for path in sorted(cfg["data"].glob(f"{arm}-*.json")):
+        domain = path.stem.split("-", 1)[1]
+        for s in json.loads(path.read_text(encoding="utf-8"))["simulations"]:
+            kind = tools_ab.outcome(s)
+            if s["trial"] < tools_ab._trials(cfg, domain) and kind not in NOT_RESULTS:
+                runs[(f"{domain}-{s['task_id']}", s["trial"])] = kind == "pass"
+    return runs
+
+
+def matched(base_cfg: dict, tools_cfg: dict, compared: list[str]) -> dict:
+    """The runs of the compared tasks that both arms counted (same task and trial, so the same seed): where one arm
+    lost runs to infrastructure stops, its totals and the other arm's cover different runs, and these do not."""
+    base, tools = counted(base_cfg, "base"), counted(tools_cfg, "tools")
+    keys = [key for key in base if key in tools and key[0] in compared]
+    return {"runs": len(keys), "alone": sum(base[k] for k in keys), "tools": sum(tools[k] for k in keys)}
+
+
 def main():
     out = []
     for name, modal, title, role, note, *only in SETS:
@@ -127,8 +166,10 @@ def main():
             continue
         tools_ab.analyze(cfg)
         report = json.loads(cfg["out"].read_text(encoding="utf-8"))
+        base_cfg = cfg
         if name in BASE_FROM:
-            report = with_base(report, cfg, tools_ab.for_backend(tools_ab.SETS[BASE_FROM[name]], modal))
+            base_cfg = tools_ab.for_backend(tools_ab.SETS[BASE_FROM[name]], modal)
+            report = with_base(report, cfg, base_cfg)
         rows, tally = [], {"improved": 0, "tied": 0, "worse": 0, "no data": 0}
         compared = []  # the tasks with both arms: the tally and the run totals both come from these
         for key in sorted(report, key=lambda k: (k.split("-")[0], k)):
@@ -162,9 +203,10 @@ def main():
                          "no_data_reason": reason})
         runs = {arm: [sum(report[k][arm]["passes"] for k in compared), sum(report[k][arm]["runs"] for k in compared)]
                 for arm in ("base", "tools")}
+        both = matched(base_cfg, cfg, compared)
         out.append({"set": name, "title": title, "role": role, "note": note, "tasks": rows, "by_task": tally,
-                    "runs": {"alone": runs["base"], "tools": runs["tools"]}})
-        print(f"{name}: {tally}, runs alone {runs['base']}, with tools {runs['tools']}")
+                    "runs": {"alone": runs["base"], "tools": runs["tools"]}, "matched": both})
+        print(f"{name}: {tally}, runs alone {runs['base']}, with tools {runs['tools']}, matched {both}")
     OUT.write_text(json.dumps(out, indent=1), encoding="utf-8")
     print(f"wrote {OUT}")
 

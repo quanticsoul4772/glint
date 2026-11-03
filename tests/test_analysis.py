@@ -128,6 +128,45 @@ def test_export_results_takes_a_tools_only_sets_base_arm_from_the_named_set(run_
     assert s["runs"] == {"alone": [1, 2], "tools": [2, 2]}
 
 
+def test_export_results_gives_the_runs_both_arms_counted(run_set, make_sim, monkeypatch, tmp_path):
+    # regression (claims judge 2026-11-03): the unseen set showed alone 22/118 beside gated 19/108, two different run
+    # sets; the matched runs (both arms counted the same task and trial) are 21 vs 19 on 108
+    import export_results
+
+    arms = {("base", "banking_knowledge"): [make_sim("a", 0, "pass"), make_sim("a", 1, "pass"),
+                                            make_sim("b", 0, "fail"), make_sim("b", 1, "context_overflow")],
+            ("tools", "banking_knowledge"): [make_sim("a", 0, "fail"), make_sim("a", 1, "infrastructure_error"),
+                                             make_sim("b", 0, "pass"), make_sim("b", 1, "fail"),
+                                             make_sim("c", 0, "pass")]}
+    cfg = run_set(arms, k=2)
+    monkeypatch.setattr(tools_ab, "SETS", {"x": {}})
+    monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: cfg)
+    monkeypatch.setattr(export_results, "SETS", [("x", True, "X", "untuned", "note")])
+    monkeypatch.setattr(export_results, "OUT", tmp_path / "results.json")
+    export_results.main()
+    (s,) = json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))
+    assert s["runs"] == {"alone": [2, 4], "tools": [1, 3]}
+    # a1 (infrastructure stop in tools) and c (one arm only) are not matched; b1's overflow is a counted failure
+    assert s["matched"] == {"runs": 3, "alone": 1, "tools": 1}
+
+
+def test_export_results_never_calls_the_banking_test_split_held_out():
+    # regression (claims and indie judges 2026-11-03): the split is design data for PRs 29-44 since its 2026-11-02
+    # gated run; the Results tab still said "held-out", "read once" and "the one gated read"
+    import export_results
+
+    test_split = [s for s in export_results.SETS if s[0].startswith("banking-test")]
+    assert {s[0] for s in test_split} == {"banking-test", "banking-test-gated", "banking-test-v2-gated"}
+    for name, _modal, title, role, note, *_ in test_split:
+        assert role in ("tuned", "design"), name
+        text = (title + " " + note).lower()
+        assert "held-out" not in text.replace("no held-out", "") and "read once" not in text, name
+        assert "one gated" not in text and "no gated run" not in text, name
+        assert "design data" in text, name
+    assert export_results.BASE_FROM["banking-test-v2-gated"] == "banking-test-gated"
+    assert "task_052" in export_results.TUNED_GATES
+
+
 def test_export_results_refuses_a_base_arm_with_other_seeds(run_set, make_sim):
     import export_results
 

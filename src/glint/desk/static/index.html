@@ -199,7 +199,7 @@
 
   /* results */
   .r-intro { color: var(--text-2); margin: 0 0 var(--s4); max-width: 900px; }
-  .sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: var(--s4); }
+  .sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(560px, 100%), 1fr)); gap: var(--s4); }
   .set { background: var(--card); border-radius: var(--r-container); box-shadow: var(--shadow-low); padding: var(--s4); }
   .set h3 { margin: 0; font-size: var(--t-lg); font-weight: 600; display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
   .set .snote { color: var(--text-2); font-size: var(--t-sm); margin-top: var(--s1); }
@@ -233,6 +233,23 @@
   .try .src { color: var(--text-3); font-size: var(--t-sm); margin-top: var(--s4); }
   .intro { padding: var(--s3) var(--s6); font-size: var(--t-base); color: var(--text-2); border-bottom: 1px solid var(--border); }
   .intro b { color: var(--text); font-weight: 600; } .intro a { color: var(--accent); }
+  /* phones (judge panel 2026-11-03: 390 px wide scrolled sideways to 744 px) */
+  @media (max-width: 640px) {
+    .top { height: auto; grid-template-columns: 1fr auto; padding: var(--s2) var(--s4); row-gap: var(--s2); }
+    .top .seg { grid-column: 1 / -1; grid-row: 2; justify-self: start; max-width: 100%; overflow-x: auto; }
+    .seg button { padding: 0 var(--s3); white-space: nowrap; }
+    .intro { padding: var(--s3) var(--s4); }
+    main { padding: var(--s4); }
+    .scn-row { flex-wrap: wrap; }
+    .scn select { font-size: var(--t-lg); width: 100%; white-space: normal; text-overflow: ellipsis; }
+    .ctl { flex-wrap: wrap; }
+    .sets { grid-template-columns: minmax(0, 1fr); }
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    .stats .runs { grid-column: 1 / -1; }
+    .set { padding: var(--s3); overflow-x: auto; }
+    td, th { padding: 6px var(--s1); }
+    .msg { max-width: 100%; }
+  }
   .chg { font-weight: 600; } .chg.improved { color: var(--ok); } .chg.worse { color: var(--bad); } .chg.tied { color: var(--text-3); font-weight: 500; }
 </style>
 </head>
@@ -497,8 +514,8 @@ async function load(id) {
   $("source").innerHTML = "<b>Selected pair, not a typical run:</b> " + esc("a recorded run where Glimmer alone failed, beside one " +
     `where Glimmer with Glint's tools passed. All recorded runs of this task: alone ${rec.base.passed}/${rec.base.runs}` +
     ` passed, with tools ${rec.tools.passed}/${rec.tools.runs} passed. Source: ${data.source}; τ²-bench banking task ` +
-    `${task} (MIT).` + (data.tuned ? " A tuned task: the tools were refined after reading its runs, so this " +
-    "pair is not evidence that the tools generalize." : "") + " The earlier version: decision tools only, no gates.");
+    `${task} (MIT).` + (data.tuned ? " A tuned task: Glint's tools or gates were refined after reading its " +
+    "runs, so this pair is not evidence that they generalize." : "") + " The earlier version: decision tools only, no gates.");
 }
 function dots(score, cls) {
   const m = /^(\d+)\/(\d+)$/.exec(String(score || ""));
@@ -509,6 +526,13 @@ function dots(score, cls) {
 function bar(label, [k, n], cls) {
   const w = n ? (100 * k / n).toFixed(1) + "%" : "0%";
   return `<div class="bar ${cls}"><span>${esc(label)}</span><i style="--w:${w}"></i><em>${k}/${n}</em></div>`;
+}
+// when the arms counted different runs (infrastructure stops), the runs both arms counted are the fair comparison
+function matchedLine(s) {
+  const m = s.matched;
+  if (!m || (m.runs === s.runs.alone[1] && m.runs === s.runs.tools[1])) return "";
+  return `<div class="snote"><b>On the ${m.runs} runs both arms counted (same task and seed):</b> alone passed ` +
+    `${m.alone}, with Glint ${m.tools}.</div>`;
 }
 async function showResults() {
   const sets = await (await fetch(API("api/results"))).json();
@@ -522,7 +546,7 @@ async function showResults() {
         <div class="stat"><b>${b.tied}</b><span>tied</span></div>
         <div class="stat down"><b>${b.worse}</b><span>worse${b["no data"] ? ` · ${b["no data"]} no data` : ""}</span></div>
         <div class="runs">${bar("Alone", s.runs.alone, "")}${bar("With Glint", s.runs.tools, "tools")}<span>runs passed</span></div>
-      </div>
+      </div>${matchedLine(s)}
       <div class="snote">${esc(s.note)}</div>
       <table><tr><th>Task</th><th>Glimmer alone</th><th>Glimmer + Glint tools</th><th>Change</th></tr>`;
     for (const r of s.tasks) {
@@ -587,6 +611,10 @@ async function init() {
   $("tab-desk").onclick = () => tab("desk");
   $("tab-results").onclick = () => tab("results");
   $("tab-try").onclick = () => tab("try");
+  // a link to …/#try or …/#results opens that tab (the README's "Try the gate" links to #try)
+  const fromHash = () => tab({"#try": "try", "#results": "results"}[location.hash] || "desk");
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
   $("brief-toggle").onclick = () => { const g = $("goal"); g.classList.toggle("open");
     $("brief-toggle").textContent = g.classList.contains("open") ? "Show less" : "Show full brief"; };
   const list = await (await fetch(API("api/scenarios"))).json();
