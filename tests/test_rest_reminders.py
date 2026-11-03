@@ -33,8 +33,12 @@ def _first_user(env):
     return next(iter(env.tools.db.users.data))
 
 
-def test_reminders_are_off_by_default_and_unknown_ones_are_refused():
+def test_reminders_are_on_by_default_with_an_off_switch_and_unknown_ones_are_refused():
     e, events = _enforcer()
+    assert e.declare_clauses == declare_reminder_clauses() and e.step_warn == 60
+    assert events.events("gates.manifest")[-1]["payload"]["reminders"] == ["declare"]
+    assert events.events("gates.manifest")[-1]["payload"]["step_warn"] == 60
+    e, events = _enforcer(reminders=(), step_warn=None)
     assert e.declare_clauses == [] and e.step_warn is None
     assert events.events("gates.manifest")[-1]["payload"]["reminders"] == []
     with pytest.raises(ValueError, match="unknown reminders"):

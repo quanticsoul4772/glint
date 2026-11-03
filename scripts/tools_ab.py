@@ -41,9 +41,15 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS). Set key
   `request_gate` (default true) false turns the banking request gate off (research row 6, fix-research-2026-11-02):
   no request gates, no request-record reminder, no record_requests tool (glint.gates.Enforcer).
-  Opt-in tools-arm keys, all off by default: `reminders` (glint.gates.reminders.REMINDERS: "declare" shows pending
-  obligations of the agreed blind clause list), `step_warn` (replayed calls before the step-limit warning) and
-  `search_compact_after` (knowledge-base searches before searches answer with a diagnosis, glint.assist.kb). Keys
+  Tools-arm keys, all on by default since the owner's decision of 2026-11-03 (every fix on by default); a key left
+  out takes the enforcer option's default (glint.gates.extend): `reminders` (default ["declare"]: pending
+  obligations of the agreed blind clause list; [] is off), `step_warn` (default 60 replayed calls before the
+  step-limit warning; null is off), `search_compact_after` (default 20 knowledge-base searches before searches answer
+  with a diagnosis, glint.assist.kb; null is off), `uncovered_reminder` (default true: a [review] open item after
+  each no_rule_yet write; false is off) and `stages` (default true: each configured stage runs; false is off), with
+  `stage_model` ("module:function", default glint.gates.stages.MODEL, empty: no model, so no stage runs and nothing
+  is called; with one the agent's conversation is tapped per run for the stages). The module-value switches
+  (entry_wait_fraud, credit_amount_mode, constraints; glint.gates.module_switches) take their on defaults. Keys
   `llm_user` and `llm_args_user` replace the customer model of both arms (a second simulator, glint.second_sim).
 - `banking-plan-v2-gated`: the tools arm of `banking-plan-gated` only, after the incorrect_amount dispute became a
   planned partial refund of the overcharge with the customer's choice winning and neutral asking (PR 101, PR 102). It is
@@ -158,8 +164,10 @@ from glint.assist import tau2_tools
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import lean_saved, recording
-from glint.gates import Enforcer, EventLog
+from glint.gates import Enforcer, EventLog, extend
+from glint.gates import stages as stage_config
 from glint.gates import summary as gate_summary
+from glint.gates.conversation import TranscriptTap
 from glint.gates.rules import REQUIRED_GATES
 from glint.meter import BudgetExceeded, Caps, Meter, guarded, litellm_callback, register_litellm_prices
 from glint.ratelimit import RateLimiter
@@ -742,14 +750,34 @@ def empty_reply_line(response) -> str | None:
     return f"EMPTY REPLY: {task_id} trial {trial}: finish_reason {choice.finish_reason}, {tokens}"
 
 
-def _enforcer(cfg: dict, domain: str, data: Path) -> Enforcer | None:
-    """The write gates for the tools arm (None when the set has `gates` false); decisions go to one log per run."""
+def _default(name: str):
+    """A registered enforcer option's default (glint.gates.extend): a set key left out takes it."""
+    return extend.OPTIONS[name].default
+
+
+def _stage_model(cfg: dict):
+    """The model call of the stages: None when the set turns gates or stages off, or names no model (`stage_model`,
+    default glint.gates.stages.MODEL, empty)."""
+    if not cfg.get("gates", True) or not cfg.get("stages", True):
+        return None
+    return stage_config.resolve_model(cfg.get("stage_model"))
+
+
+def _enforcer(cfg: dict, domain: str, data: Path, transcript: TranscriptTap | None = None) -> Enforcer | None:
+    """The write gates for the tools arm (None when the set has `gates` false); decisions go to one log per run. A key
+    the set leaves out takes the option's default; every fix is on by default (owner's decision, 2026-11-03)."""
     if not cfg.get("gates", True):
         return None
+    model = _stage_model(cfg)
+    stages = stage_config.default_stages(model, transcript) if cfg.get("stages", True) else None
     return Enforcer(domain, EventLog(data / f"gates-{domain}.sqlite"),
                     context=run_context,
                     wording=cfg.get("deny_wording", "plain"), request_gate=cfg.get("request_gate", True),
-                    reminders=tuple(cfg.get("reminders", ())), step_warn=cfg.get("step_warn"))
+                    reminders=tuple(cfg.get("reminders", _default("reminders"))),
+                    step_warn=cfg.get("step_warn", _default("step_warn")),
+                    uncovered_reminder=cfg.get("uncovered_reminder", _default("uncovered_reminder")),
+                    stages=stages,
+                    search_compact_after=cfg.get("search_compact_after", _default("search_compact_after")))
 
 
 def rerun_command(argv: list[str] | None = None) -> str:
@@ -807,6 +835,10 @@ def generate(cfg: dict) -> None:
     quiet_run_log()
     litellm.callbacks = [litellm_callback((glim, ("Muse-Glimmer",)), (meta, ("muse-spark", "muse-wonder")))]
     base, glimmer = llm_utils.completion, reparsing(llm_utils.completion)
+    # the agent's conversation per run, for the stages, only when a stage model is configured (Glimmer is the agent)
+    tap = TranscriptTap(key=lambda: tuple(run_context().values())) if _stage_model(cfg) is not None else None
+    if tap is not None:
+        glimmer = tap.wrap(glimmer)
 
     halt = threading.Event()  # set by glimmer_serve.session() when the GPU cap trips or its watcher fails
     stopped: dict[str, str | None] = {"reason": None}  # set by fail_fast (runlog: a pattern that cannot be noise)
@@ -881,9 +913,9 @@ def generate(cfg: dict) -> None:
             glimmer_serve.wait_ready(endpoint, os.environ["MODAL_PROXY_KEY"], os.environ["MODAL_PROXY_SECRET"],
                                      failed=log.failure, log_lines=lambda: len(log.lines))
         for domain, ids, arm in pending:
-            enforcer = _enforcer(cfg, domain, data) if arm == "tools" else None
+            enforcer = _enforcer(cfg, domain, data, tap) if arm == "tools" else None
             if arm == "tools":
-                tau2_tools.SEARCH_COMPACT_AFTER = cfg.get("search_compact_after")
+                tau2_tools.SEARCH_COMPACT_AFTER = cfg.get("search_compact_after", _default("search_compact_after"))
                 install(domain, enforcer=enforcer)
             glim_before, meta_before = glim.meta_usd, meta.meta_usd
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",

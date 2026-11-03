@@ -10,7 +10,7 @@ import pytest
 from test_gates_phase2 import BANKING, TEST_SPLIT, _bank, _hidden, _play, _ran
 
 from glint import convcheck, paths, verifiers
-from glint.gates import GateRegistry, constraints, debit, fees, rules
+from glint.gates import Enforcer, EventLog, GateRegistry, constraints, debit, fees, rules
 
 DB = json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "db.json").read_text(encoding="utf-8"))
 CREDIT = "apply_checking_account_credit_5829"
@@ -59,7 +59,7 @@ def test_credit_amount_modes():
     assert flagged.allowed and flagged.rule_id == fees.UNMATCHED and flagged.details["net_correction"] == 9.5
     refused = fees.credit_amount(db, a, "deny")
     assert not refused.allowed and "9.50" in refused.fix and refused.facts
-    assert fees.credit_amount(db, a).allowed  # the default is "flag"
+    assert not fees.credit_amount(db, a).allowed  # the default is "deny" (owner's decision, 2026-11-03)
     with pytest.raises(ValueError):
         fees.credit_amount(db, a, "strict")
 
@@ -91,30 +91,42 @@ def test_foreign_withdrawals_and_the_monthly_rebate_cap():
     assert parts["fees_due"] == 60.0 and parts["rebates_due"] == 50.0 and net == -10.0
 
 
-def test_checking_credit_gate_flags_an_unmatched_amount_and_still_runs_it():
+def test_checking_credit_gate_refuses_an_unmatched_amount_and_flags_it_when_off(monkeypatch):
     env, task, events = _bank("task_073")
     first = _play(env, task, CREDIT)
     assert _ran(_hidden(env, CREDIT, **first))
     assert _gate_rule(events, f"banking_{CREDIT}_gate") == "banking.checking_credit"
     other = next(k for k in ("chk_kj93a7b2e1_1", "chk_kj93a7b2e1_2") if k != first["account_id"])
+    # the default "deny" (owner's decision, 2026-11-03)
+    assert not _ran(_hidden(env, CREDIT, account_id=other, amount=1.0, credit_type="fee_refund"))
+    assert _gate_rule(events, f"banking_{CREDIT}_gate") == fees.UNMATCHED
+    # the off switch, Enforcer(credit_amount_mode="flag"): allowed and flagged
+    monkeypatch.setattr(fees, "CREDIT_AMOUNT_MODE", fees.CREDIT_AMOUNT_MODE)  # restored after the test
+    events = EventLog(":memory:")
+    env, task, _ = _bank("task_073", Enforcer("banking_knowledge", events, credit_amount_mode="flag"))
+    first = _play(env, task, CREDIT)
+    assert _ran(_hidden(env, CREDIT, **first))
     assert _ran(_hidden(env, CREDIT, account_id=other, amount=1.0, credit_type="fee_refund"))
     assert _gate_rule(events, f"banking_{CREDIT}_gate") == fees.UNMATCHED
 
 
 # ---- 48-hour entry wait after a fraud_suspected closure (doc 029 vs 031) ------------------------------------------
 
-def test_entry_wait_after_a_fraud_closure_is_a_flagged_allow(monkeypatch):
-    env, task, events = _bank("task_091")
+def test_entry_wait_after_a_fraud_closure_is_refused_by_default_and_flagged_when_off(monkeypatch):
+    # the default "deny" (owner's decision, 2026-11-03) refuses task_091's gold
+    env, task, _ = _bank("task_091")
+    gold = _play(env, task, debit.ORDER, 1)
+    assert debit.ENTRY_WAIT_FRAUD == "deny"
+    assert not debit.order(env.tools.db, gold).allowed
+    # the off switch, Enforcer(entry_wait_fraud="flag"): allowed and flagged
+    monkeypatch.setattr(debit, "ENTRY_WAIT_FRAUD", debit.ENTRY_WAIT_FRAUD)  # restored after the test
+    events = EventLog(":memory:")
+    env, task, _ = _bank("task_091", Enforcer("banking_knowledge", events, entry_wait_fraud="flag"))
     gold = _play(env, task, debit.ORDER, 1)
     assert _ran(_hidden(env, debit.ORDER, **gold))
     assert _gate_rule(events, f"debit_{debit.ORDER}_gate") == debit.ENTRY_WAIT_FLAG
     fired = [e for e in events.events("gate.fired") if e["payload"]["rule_id"] == debit.ENTRY_WAIT_FLAG][-1]
     assert "029 vs 031" in fired["payload"]["reason"]
-    # the deny setting refuses task_091's gold: the reason it is not the default
-    env, task, _ = _bank("task_091")
-    gold = _play(env, task, debit.ORDER, 1)
-    monkeypatch.setattr(debit, "ENTRY_WAIT_FRAUD", "deny")
-    assert not debit.order(env.tools.db, gold).allowed
 
 
 # ---- constrained values (τ² tool docstrings) ----------------------------------------------------------------------
@@ -146,10 +158,12 @@ def test_constraint_violations_schema_and_gate():
 
 
 def test_constraint_gates_register_only_when_enabled(monkeypatch):
+    assert constraints.ENABLED  # on by default (owner's decision, 2026-11-03)
+    assert [g for g in rules.build_registry("banking_knowledge").gates() if g.name.startswith("constraints_")]
+    monkeypatch.setattr(constraints, "ENABLED", False)
     reg = GateRegistry()
     constraints.register(reg, "banking_knowledge")
     assert reg.gates() == []
-    assert not [g for g in rules.build_registry("banking_knowledge").gates() if g.name.startswith("constraints_")]
     monkeypatch.setattr(constraints, "ENABLED", True)
     constraints.register(reg, "retail")
     assert reg.gates() == []

@@ -45,21 +45,23 @@ def turns(messages: Iterable) -> list[Turn]:
 class TranscriptTap:
     """The conversation as the agent last saw it: wrap the agent's completion function, and each call keeps the
     message list it was sent (LiteLLM's `messages`, keyword or second positional argument). Calling the tap returns
-    those messages as turns."""
+    those messages as turns. `key` (default: one conversation) names the conversation a call belongs to, so
+    conversations run concurrently each keep their own messages (tools_ab passes its run context)."""
 
-    def __init__(self):
-        self._messages: list = []
+    def __init__(self, key: Callable[[], object] | None = None):
+        self._key = key or (lambda: None)
+        self._messages: dict = {}
 
     def wrap(self, completion: Callable) -> Callable:
         def wrapped(*args, **kwargs):
             messages = kwargs.get("messages", args[1] if len(args) > 1 else None)
             if messages is not None:
-                self._messages = list(messages)
+                self._messages[self._key()] = list(messages)
             return completion(*args, **kwargs)
         return wrapped
 
     def __call__(self) -> list[Turn]:
-        return turns(self._messages)
+        return turns(self._messages.get(self._key(), []))
 
 
 def _norm(text: str) -> str:

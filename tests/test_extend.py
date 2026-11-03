@@ -27,14 +27,17 @@ def _reply(content: str = "ok", error: bool = False) -> ToolMessage:
 
 def test_the_existing_keywords_are_registered_options_with_their_defaults_and_one_line_docs():
     opts = {o.name: o for o in extend.options()}
-    assert {"wording": "plain", "stages": None, "uncovered_reminder": False}.items() <= {
+    # every fix on by default (owner's decision, 2026-11-03); stages "auto" runs nothing with no model configured
+    assert {"wording": "plain", "stages": "auto", "uncovered_reminder": True}.items() <= {
         n: o.default for n, o in opts.items()}.items()
     assert [o.name for o in extend.options()][:3] == ["wording", "stages", "uncovered_reminder"]
     assert all(o.doc and "\n" not in o.doc for o in opts.values())
     enforcer = Enforcer("retail", events := EventLog(":memory:"))
-    assert (enforcer.wording, enforcer.stages, enforcer.uncovered_reminder) == ("plain", None, False)
+    assert (enforcer.wording, enforcer.stages, enforcer.uncovered_reminder) == ("plain", None, True)
     payload = _manifest(events)
-    assert payload["wording"] == "plain" and "stages" not in payload and "uncovered_reminder" not in payload
+    assert payload["wording"] == "plain" and "stages" not in payload and payload["uncovered_reminder"] is True
+    off = Enforcer("retail", events := EventLog(":memory:"), stages=None, uncovered_reminder=False)
+    assert (off.stages, off.uncovered_reminder) == (None, False) and "uncovered_reminder" not in _manifest(events)
 
 
 def test_an_unknown_keyword_is_refused_and_a_bad_wording_still_raises():

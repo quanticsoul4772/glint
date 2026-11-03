@@ -276,7 +276,8 @@ def test_generate_prints_gate_outcomes_and_watches_with_the_domain(stand_in, mak
     outcomes["base"] = [make_sim("1", 0), make_sim("1", 1)]
     outcomes["tools"] = [make_sim("1", 0), make_sim("1", 1)]
     log = gate_log(tmp_path / "gates.sqlite", [])
-    monkeypatch.setattr(tools_ab, "_enforcer", lambda cfg_, domain, data: types.SimpleNamespace(events=log))
+    monkeypatch.setattr(tools_ab, "_enforcer",
+                        lambda cfg_, domain, data, transcript=None: types.SimpleNamespace(events=log))
     domains = []
     real = tools_ab.RunEvents
 

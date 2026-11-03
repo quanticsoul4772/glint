@@ -1,9 +1,12 @@
-"""Opt-in reminders and a transfer flag on the enforcer (fix-research appendix #60, #68, #69; PR #40), all off by
-default and registered as enforcer options and hooks (glint.gates.extend).
+"""Reminders and a transfer flag on the enforcer (fix-research appendix #60, #68, #69; PR #40), registered as
+enforcer options and hooks (glint.gates.extend). The reminders are on by default since the owner's decision of
+2026-11-03 (every fix on by default).
 
-- `reminders=("declare",)` (#60): the open items also list the pending obligations of the agreed blind clause list
-  (glint.declare) whose activities the trace of replayed calls can show.
-- `step_warn=N` (#69): once N calls τ²'s evaluator replays have run, the open items end with STEP_WARN_NOTE.
+- `reminders=("declare",)` (#60, the default; `reminders=()` is off): the open items also list the pending
+  obligations of the agreed blind clause list (glint.declare) whose activities the trace of replayed calls can show.
+- `step_warn=N` (#69; default 60, `step_warn=None` is off): once N calls τ²'s evaluator replays have run, the open
+  items end with STEP_WARN_NOTE. 60 was chosen by a parallax score at the owner's request (60 scored 78, 80: 66,
+  40: 62).
 - A transfer.flagged event (#68) when a transfer ran while every recorded request names an action this toolkit has a
   tool for. Flag only, never a refusal.
 
@@ -26,7 +29,7 @@ from glint.gates.rules import parse_hidden_arguments
 
 log = logging.getLogger("glint.gates")
 WRAPPER = declare.WRAPPER
-REMINDERS = ("declare",)  # opt-in reminders (Enforcer(reminders=...)); each only adds [open] lines, never refuses
+REMINDERS = ("declare",)  # the reminders (Enforcer(reminders=...)); each only adds [open] lines, never refuses
 CLAUSES = Path(__file__).resolve().parents[3] / "data-public" / "clauses" / "reconciled.json"
 # appendix #69 (reader 3 K5; B2 §1): a step-limit warning listing the open items. Glint convention: the gates see tool
 # calls only, never τ²'s step count, so the trigger counts the calls τ²'s evaluator replays (a lower bound on steps)
@@ -83,11 +86,12 @@ def _setup_reminders(enforcer, reminders) -> None:
     enforcer.declare_clauses = declare_reminder_clauses() if "declare" in reminders else []
 
 
-extend.option("reminders", (), "opt-in open-items reminders (REMINDERS); \"declare\" lists pending blind-clause "
-              "obligations; off by default", order=40, owner=__name__, setup=_setup_reminders,
+extend.option("reminders", ("declare",), "open-items reminders (REMINDERS); \"declare\" lists pending blind-clause "
+              "obligations; on by default, () is off", order=40, owner=__name__, setup=_setup_reminders,
               manifest=lambda enforcer, reminders: {"reminders": sorted(reminders)})
-extend.option("step_warn", None, "the step-limit warning (STEP_WARN_NOTE) once that many replayed calls ran; off by "
-              "default", order=41, owner=__name__, manifest=lambda enforcer, step_warn: {"step_warn": step_warn})
+extend.option("step_warn", 60, "the step-limit warning (STEP_WARN_NOTE) once that many replayed calls ran; 60 by "
+              "default, None is off", order=41, owner=__name__,
+              manifest=lambda enforcer, step_warn: {"step_warn": step_warn})
 
 
 @extend.hook("attach", order=40)
@@ -134,7 +138,7 @@ def _flag_transfer(call: extend.Call, reply: ToolMessage) -> None:
 
 @extend.hook("open_items", order=10)
 def _extra_items(call: extend.Call) -> list[str]:
-    """The opt-in reminders' [open] lines: pending Declare obligations whose activities glint_trace can show,
+    """The reminders' [open] lines: pending Declare obligations whose activities glint_trace can show,
     then the step-limit warning. Deterministic over what the replay rebuilds."""
     enforcer, tools = call.enforcer, call.tools
     clauses = [c for c in enforcer.declare_clauses

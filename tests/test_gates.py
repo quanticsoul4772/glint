@@ -769,8 +769,12 @@ def test_no_gold_write_is_refused():
     events = EventLog(":memory:")
     reports = [gate_replay.replay(d, gate_replay.tasks_of(d), events) for d in gate_replay.DOMAINS]
     refusals = [f for r in reports for f in r["false_refusals"]]
-    assert refusals == [], "\n".join(f"{f['domain']} {f['task_id']} {f['tool']} {f['rule_id']}: {f['reason']}"
-                                     for f in refusals)
+    # exactly one expected refusal: task_091's entry-tier replacement after a fraud_suspected closure, refused by
+    # debit.order.entry_wait. Owner's decision (2026-11-03): every fix on by default; the 48-hour wait follows doc
+    # 029, which conflicts with doc 031 (029 vs 031). Any other refusal still fails this test.
+    assert [(f["domain"], f["task_id"], f["tool"], f["rule_id"]) for f in refusals] == [
+        ("banking_knowledge", "task_091", "order_debit_card_5739", "debit.order.entry_wait")], "\n".join(
+        f"{f['domain']} {f['task_id']} {f['tool']} {f['rule_id']}: {f['reason']}" for f in refusals)
     # the gold write τ²'s tool rejects anyway (retail 105: gift card balance)
     assert sorted(f["task_id"] for r in reports for f in r["also_rejected"]) == ["105"]
     assert [r["tasks"] for r in reports] == [74, 30, 77]
