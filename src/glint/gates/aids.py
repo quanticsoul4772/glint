@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 
 from glint.assist.banking import TODAY
+from glint.gates import extend
 from glint.gates.bankdb import as_date
 from glint.gates.core import GateResult, allow, deny
 
@@ -123,3 +124,32 @@ def counts_as_seen(reply) -> bool:
     """A tool result counted as shown to the agent: a reply to the assistant that is not an error."""
     return (getattr(reply, "requestor", "assistant") == "assistant" and not reply.error
             and not str(reply.content).startswith("Error"))
+
+
+# The records the two denies judge on, kept by enforcer hooks (glint.gates.extend).
+
+@extend.hook("attach", order=30)
+def _init_records(enforcer, env) -> None:
+    env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
+    env.tools.glint_seen = []  # every assistant tool result that is not an error, for identifier provenance (N10)
+    env.glint_seen_before = {}  # in τ²'s replay: tool message id -> the results before it (seen_before)
+
+
+@extend.hook("before_call", order=10)
+def _replayed_seen(call: extend.Call) -> None:
+    """In τ²'s replay, judge each call on the results the live check saw before it."""
+    before = call.env.glint_seen_before
+    if call.replay and str(call.message.id) in before:
+        call.tools.glint_seen = list(before[str(call.message.id)])
+
+
+@extend.hook("after_write", order=30)
+def _record_ran(call: extend.Call, reply) -> None:
+    if extend.ran(reply):
+        call.tools.glint_ran.add(write_key(*call.write))
+
+
+@extend.hook("reply", order=20)
+def _record_seen(call: extend.Call, reply) -> None:
+    if counts_as_seen(reply):
+        call.tools.glint_seen.append(str(reply.content))

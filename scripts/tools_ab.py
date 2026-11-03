@@ -41,7 +41,7 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS). Set key
   `request_gate` (default true) false turns the banking request gate off (research row 6, fix-research-2026-11-02):
   no request gates, no request-record reminder, no record_requests tool (glint.gates.Enforcer).
-  Opt-in tools-arm keys, all off by default: `reminders` (glint.gates.enforce.REMINDERS: "declare" shows pending
+  Opt-in tools-arm keys, all off by default: `reminders` (glint.gates.reminders.REMINDERS: "declare" shows pending
   obligations of the agreed blind clause list), `step_warn` (replayed calls before the step-limit warning) and
   `search_compact_after` (knowledge-base searches before searches answer with a diagnosis, glint.assist.kb). Keys
   `llm_user` and `llm_args_user` replace the customer model of both arms (a second simulator, glint.second_sim).

@@ -12,7 +12,7 @@ from glint import declare
 from glint.assist import kb, tau2_tools
 from glint.assist.tau2_tools import assist_environment
 from glint.gates import Enforcer, EventLog
-from glint.gates.enforce import (
+from glint.gates.reminders import (
     CLAUSES,
     STEP_WARN_NOTE,
     TOOLS_COVER,
