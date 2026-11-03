@@ -201,9 +201,11 @@ class DisputePlanTools(ToolKitBase):
     @is_tool(ToolType.GENERIC, mutates_state=True)
     def record_requests(self, user_id: str, requests: list[dict]) -> dict:
         """Record the account actions the customer asked for, before making any of them. Each write below is checked
-        against this record: a write it does not cover is refused until the customer asks for it and it is recorded.
-        Call it again to add requests when the customer asks for more (each call adds to the record). It does not change the
-        database.
+        against this record: a close, payment, filing or other change it does not cover is refused until the customer
+        asks for it and it is recorded (the refusal shows the record_requests call to make). A closure reason log or a
+        debit card order it does not cover still runs and is flagged for review. A close_debit_card request also covers
+        the replacement order on that card's checking account. Call it again to add requests when the customer asks for
+        more (each call adds to the record). It does not change the database.
 
         Args:
             user_id: The customer's user id.
