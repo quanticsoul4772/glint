@@ -219,8 +219,8 @@ def test_a_session_log_opened_with_another_key_setting_names_the_fix(server, mon
     server.load_scenario(None, "task_054")
     server.session().events.close()
     monkeypatch.delenv(KEY_ENV)
-    restarted = bank.BankServer(sid="s1")  # the same session folder, now without the key
-    with pytest.raises(MCPError, match=f"keyed log.*Restart the server with {KEY_ENV}"):
+    restarted = bank.BankServer(sid="s1")  # the same session folder, now under the per-install key file instead
+    with pytest.raises(MCPError, match=f"different {KEY_ENV}.*Restart the server with {KEY_ENV}"):
         restarted.call(None, bank.POLICY, {})
     monkeypatch.setenv(KEY_ENV, "operator key")
     assert not bank.BankServer(sid="s1").call(None, bank.POLICY, {}).is_error
@@ -344,7 +344,8 @@ def test_brief_and_log_clis(server, capsys, monkeypatch):
     assert bank.main(["log", "s1"]) == 0
     out = capsys.readouterr().out
     assert "scenario.loaded  task_054" in out and "banking.cli.submit.reduce_amount" in out
-    assert "gates.manifest" in out and "hash chain intact (sha256)" in out and "head: event " in out
+    assert "gates.manifest" in out and "hash chain intact (hmac-sha256)" in out and "head: event " in out
+    assert "unkeyed" not in out and "write.ran" in out
     with pytest.raises(SystemExit, match="no gate log"):
         bank.main(["log", "nobody"])
     with pytest.raises(SystemExit, match="unknown task_id"):

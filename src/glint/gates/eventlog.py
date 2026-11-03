@@ -9,8 +9,13 @@ does not match.
 What the chain protects against depends on the key:
 - **Unkeyed (sha256):** accidental damage and edits that do not recompute the chain. Anyone who can write the file can
   drop the triggers, edit a row and recompute every hash after it.
-- **Keyed (HMAC-SHA256, GLINT_LOG_KEY):** a rewrite by anyone without the key. The key is in the gate server's
-  environment, so keep it out of the agent's prompt and of any file the agent can read. The scheme is recorded in the file's meta table, so a keyed log is never verified as an unkeyed one.
+- **Keyed (HMAC-SHA256, GLINT_LOG_KEY or a per-install key file, `install_key`):** a rewrite by anyone without the
+  key. Keep the key out of the agent's prompt and of any file the agent can read. The scheme is recorded in the file's
+  meta table, so a keyed log is never verified as an unkeyed one; `recorded_scheme` reads it without opening the log
+  for writing. A writer who can replace the whole file can still swap in an unkeyed log, so a verifier that expects
+  a keyed log treats "sha256" as a finding.
+- **What is logged:** decisions (gate.fired, write.attested) and outcomes (write.ran: the tool's result status and
+  the database hash after each allowed write; glint.gates.enforce).
 - **Truncation:** cutting rows off the end leaves a valid shorter chain. `head()` returns (count, last hash); kept
   somewhere the agent cannot write, `verify(expected_head=...)` fails when the log no longer contains that head.
 """
@@ -20,6 +25,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import sqlite3
 import threading
 import time
@@ -66,6 +72,46 @@ def log_key() -> bytes | None:
     """The operator's chain key from GLINT_LOG_KEY, or None for an unkeyed log."""
     value = os.environ.get(KEY_ENV, "")
     return value.encode("utf-8") if value else None
+
+
+def install_key(path: str | Path) -> bytes:
+    """The per-install chain key kept in `path`, created on first use: 32 random bytes as hex, in a file opened with
+    owner-only permissions (0600 where the system honors them). An existing file is never replaced; an empty one is an
+    error, because a key that changed would leave every log written with the old one unverifiable."""
+    path = Path(path)
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:  # another process created it between the check and the open
+            pass
+        else:
+            with os.fdopen(fd, "w", encoding="ascii") as f:
+                f.write(secrets.token_hex(32))
+    value = path.read_text(encoding="ascii").strip()
+    if not value:
+        raise ChainBroken(f"the log key file {path} is empty: restore it from a backup, or move it away to start new "
+                          "logs under a new key (logs written with the old key then need the old key to verify)")
+    return value.encode("ascii")
+
+
+def recorded_scheme(path: str | Path) -> str | None:
+    """The chain scheme a log file records ("sha256" or "hmac-sha256"), read without writing to it: "sha256" for a file
+    from before the meta table that holds events, None for a missing or empty log."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "meta" in tables:
+            row = conn.execute("SELECT v FROM meta WHERE k = 'chain'").fetchone()
+            if row:
+                return row[0]
+        has_events = "events" in tables and conn.execute("SELECT 1 FROM events LIMIT 1").fetchone() is not None
+    finally:
+        conn.close()
+    return "sha256" if has_events else None
 
 
 def chain_hash(prev_hash: str, event_id: str, ts: int, event_type: str, actor: str, payload_text: str,
