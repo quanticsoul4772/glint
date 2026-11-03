@@ -81,6 +81,22 @@ def decisions(events: list[dict]) -> tuple[int, Counter]:
     return writes, denies
 
 
+OTHER_CHECKS = "other"  # a deny from no registered gate (unparsed arguments, a stage, a gate since renamed)
+
+
+def denies_by_checks(events: list[dict], checks: dict[str, str]) -> dict[str, Counter]:
+    """A gate log's live denies by what the denying gate rests on (`checks`: gate name -> core.CHECKS kind, from
+    today's registry, since older logs' manifests do not carry it), each kind's denies counted by (gate, rule_id). A
+    deny whose gate `checks` does not name counts under OTHER_CHECKS."""
+    out: dict[str, Counter] = {}
+    for e in events:
+        p = e["payload"]
+        if e["type"] != "gate.fired" or p.get("replay") or p["decision"] == "allow":
+            continue
+        out.setdefault(checks.get(p["gate"], OTHER_CHECKS), Counter())[(p["gate"], p["rule_id"])] += 1
+    return out
+
+
 def denied_runs(events: list[dict]) -> set[tuple[str, str]]:
     """(task_id, trial) of every run with a live deny in the gate log. A run that overflowed the context keeps no
     messages in τ²'s save, so its denies are only here (banking-plan-v5-gated: 17 runs counted from the messages,

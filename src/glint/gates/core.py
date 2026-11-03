@@ -85,17 +85,28 @@ def deny(rule_id: str, source: str, reason: str, fix: str, details: dict | None 
 
 GateFn = Callable[[Any, dict], GateResult]
 
+# What a gate's decision rests on (docs/gate-classes.md). ACCOUNT_RECORDS: the live database, the write's arguments
+# and the record of tool calls that actually ran in the conversation; a misbehaving agent cannot make such a gate allow
+# a write without changing what the database or a real tool result shows. AGENT_RECORDS: at least one of its checks
+# is passed by what the agent itself states the customer said (a record_* call, the customer's answers in a
+# plan_disputes call) or by repeating a refused call (an ask-once check). Nothing compares those statements with the
+# conversation unless a conversation stage is configured, so an agent that makes them up passes these checks.
+ACCOUNT_RECORDS, AGENT_RECORDS = "account_records", "agent_records"
+CHECKS = (ACCOUNT_RECORDS, AGENT_RECORDS)
+
 
 @dataclass(frozen=True)
 class Gate:
     """One gate. `fn(db, args)` judges the write; with `toolkit=True` it gets the environment's toolkit instead of its
-    database (a procedure gate reads `toolkit.db` and which hidden reads that environment records)."""
+    database (a procedure gate reads `toolkit.db` and which hidden reads that environment records). `checks` says
+    what its decision rests on (CHECKS)."""
     name: str
     tools: tuple[str, ...]
     purpose: str
     fn: GateFn
     timeout_s: float = DEFAULT_TIMEOUT_S
     toolkit: bool = False
+    checks: str = ACCOUNT_RECORDS
 
 
 class GateRegistry:
@@ -105,6 +116,8 @@ class GateRegistry:
     def register(self, gate: Gate) -> Gate:
         if not gate.purpose or not gate.purpose.strip():
             raise ValueError(f"gate {gate.name!r} has no purpose: every gate states why it exists when it fires")
+        if gate.checks not in CHECKS:
+            raise ValueError(f"gate {gate.name!r} checks {gate.checks!r}; one of {CHECKS}")
         if not gate.tools:
             raise ValueError(f"gate {gate.name!r} names no tool")
         if gate.name in self._gates:
@@ -120,6 +133,10 @@ class GateRegistry:
 
     def gates(self) -> list[Gate]:
         return list(self._gates.values())
+
+    def checks_counts(self) -> dict[str, int]:
+        """How many registered gates rest on each kind of record (CHECKS), every kind listed."""
+        return {kind: sum(g.checks == kind for g in self._gates.values()) for kind in CHECKS}
 
 
 def assert_required(registry: GateRegistry, required: set[str], where: str) -> None:
