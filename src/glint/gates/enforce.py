@@ -54,7 +54,8 @@ Extending the enforcer (glint.gates.extend). A new feature registers an option (
 one-line doc and gates.manifest keys) and hooks (ordered functions run when an environment is attached, before each
 call, after a read, before and after an allowed write, on every reply, and for extra open items) in its own module,
 instead of editing `Enforcer.__init__`, the gates.manifest call or `get_response`. The options and hooks of the
-features this module owns are registered at its end; glint.gates.stages and glint.gates.aids register theirs.
+features this module owns are registered at its end; glint.gates.stages, glint.gates.aids and glint.gates.reminders
+(the opt-in reminders, step_warn and the transfer flag) register theirs.
 
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -91,6 +92,7 @@ from glint.assist.banking import (
 )
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates import aids, debit, extend
+from glint.gates import reminders as _reminders  # noqa: F401  (registers the reminders, step_warn and their hooks)
 from glint.gates import stages as _stages  # noqa: F401  (registers the stages option and hook)
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers

@@ -16,6 +16,9 @@ from tau2.registry import registry
 from glint.assist import airline, banking, kb, retail
 
 SEARCH_WARN = 60  # knowledge-base calls in one conversation before the run log warns (see _count_search)
+# KB_search/grep calls after which new searches get kb.diagnosis instead of documents (appendix #72); None: off. A
+# tools_ab set turns it on with the key `search_compact_after`.
+SEARCH_COMPACT_AFTER: int | None = None
 # knowledge-base calls with no write between them before the search-loop guard adds the open items (see _guard).
 # scripts/search_guard_count.py on recorded train runs (in-sample, 2026-11-03): at 20, banking-unseen-v10-gated's tools
 # arm fires in 82 of 118 runs (6 of them passing), banking12-plan-v9-gated's in 3 of 40 tuned runs (none passing)
@@ -362,6 +365,14 @@ class BankingDecisionTools(DisputePlanTools):
                     f"(the first {shown}). Read one with KB_read(doc_id), or search with different words.")
         results = retrieve(query)
         ids = [doc_id for doc_id, _ in results[:kb.TOP_DOCS]]
+        returned = self.__dict__.setdefault("_glint_returned", [])
+        if SEARCH_COMPACT_AFTER is not None and calls > SEARCH_COMPACT_AFTER:
+            pipeline = self._kb_pipeline if tool == "KB_search" else self._grep_pipeline
+            answer = kb.diagnosis(pipeline, results, returned, calls)
+            returned += [d for d in ids if d not in returned]
+            seen[key] = (calls, ids, False)
+            return answer
+        returned += [d for d in ids if d not in returned]
         top = (self._kb_pipeline if tool == "KB_search" else self._grep_pipeline).get_document_content(ids[0]) if ids \
             else ""
         seen[key] = (calls, ids, len(top or "") <= kb.PAGE_CHARS)

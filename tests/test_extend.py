@@ -91,17 +91,21 @@ def test_a_reply_hook_replaces_the_reply_or_keeps_it_with_none(monkeypatch):
 
 def test_the_built_in_hooks_keep_the_order_the_wrapper_had():
     names = {p: [h.fn.__name__ for h in extend.hooks(p)] for p in extend.PHASES}
-    assert names["after_write"] == ["_allow_note", "_increase_record", "_record_ran", "_uncovered_write"]
+    assert names["after_write"] == ["_allow_note", "_increase_record", "_record_ran", "_uncovered_write",
+                                    "_trace_write", "_flag_transfer"]
     assert names["reply"] == ["_with_open_items", "_record_seen"]
-    assert names["after_read"] == ["_after_read_records"]
-    assert names["before_call"] == ["_replayed_seen"] and names["before_write"] == ["_increase_snapshot"]
-    assert names["attach"] == ["_init_uncovered", "_init_records", "_init_records"]  # enforce, stages, aids
+    assert names["after_read"] == ["_trace_read", "_after_read_records"]
+    assert names["before_call"] == ["_count_replayed", "_replayed_seen"]
+    assert names["before_write"] == ["_increase_snapshot"] and names["open_items"] == ["_extra_items"]
+    # enforce, stages, aids, reminders
+    assert names["attach"] == ["_init_uncovered", "_init_records", "_init_records", "_init_records"]
+    assert [o.name for o in extend.options()][3:5] == ["reminders", "step_warn"]
 
 
 def test_open_items_and_reply_hooks_reach_a_banking_reply_and_get_the_call(monkeypatch):
     monkeypatch.setattr(extend, "HOOKS", {p: dict(h) for p, h in extend.HOOKS.items()})
     got = []
-    extend.hook("open_items", 10, "demo")(lambda call: ["[open] demo item"])
+    extend.hook("open_items", 20, "demo")(lambda call: ["[open] demo item"])
     extend.hook("after_read", 5, "demo")(lambda call, reply: got.append((call.message.id, call.write, call.replay)))
     extend.hook("reply", 30, "demo")(lambda call, reply: reply.model_copy(update={"content": reply.content + "|end"}))
     task = Task.model_validate(TASKS["task_072"])
