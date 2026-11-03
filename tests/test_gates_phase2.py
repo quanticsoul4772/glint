@@ -700,6 +700,35 @@ def test_transfer_reason_after_fraud_is_the_fraud_code():
     assert _ran(_call(env, "transfer_to_human_agents", summary="s", reason="fraud_or_security_concern"))
 
 
+def test_a_transfer_without_a_doc_042_code_runs_flagged_with_a_reminder():
+    # task_005's gold transfer carries no reason: allowed, flagged in the gate log, and the reply names doc 042's codes
+    env, task, events = _bank("task_005")
+    gold = _play(env, task, "transfer_to_human_agents")
+    assert "reason" not in gold
+    reply = env.get_response(ToolCall(id="t", name="transfer_to_human_agents", arguments=gold, requestor="assistant"))
+    assert _ran(reply) and "[reminder] This transfer carries no reason code" in reply.content
+    assert all(code in reply.content for code in proc.TRANSFER_REASONS)
+    fired = events.events("gate.fired")[-1]["payload"]
+    assert (fired["decision"], fired["rule_id"]) == ("allow", proc.TRANSFER_UNCODED)
+    assert events.events("write.attested")[-1]["payload"]["classes"] == ["uncovered", "transfer_reason_uncoded"]
+    # a reason outside doc 042's list: still allowed and flagged (τ²'s own tool answers it with an error)
+    reply = _call(env, "transfer_to_human_agents", summary="s", reason="made_up_code")
+    assert "was NOT executed" not in reply.content and "reason 'made_up_code', not a code" in reply.content
+    assert _rule(events) == proc.TRANSFER_UNCODED
+    # a doc 042 code: the plain allow, rule-checked, no reminder
+    reply = _call(env, "transfer_to_human_agents", summary="s", reason="other")
+    assert _ran(reply) and "[reminder]" not in reply.content and _rule(events) == "procedure.transfer"
+    assert events.events("write.attested")[-1]["payload"]["classes"] == ["rule_checked"]
+
+
+def test_transfer_reasons_are_doc_042s_codes():
+    doc = json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "documents" /
+                      "doc_bank_accounts_bank_accounts_(general)_042.json").read_text(encoding="utf-8"))["content"]
+    listed = [line.split("|")[1].strip() for line in doc.splitlines()
+              if line.startswith("| ") and not line.startswith(("| Reason Code", "|---"))]
+    assert listed == list(proc.TRANSFER_REASONS)
+
+
 def test_transfer_is_gated_only_where_it_carries_a_reason_code():
     env = registry.get_env_constructor("retail")()
     events = EventLog(":memory:")

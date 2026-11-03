@@ -38,6 +38,10 @@ check_credit_limit_increase is GENERIC with mutates_state=True so the replay reb
 038 trial 3 each made the plan and filed none of its disputes before the customer ended the conversation. The items are a function of what the replay rebuilds, so a write's
 reply, footer included, replays unchanged.
 
+Since 2026-11-03 (fix research 2026-11-02; glint.gates.aids) it also keeps the writes that ran (`glint_ran`, for the
+duplicate-write deny) and the shipping address recorded with record_address_confirmation (`glint_address_confirmed`). An account read's reply carries the one-credit-per-checking-
+account fact (bank_accounts_(general)_017) ahead of the open items.
+
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": GateResult.message()} } to block a call (a PreToolUse deny
@@ -48,12 +52,14 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 
 from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
 from glint.assist import as_flag
 from glint.assist.banking import (
+    ADDRESS_TOOL,
     CLOSURE_REASON_TOOL,
     DISPUTE_ANSWERS_TOOL,
     ORDER_TOOL,
@@ -70,11 +76,12 @@ from glint.assist.banking import (
     waiver_due,
 )
 from glint.assist.tau2_tools import add_plan_tool
-from glint.gates import debit
+from glint.gates import aids, debit
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
+from glint.gates.procedure import TRANSFER_UNCODED
 from glint.gates.rules import (
     ADDRESS_ASK,
     APPROVE,
@@ -92,7 +99,7 @@ from glint.gates.rules import (
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
 VERDICT_TOOL = "check_credit_limit_increase"
-GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL)  # replies carry no open items
+GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL)  # replies: no open items
 CHECK_TOOLS = ("check_card_dispute", "check_verification", VERDICT_TOOL)  # decision tools logged as check.recorded
 
 
@@ -190,17 +197,21 @@ REPEAT_NOTE = ("\n\nThis exact call was already refused for the same reason, so 
                "cannot be resolved.")
 
 
-def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] = ()) -> list[str]:
+def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] = (),
+                        uncoded: list[str] | tuple[str, ...] = ()) -> list[str]:
     """What stood behind an allowed write, from the names of the gates that allowed it: 'rule_checked' (a policy rule
     on the write's values or state), 'customer_requested' (the request record covers it), or 'uncovered' (only the
     procedure gates and a no_rule_yet allow). `flagged` names the request gates that allowed the write without a
-    covering request (bank_rules.UNRECORDED): those add 'request_unrecorded', never 'customer_requested'."""
+    covering request (bank_rules.UNRECORDED): those add 'request_unrecorded', never 'customer_requested'. `uncoded`
+    names the gates that allowed a transfer with no doc-042 reason code (procedure.TRANSFER_UNCODED): those add
+    'transfer_reason_uncoded', never 'rule_checked'."""
     classes = []
-    if any(not g.startswith(("no_rule_", "procedure_", "banking_request_")) for g in passed):
+    if any(not g.startswith(("no_rule_", "procedure_", "banking_request_")) and g not in uncoded for g in passed):
         classes.append("rule_checked")
     if any(g.startswith("banking_request_") and g not in flagged for g in passed):
         classes.append("customer_requested")
-    return (classes or ["uncovered"]) + (["request_unrecorded"] if flagged else [])
+    return ((classes or ["uncovered"]) + (["request_unrecorded"] if flagged else [])
+            + (["transfer_reason_uncoded"] if uncoded else []))
 
 
 class Enforcer:
@@ -229,7 +240,8 @@ class Enforcer:
 
     def check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None) -> GateResult:
         """Run every gate on the write; the first deny wins. Each gate's decision is logged as gate.fired. A gate with
-        `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`."""
+        `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`. The returned allow carries every
+        passing gate's note, which get_response appends to the tool's reply."""
         if args is None:
             result = deny("unparsed_arguments", "glint.gates.enforce", "the hidden tool's arguments could not be "
                           "read, so no check could judge the write", "Pass `arguments` as a JSON object string.",
@@ -237,7 +249,7 @@ class Enforcer:
                           "of the request is not affected.", facts=["`arguments` is not a JSON object"])
             self._log(tool, args, result, 0.0, replay, "unparsed")
             return result
-        final, passed, flagged = None, [], []
+        final, passed, flagged, uncoded, notes = None, [], [], [], []
         for gate in self.registry.for_tool(tool):
             if gate.toolkit and toolkit is None:
                 result, ms = deny("gate_error", gate.name, f"the check {gate.name!r} needs the environment's "
@@ -254,18 +266,24 @@ class Enforcer:
             passed.append(gate.name)
             if result.rule_id == UNRECORDED:
                 flagged.append(gate.name)
+            if result.rule_id == TRANSFER_UNCODED:
+                uncoded.append(gate.name)
+            if result.note:
+                notes.append(result.note)
             final = final or result
         if final is None:  # attach() refuses an environment with an ungated write; this is a second line
             raise RuntimeError(f"write {tool} has no gate")
-        self._attest(tool, passed, replay, flagged)
-        return final
+        self._attest(tool, passed, replay, flagged, uncoded)
+        return replace(final, note="\n\n".join(notes))
 
-    def _attest(self, tool: str, passed: list[str], replay: bool, flagged: list[str] | None = None) -> None:
+    def _attest(self, tool: str, passed: list[str], replay: bool, flagged: list[str] | None = None,
+                uncoded: list[str] | None = None) -> None:
         """A write.attested event for each allowed write: which kind of check stood behind it (attestation_classes).
         Never decides anything; a failure to log is logged, not raised."""
         try:
             self.events.emit("write.attested", {"domain": self.domain, "tool": tool,
-                                                "classes": attestation_classes(passed, flagged or ()), "gates": passed,
+                                                "classes": attestation_classes(passed, flagged or (), uncoded or ()),
+                                                "gates": passed,
                                                 "replay": replay, **self.context()})
         except Exception:
             log.exception("the write.attested event was not logged")
@@ -393,6 +411,24 @@ class Enforcer:
         except Exception:
             log.exception("the retention_answer.recorded event was not logged")
 
+    def _record_address(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
+        """Keep the shipping address the customer confirmed for a card's replacement (record_address_confirmation; the
+        latest wins), which satisfies the address_ask gate (credit_card_replacements_001)."""
+        if call.requestor != "assistant" or call.name != ADDRESS_TOOL or reply.error:
+            return
+        try:
+            record = json.loads(reply.content)
+        except (TypeError, json.JSONDecodeError):
+            return
+        if not isinstance(record, dict) or not as_flag(record.get("recorded")):
+            return
+        env.tools.glint_address_confirmed[record["credit_card_account_id"]] = record["shipping_address"]
+        try:
+            self.events.emit("address.recorded", {
+                "domain": self.domain, "credit_card_account_id": record["credit_card_account_id"],
+                "address_on_file": record.get("address_on_file"), "replay": replay, **self.context()})
+        except Exception:
+            log.exception("the address.recorded event was not logged")
     def _record_dispute_answers(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """Keep the customer's recorded answers to the two debit dispute questions, per card (the latest wins)."""
         if call.requestor != "assistant" or call.name != DISPUTE_ANSWERS_TOOL or reply.error:
@@ -458,12 +494,19 @@ class Enforcer:
         env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
         env.tools.glint_address_asked = set()  # cards whose replacement the address_ask gate refused once
+        env.tools.glint_address_confirmed = {}  # card -> the shipping address recorded with record_address_confirmation
+        env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
             if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in GLINT_RECORDS
                     or reply.error or str(reply.content).startswith("Error")):
                 return reply
             items = _open_items(env.tools)
+            if message.name == WRAPPER:  # an account read carries the one-credit-per-account fact (row 14, doc 017)
+                args = message.arguments or {}
+                hidden = parse_hidden_arguments(args.get("arguments", "{}")) or {}
+                note = aids.credit_note(env.tools.db, str(args.get("agent_tool_name", "")), hidden)
+                items = [note, *items] if note else items
             return reply.model_copy(update={"content": f"{reply.content}\n\n" + "\n".join(items)}) if items else reply
 
         def get_response(message: ToolCall) -> ToolMessage:
@@ -475,6 +518,7 @@ class Enforcer:
                 self._record_retention(env, message, reply, state["replay"])
                 self._record_dispute_answers(env, message, reply, state["replay"])
                 self._record_requests(env, message, reply, state["replay"])
+                self._record_address(env, message, reply, state["replay"])
                 self._record_verdict(env, message, reply)
                 self._record_check(message, reply, state["replay"])
                 return with_open_items(message, reply)
@@ -482,7 +526,11 @@ class Enforcer:
             if result.allowed:
                 before = increase_request_ids(env.tools.db) if write[0] == SUBMIT else None
                 reply = original_response(message)
+                if result.note:  # an allow's reminder (procedure.TRANSFER_UNCODED): deterministic, so it replays
+                    reply = reply.model_copy(update={"content": f"{reply.content}\n\n{result.note}"})
                 self._record_increase(env, *write, reply, before)
+                if not reply.error and not str(reply.content).startswith("Error"):
+                    env.tools.glint_ran.add(aids.write_key(*write))
                 return with_open_items(message, reply)
             asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
             if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
