@@ -60,14 +60,15 @@ with quiet_stdout():
     from tau2.environment.toolkit import ToolType
     from tau2.runner.build import _derive_read_log_allowlist
 
-    from glint.assist.banking import DISPUTE_ANSWERS_TOOL, PLAN_TOOL, REQUESTS_TOOL, RETENTION_TOOL
+    from glint.assist.banking import ADDRESS_TOOL, DISPUTE_ANSWERS_TOOL, PLAN_TOOL, REQUESTS_TOOL, RETENTION_TOOL
     from glint.assist.tau2_tools import assist_environment
     from glint.gates import ChainBroken, Enforcer, EventLog
     from glint.gates.eventlog import KEY_ENV, log_key
 
 DOMAIN = "banking_knowledge"
 RETRIEVAL = "bm25_grep"
-READ_ONLY_GENERIC = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, "check_credit_limit_increase")
+READ_ONLY_GENERIC = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL,
+                     "check_credit_limit_increase")
 LOAD, POLICY = "load_scenario", "get_bank_policy"
 # published only with --decision-tools (the search fix replaces KB_search's body; it adds no name)
 DECISION_TOOLS = frozenset({"check_credit_limit_increase", "check_card_dispute", "check_verification", "KB_read"})
@@ -172,7 +173,7 @@ class BankServer:
             s.enforcer.attach(env)
         s.env = env
         s.published = set(env.tools.get_tools()) if self.decision_tools else base | {
-            PLAN_TOOL, RETENTION_TOOL, DISPUTE_ANSWERS_TOOL} | ({REQUESTS_TOOL} if self.request_gate else set())
+            PLAN_TOOL, RETENTION_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL} | ({REQUESTS_TOOL} if self.request_gate else set())
 
     def load_scenario(self, sid: str | None, task_id: str) -> tuple[str, bool]:
         """A fresh environment at the task's initial state (the base database for an empty task_id). Returns only the
