@@ -1,19 +1,128 @@
 # Glint
 
+**For banks letting AI agents write to accounts: the policy firewall between the agent and the account.**
+
+**The model proposes. The policy decides. A refused write never runs.**
+
 [![tests](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml/badge.svg)](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml)
+[![coverage 97% (96.86%, PR #45 run)](https://img.shields.io/badge/coverage-97%25-brightgreen)](docs/testing-strategy.md "coverage 97% (96.86%, PR #45 run)")
+[![tests: 909 passed (local, 2026-11-03)](https://img.shields.io/badge/tests-909%20passed%20%28local%2C%202026--11--03%29-brightgreen)](docs/testing-strategy.md)
+[![license MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**Verifiable agents: Glint puts Meta's open-weight Muse Glimmer 30B in front of a bank's accounts with the bank's written policy, as code, checking every write before it runs. A write the policy forbids does not run, and every decision goes into a hash-chained log.**
+<!-- GIF placeholder (block, fix, pass; under 10 MB), produced by the video build: ![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](video/demo.gif) -->
 
-An agent that can move money is only as safe as its worst call. A 30B model holds a customer conversation well and still gets policy decisions wrong: the largest credit-limit increase a card allows, which disputes need a provisional credit, whether a card can be closed. Glint takes those decisions away from the model. Each write the agent attempts goes through a gate that applies the bank's written policy to the live account records. An allowed write runs. A denied write does not run, and the agent gets the rule, what the check found, the facts it used and the next step. The agent cannot skip the check. A gate checks only what its rules encode: a write no rule covers is allowed and logged as such.
+**[Watch (2:31)](https://youtu.be/56g7D-g_iNI)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
 
-## For judges: three steps
-1. **Watch the demo video** (2:35, captions): [youtu.be/tdQuhfSO_9w](https://youtu.be/tdQuhfSO_9w). Every clip is replayed from recorded logs: the Muse Code run of 2026-10-31 and the desk's recorded runs.
-2. **Open the Bank Desk:** [quanticsoul4772.github.io/glint](https://quanticsoul4772.github.io/glint/). The same banking customer, handled by Glimmer alone and by Glimmer with Glint, side by side; press Play and watch for the red "Blocked by policy gate" cards. Then open **Try the gate**, pick a credit-limit increase for the simulated customer and see the gate's own decision for it. No sign-in, no install.
-3. **Check the gates yourself** (no GPU, no keys): clone and run the two gate replays in [Run it](#run-it), or load the [glint-bank plugin](plugins/glint-bank/README.md) in Muse Code, where every write to a τ² bank goes through the gates over MCP.
+Glint is write authorization for AI agents that touch money. Every account change the agent attempts goes through a gate before it runs; where the bank's written policy has a rule, the gate applies it as code to the live account records. An allowed write runs. A refused write does not run, and the agent gets the rule, the facts and the fix. Every decision lands in a hash-chained, tamper-evident log. Built on Meta's open-weight Muse Glimmer 30B, Muse Spark and Muse Code.
+
+## Why it matters
+- **Agents are getting payment access.** Visa (Intelligent Commerce, April 30, 2025) and Mastercard (Agent Pay, April 29, 2025) launched programs that let AI agents pay ([Retail TouchPoints](https://www.retailtouchpoints.com/topics/payments/visa-mastercard-paypal-dive-into-agentic-era-with-tools-that-help-consumers-use-ai-to-buy)). 64% of larger US banks were testing or deploying agentic AI, against 38% of smaller ones (SoundHound-commissioned Arizent/American Banker survey, n=201, [Nasdaq/GlobeNewswire](https://www.nasdaq.com/press-release/research-finds-two-three-us-banking-executives-believe-agentic-ai-will-change-how)).
+- **Risk controls decide which projects survive.** Gartner predicts over 40% of agentic AI projects will be canceled by the end of 2027, citing costs, unclear value or "inadequate risk controls" ([Gartner](https://www.gartner.com/en/newsroom/press-releases/2025-06-25-gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-canceled-by-end-of-2027)).
+- **Automated account actions are already an enforcement target (a non-AI parallel).** The CFPB's 2022 order against Wells Fargo, more than $2 billion in redress plus a $1.7 billion penalty (over $3.7 billion in all), cited account freezes in "more than 1 million instances" driven by "a faulty automated filter" ([CFPB](https://www.consumerfinance.gov/enforcement/actions/wells-fargo-bank-na-2022/)).
+- **Wrong account actions are expensive at scale.** Chargebacks: 261 million worth $33.8 billion in 2025 (Mastercard and Datos Insights estimate, [Mastercard](https://b2b.mastercard.com/news-and-insights/blog/what-s-the-true-cost-of-a-chargeback-in-2025)).
+
+## What makes it different
+1. **Deterministic enforcement of written business policy, before the write.**
+2. **Refusals carry the rule, the facts and the fix, so the agent can recover.** This is not described in competitors' docs ([AgentCore Policy](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/policy/overview.html) describes allow/deny; [ToolGuard](https://pypi.org/project/toolguard/0.1.19/) describes raising alerts).
+3. **The refusal and its hash-chained, tamper-evident record come from one gate.**
+4. **The first policy layer found measured with and without on τ²-bench banking** (ToolGuard's paper evaluates the airline domain only, [arXiv 2507.16459](https://arxiv.org/html/2507.16459v1)).
+5. **Built on Meta's open-weight stack.** It ships a LlamaFirewall custom-scanner adapter ([docs/llamafirewall.md](docs/llamafirewall.md)).
+
+| Approach | What it checks | Deterministic? | Explains the fix? | Tamper-evident record? |
+|---|---|---|---|---|
+| Content filters ([Llama Guard 4](https://build.nvidia.com/meta/llama-guard-4-12b/modelcard), [Lakera Guard](https://www.checkpoint.com/press-releases/check-point-acquires-lakera-to-deliver-end-to-end-ai-security-for-enterprises/), [Model Armor](https://docs.cloud.google.com/model-armor/help/configure-model-armor-gateway)) | Unsafe content, prompt injection, sensitive data in prompts, responses and tool payloads | No: model or classifier | Not described | Not described |
+| Generic authorization ([Cedar in AgentCore Policy](https://aws.amazon.com/about-aws/whats-new/2026/03/policy-amazon-bedrock-agentcore-generally-available/), [OPA](https://www.openpolicyagent.org/docs/management-decision-logs), [Cerbos](https://cerbos.dev/features-benefits-and-use-cases/ai-security)) | Whether an identity may call a tool or action, optionally with conditions on its inputs | Yes | Not described (allow or deny) | Decision logs; hash-chaining not described |
+| Model judges ([Microsoft Task Adherence](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/quickstart-task-adherence), [LlamaFirewall AlignmentCheck](https://arxiv.org/abs/2505.03574v1)) | Whether a proposed call or the agent's reasoning fits its task | No: model | Not described | Not described |
+| **Glint** | Each write against the bank's written policy and the live account records | **Yes:** plain Python functions | **Yes:** the rule, the facts and the next step | **Yes:** hash chain, HMAC-keyed with `GLINT_LOG_KEY` |
+
+Glint complements content filters rather than replacing them: a prompt-injection scanner and a policy gate catch different failures. A per-project comparison is in [How it compares in detail](#how-it-compares-in-detail).
+
+## Results
+| What | Result | Label and source |
+|---|---|---|
+| Enforcement by construction | Every one of **964 write calls** in four gated sets went through a gate; **89 of 89** refusals in replayed runs were refused again | Measured on Glimmer's runs in the four gated banking sets (v9, unseen, v10, pressure); holds by construction for any model behind the gate ([details](docs/results.md#live-gate-decisions-across-the-four-gated-banking-sets)) |
+| Precision | **1 false refusal in 407 correct write calls** on 59 tasks no gate rule came from: 0.25%, upper bound 1.2% (one-sided 95%); 4.9% counting every hold as a cost | Untuned tasks, judged against τ²'s expected writes ([details](docs/results.md#live-gate-decisions-across-the-four-gated-banking-sets)) |
+| Banking test split after the fix research | **11 of 40** runs passed (gated arm, 2026-11-03) against **7 of 40** for both arms (2026-11-02); by task p = 0.125 against the earlier gated run and p = 0.25 against alone, by task, sign test, two-sided. Against τ²'s offline re-grade of the alone arm (10/40): 3 better, 1 worse, p = 0.63. | **Tuned, in-sample, cross-day; the alone arm was not rerun; may be chance** ([details](docs/results.md#banking-test-split-gated-arm-after-the-fix-research-2026-11-03)) |
+
+No outcome gain on unseen tasks has been shown; see [Limits](#limits-each-answered) and [What was measured](#what-was-measured).
+
+## Quickstart
+Requires Python 3.12, [uv](https://docs.astral.sh/uv/) and git. τ²-bench is about 1.4 GB.
+
+```bash
+git clone -c core.longpaths=true https://github.com/quanticsoul4772/glint
+git clone -c core.longpaths=true -c core.autocrlf=false https://github.com/sierra-research/tau2-bench vendor/tau2-bench
+git -C vendor/tau2-bench checkout fc0055dc4e0a316c3f83133267fbd6faaa770992   # τ²-bench v1.0.1, pinned; stop if this fails
+cd glint
+uv sync --extra dev
+uv run pytest -q
+```
+
+τ²-bench goes next to the repo (`../vendor/tau2-bench`, as `pyproject.toml` expects). On Windows, the `core.longpaths` and `core.autocrlf` settings are required: without them some τ² data files fail to check out, the pin fails, and `uv sync` installs a different τ² version; and the bundled bank data no longer matches τ²'s byte for byte.
+
+- **The gate replays** (no GPU, no keys, no workspace needed): `uv run python scripts/gate_replay.py` and `uv run python scripts/bank_replay.py`.
+- **Bank Desk, replay mode** (no GPU, no keys): `uv run python -m glint.desk.app`, then open http://127.0.0.1:8765.
+- **glint-bank in Muse Code:** see [plugins/glint-bank/README.md](plugins/glint-bank/README.md). Check an install without Muse or a model: `uv run python -m glint.bank.server --decision-tools --selftest`.
+- **Bank Desk, live mode:** needs a deployed Glimmer endpoint (`modal deploy src/glint/glimmer_serve.py`) and the keys in [.env.example](.env.example), copied to `$GLINT_HOME/.env`.
+- **Decision-tool MCP server:** `uv run python -m glint.assist.server` (stdio).
+- **With/without comparisons:** `scripts/tools_ab.py` (checkpointed; both arms on the same backend; a set's tools arm enforces the gates unless the set says otherwise; `--help` lists the sets). `scripts/export_results.py` and `scripts/export_scenarios.py` regenerate the desk's data from the run data. Every script is listed in [scripts/README.md](scripts/README.md).
+- **Workspace:** working files (run data, the spend ledger, results, `.env`) live outside the repo, under `GLINT_HOME`, which defaults to the repo's parent folder. The task splits (`splits/`) and the recorded wrong-write runs (`data-public/`) are in the repo.
+- **Tests:** coverage goals and rules in [docs/testing-strategy.md](docs/testing-strategy.md); CI runs pytest with the coverage gate and ruff on every PR.
+
+## How it works
+
+```mermaid
+flowchart LR
+    C["Customer<br/>(Muse Spark simulator, or a person)"] <--> A["Muse Glimmer 30B<br/>(agent)"]
+    A -- "tool call" --> E["τ²-bench environment<br/>(bank, retail, airline)"]
+    E -- "read" --> A
+    E -- "write" --> G{"Glint gate<br/>policy as code"}
+    G -- "allow" --> W["write runs"]
+    G -- "deny: rule, facts, next step" --> A
+    G -. "every decision" .-> L[("hash-chained<br/>gate log")]
+    A -. "optional" .-> T["Glint decision tools<br/>(MCP)"]
+    M["Muse Code<br/>+ glint-bank plugin"] -- "MCP" --> S["glint-bank server"] --> E
+```
+
+An agent that can move money is only as safe as its worst call. A 30B model holds a customer conversation well and still gets policy decisions wrong: the largest credit-limit increase a card allows, which disputes need a provisional credit, whether a card can be closed. Glint takes those decisions away from the model. The agent cannot skip the check. A gate checks only what its rules encode: a write no rule covers is allowed and logged as such.
+
+1. A customer asks the agent (Glimmer 30B) for something policy-bound: dispute a charge, raise a credit limit, close a card, exchange an item.
+2. The agent calls the environment's tools. Reads run as usual.
+3. **Every write is intercepted** (`glint.gates.enforce`) and checked by the gates registered for that tool. A gate is a plain function of the live database and the write's arguments, so the same call against the same records always gets the same decision, including when τ²'s evaluator replays the run.
+4. A deny returns, as the tool result, the rule, what the check found, the facts it used, why it matters and the next step. Arguments are never rewritten. A gate that raises, times out or returns nothing usable denies (fail closed).
+5. Every decision is written to an append-only, hash-chained SQLite log (`glint.gates.eventlog`). At startup, every write tool in the toolkit must have a gate, or enforcement refuses to start.
+6. **What the log protects against.** Unkeyed (SHA-256), the chain catches damage and edits that do not recompute it. With `GLINT_LOG_KEY` set, each link is an HMAC-SHA256 under the operator's key, so a rewrite by anyone without the key fails `verify()`; the key lives in the gate server's environment, so keep it out of the agent's prompt and of any file the agent can read. Truncation leaves a valid shorter chain, so `python -m glint.bank.server log SESSION_ID` prints the log's head (event count and last hash) to keep off the machine; `verify(expected_head=...)` fails when the log no longer contains it.
+
+## Meta AI tooling, mapped to the judging criteria
+| Meta tool | Role in Glint | What is shown | Criterion it serves |
+|---|---|---|---|
+| **Muse Glimmer 30B** (open weights) | The agent: it proposes every write, and the gates decide | **Self-hosted** on Modal with vLLM (bf16, A100-80GB, 131K context, scale to zero) by `glint.glimmer_serve`, with a health wait, fail-fast boot-log watching, a GPU cap enforced during the session and a retried stop. Every comparison reported here ran on it, except the first retail and airline draws (DeepInfra's hosted Glimmer). `glint.atem` re-parses its tool calls from the raw token stream: the hosted parser turned string arguments such as zip codes into numbers | Use of Meta AI tooling; technical depth |
+| **Muse Spark** (Meta Model API) | The simulated customer in τ²-bench (and judge of its natural-language checks), and the agent in the Muse Code demo | Every τ² run reported here; the Muse Code run of 2026-10-31 | Use of Meta AI tooling; demo |
+| **Muse Code** + the [glint-bank plugin](plugins/glint-bank/README.md) | A live τ² bank over MCP with every write gated, plus Glint's decision tools | Checked 2026-10-31 on plugin 0.2.1, headless (`muse exec`): the server reached `ready` with 23 tools; read-only tools ran without approval; a $4,000 increase denied and $2,500 allowed, with the session and call ids matching Muse Code's hook. `/start <task_id>` loads a scenario | Use of Meta AI tooling; demo |
+| **LlamaFirewall** scanner adapter | Glint's gate decision as a LlamaFirewall custom scanner (`glint.integrations.llamafirewall_scanner`) | Unit-tested against a fake module with LlamaFirewall 1.0.3's names, and on one real `Enforcer`; not yet run inside LlamaFirewall ([docs/llamafirewall.md](docs/llamafirewall.md)) | Use of Meta AI tooling; technical depth |
+
+## Business case
+- **Buyers:**
+  - bank risk, compliance and model-risk teams, who own model validation under [SR 11-7](https://www.federalreserve.gov/supervisionreg/srletters/sr1107.htm);
+  - fintech and banking-software platforms;
+  - agent vendors selling into banks, who face the barriers bank executives rank highest: security and compliance, and autonomy (51% each, SoundHound-commissioned survey, n=201, [Nasdaq/GlobeNewswire](https://www.nasdaq.com/press-release/research-finds-two-three-us-banking-executives-believe-agentic-ai-will-change-how)).
+- **Price floor:** generic authorization already sells: Cerbos Hub Production starts at $933 a month, with one year of audit logs ([Cerbos pricing](https://www.cerbos.dev/pricing)).
+- **The offer:** an annual bank package on the open-source core: policy encoding for each product line, validation evidence for model risk, the tamper-evident audit trail, and support.
+- **The value, in the bank's own numbers:** value per year = (agent write actions per year) × (error rate without the gate, measured on the bank's own traffic) × (average remediation cost per wrong action, from the bank's dispute and complaint data) + audit hours saved. The bank supplies every input; Glint supplies the gate and its measured with-and-without results on τ²-bench above.
+
+## Limits, each answered
+- **The 2026-11-02 test-split run had 18 false refusals of 35 judged** (17 by the request gate, 1 by verify once, against τ²'s gold). *Answer:* PRs #29 onward changed the request gate: reversible writes are allowed and flagged instead of refused, a refusal carries the filled-in `record_requests` call, and PR #41 added a switch that removes the request gate. These changes were fitted to that split, and the 2026-11-03 run's refusals by rule are not yet analyzed ([details](#rule-changes-from-the-test-split-prs-29-44)).
+- **No outcome gain on unseen tasks.** On 59 unseen tasks Glimmer alone passed 21 of 108 matched runs and gated 19. Alone's 21 includes at least 27 runs lost to context overflows, counted as failures; 41 gated runs hit the step limit. *Answer:* the claim is enforcement integrity, which holds by construction; fewer wrong writes depends on which policy clauses the rules encode, and can be measured by each bank on its own traffic, as in the value formula above.
+- **The replays are in-sample.** The 289 gold writes and the 24 of 32 stopped failures come from the tasks the rules were written on. *Answer:* they show the gates work as designed; the precision row above comes from 59 tasks no gate rule came from.
+- **A gate checks only what its rules encode.** On those 59 tasks, 31% of live write decisions (206 of 660) were writes no rule covered. *Answer:* every such write is allowed and logged as `no_rule_yet` with the reason, enforcement refuses to start unless every write tool has a gate, and rules have since been added for savings interest and debit disputes ([The gates](#the-gates)).
+- **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard. *Answer:* both arms run on the same backend and seeds in every comparison except the 2026-11-03 test-split rerun (gated arm only, cross-day), reported by task.
+- **The demos are illustrations.** The desk's pairs are selected, and the Muse Code run was scripted. *Answer:* the desk shows each task's real pass counts beside the pair, and the replays run without a GPU for anyone to check.
+- **The LlamaFirewall adapter has not run inside LlamaFirewall,** and interactive Muse Code is not shown to work (headless is). *Answer:* both are stated in [docs/llamafirewall.md](docs/llamafirewall.md) and [Limitations in detail](#limitations-in-detail).
+
+## What the gates are shown to do
 
 ![Bank Desk, gated pair (task_054, a tuned task): on the left, Glimmer alone fails; on the right, a policy gate holds a dispute filing until the agent's dispute plan records the date the customer gave, two more gates make it confirm the shipping address and offer expedited shipping, and this run passes](docs/images/desk-gate.png)
 
-## What the gates are shown to do
 Glint makes two claims with different evidence. **Enforcement integrity**, that every write is checked before it runs, a denied write never runs, every refusal carries the rule, the facts and the next step, and every decision is logged tamper-evidently, is shown below on Glimmer's runs and holds by construction for any model behind the gate. **Fewer wrong writes** depends on which policy clauses the rules encode and on the agent acting on a refusal, and on unseen tasks it is not yet shown (see [What was measured](#what-was-measured)). Each number says where it comes from.
 
 | Check | Result | Where it comes from |
@@ -39,29 +148,7 @@ Verdict: {"current_limit": 5000.0, "max_increase": 2500.0, ...}
 
 Built for the Meta Global AI Developer Hackathon (Indie track, theme **Push the Frontier**: a new capability for an open-weight agent). See [Built during the event](#built-during-the-event).
 
-## How it works
-
-```mermaid
-flowchart LR
-    C["Customer<br/>(Muse Spark simulator, or a person)"] <--> A["Muse Glimmer 30B<br/>(agent)"]
-    A -- "tool call" --> E["τ²-bench environment<br/>(bank, retail, airline)"]
-    E -- "read" --> A
-    E -- "write" --> G{"Glint gate<br/>policy as code"}
-    G -- "allow" --> W["write runs"]
-    G -- "deny: rule, facts, next step" --> A
-    G -. "every decision" .-> L[("hash-chained<br/>gate log")]
-    A -. "optional" .-> T["Glint decision tools<br/>(MCP)"]
-    M["Muse Code<br/>+ glint-bank plugin"] -- "MCP" --> S["glint-bank server"] --> E
-```
-
-1. A customer asks the agent (Glimmer 30B) for something policy-bound: dispute a charge, raise a credit limit, close a card, exchange an item.
-2. The agent calls the environment's tools. Reads run as usual.
-3. **Every write is intercepted** (`glint.gates.enforce`) and checked by the gates registered for that tool. A gate is a plain function of the live database and the write's arguments, so the same call against the same records always gets the same decision, including when τ²'s evaluator replays the run.
-4. A deny returns, as the tool result, the rule, what the check found, the facts it used, why it matters and the next step. Arguments are never rewritten. A gate that raises, times out or returns nothing usable denies (fail closed).
-5. Every decision is written to an append-only, hash-chained SQLite log (`glint.gates.eventlog`). At startup, every write tool in the toolkit must have a gate, or enforcement refuses to start.
-6. **What the log protects against.** Unkeyed (SHA-256), the chain catches damage and edits that do not recompute it. With `GLINT_LOG_KEY` set, each link is an HMAC-SHA256 under the operator's key, so a rewrite by anyone without the key fails `verify()`; the key lives in the gate server's environment, so keep it out of the agent's prompt and of any file the agent can read. Truncation leaves a valid shorter chain, so `python -m glint.bank.server log SESSION_ID` prints the log's head (event count and last hash) to keep off the machine; `verify(expected_head=...)` fails when the log no longer contains it.
-
-## How it compares
+## How it compares in detail
 Each cell is from the project's own documentation (checked 2026-11-01; Invariant's guardrail docs were removed on 2026-01-12, so its row uses their last published version). "Not documented" means the docs do not say, not that the feature is absent.
 
 | Project | Mainly guards against | Decides with | Reads the application's current data at decision time | The agent gets on a block | Tamper-evident decision log |
@@ -112,12 +199,6 @@ The first rules encoded after the evaluation of the recorded runs, from the bank
 - two pairs of documents list different card bonuses for the same account;
 - two worked examples are arithmetic errors ("5.5% + 0.025% = 6.0%", "4.0% + 0.5% = 4.75%").
 
-## Meta AI tooling
-- **Muse Glimmer 30B** (open weights) is the agent, **self-hosted** on Modal with vLLM (bf16, A100-80GB, 131K context, scale to zero) by `glint.glimmer_serve`, which adds a health wait, fail-fast boot-log watching, a GPU cap enforced during the session and a retried stop. Every comparison reported here ran on it, except the first retail and airline draws (DeepInfra's hosted Glimmer).
-- **Muse Code** loads the [glint-bank plugin](plugins/glint-bank/README.md): a live τ² bank over MCP with every write gated and Glint's decision tools. Checked 2026-10-31 on plugin 0.2.1: the server reached `ready` with 23 tools; read-only tools ran without approval; the $4,000 deny and $2,500 allow above, with the session and call ids matching Muse Code's hook. `/start <task_id>` loads a scenario.
-- **Muse Spark** (Meta Model API) plays the customer in τ²-bench and judges its natural-language checks.
-- `glint.atem` re-parses Glimmer's tool calls from its raw token stream: the hosted parser turned string arguments such as zip codes into numbers.
-
 ## Decision tools
 Before the gates, the same checks were offered as seven optional **MCP tools** the agent could call (`python -m glint.assist.server`, stdio). They are still served, and wired into τ²-bench toolkits (`glint.assist.tau2_tools`) and the Muse Code plugin. Measured: Glimmer called one in 1 of 80 runs on τ²'s banking test split, which is why the checks became enforced gates.
 
@@ -167,7 +248,7 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 ![Results tab: per set, tasks improved, tied and worse, runs passed with and without Glint, and pass dots per task](docs/images/desk-results.png)
 
 <!-- results:end -->
-## Limitations
+## Limitations in detail
 - **The gates block the specific steps they encode; they do not make every write correct, and they have not been shown to raise pass rates or to reduce wrong writes on unseen tasks.** On the 59 unseen tasks the gated arm passed 19 of 108 matched runs against Glimmer alone's 21; 20 of its failed runs still filed a write with a wrong value. Across the 59 tasks no gate rule came from (three sets), 206 of 660 live write decisions (31%) were allows for writes no rule covers, and 120 of the 189 writes that differ from τ²'s expected ones ran on those tools. Most of the policy's computable clauses are not encoded yet (dispute liability tiers, checking credits, rewards amounts); savings interest corrections and discrepancy reports were encoded on 2026-11-02, checked only against recorded writes from five tasks, and not yet run live. The other rules were written and checked on 12 training tasks.
 - **Muse Code, interactive mode:** checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31), the plugin's server reached `ready` with 23 tools and a $4,000 increase past the tier maximum was refused, then $2,500 allowed. In interactive mode on 2026-11-01, Muse's own startup log shows the interactive start shutting the plugin's server down about 0.15 s after fetching a fresh feature configuration (`transport_closed`); a headless start (`muse exec`) three minutes later, with that configuration cached, reached `ready` with 23 tools. A second interactive start has not been checked, so interactive mode is not shown to work; headless mode is. `scripts/muse_check.py` reads Muse's startup log and says whether the server reached `ready`.
 - **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard.
@@ -176,29 +257,6 @@ Before the gates, the same checks were offered as seven optional **MCP tools** t
 - **The desk's replay pairs are selected:** a failed run without Glint beside a passed run with it. The gated pairs' arm also has the decision tools and the dispute plan, so a pair does not show the gate alone caused the pass; an earlier gated version passed task_054 4/4 without blocking anything. The page says so and shows each task's real pass counts. Live mode runs no gates and is off on the hosted desk.
 - **Retail:** `find_variants` matches option names as exact strings (it called the user's "Google Home" unavailable when the catalog says "Google Assistant").
 - **Banking:** Glimmer still fails most tasks; task 081 overflows the context.
-
-## Run it
-Requires Python 3.12, [uv](https://docs.astral.sh/uv/) and git. τ²-bench is about 1.4 GB.
-
-```bash
-git clone -c core.longpaths=true https://github.com/quanticsoul4772/glint
-git clone -c core.longpaths=true -c core.autocrlf=false https://github.com/sierra-research/tau2-bench vendor/tau2-bench
-git -C vendor/tau2-bench checkout fc0055dc4e0a316c3f83133267fbd6faaa770992   # τ²-bench v1.0.1, pinned; stop if this fails
-cd glint
-uv sync --extra dev
-uv run pytest -q
-```
-
-τ²-bench goes next to the repo (`../vendor/tau2-bench`, as `pyproject.toml` expects). On Windows, the `core.longpaths` and `core.autocrlf` settings are required: without them some τ² data files fail to check out, the pin fails, and `uv sync` installs a different τ² version; and the bundled bank data no longer matches τ²'s byte for byte.
-
-- **The gate replays** (no GPU, no keys, no workspace needed): `uv run python scripts/gate_replay.py` and `uv run python scripts/bank_replay.py`.
-- **Bank Desk, replay mode** (no GPU, no keys): `uv run python -m glint.desk.app`, then open http://127.0.0.1:8765.
-- **glint-bank in Muse Code:** see [plugins/glint-bank/README.md](plugins/glint-bank/README.md). Check an install without Muse or a model: `uv run python -m glint.bank.server --decision-tools --selftest`.
-- **Bank Desk, live mode:** needs a deployed Glimmer endpoint (`modal deploy src/glint/glimmer_serve.py`) and the keys in [.env.example](.env.example), copied to `$GLINT_HOME/.env`.
-- **Decision-tool MCP server:** `uv run python -m glint.assist.server` (stdio).
-- **With/without comparisons:** `scripts/tools_ab.py` (checkpointed; both arms on the same backend; a set's tools arm enforces the gates unless the set says otherwise; `--help` lists the sets). `scripts/export_results.py` and `scripts/export_scenarios.py` regenerate the desk's data from the run data. Every script is listed in [scripts/README.md](scripts/README.md).
-- **Workspace:** working files (run data, the spend ledger, results, `.env`) live outside the repo, under `GLINT_HOME`, which defaults to the repo's parent folder. The task splits (`splits/`) and the recorded wrong-write runs (`data-public/`) are in the repo.
-- **Tests:** coverage goals and rules in [docs/testing-strategy.md](docs/testing-strategy.md); CI runs pytest with the coverage gate and ruff on every PR.
 
 ## Built during the event
 - All code in this repo was written during the event (Oct 26 – Nov 4, 2026); no earlier code was copied. The gate runner's and gate log's design follows the author's earlier private projects (agent-harness-v2 and pgharness). The first commit is `952dd30` on 2026-10-26.
