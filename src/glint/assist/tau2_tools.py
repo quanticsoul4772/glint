@@ -205,10 +205,10 @@ class DisputePlanTools(ToolKitBase):
                                customer_words: str) -> dict:
         """Record the customer's answers to the two questions a debit card dispute asks (knowledge base
         bank_accounts_(general)_031), before filing it: "Do you still have your physical debit card in your
-        possession?" and "Do you believe your PIN may have been compromised?". A debit dispute filing is checked
-        against the latest record for its card: no filing without one, and its card_in_possession and
-        pin_compromised must equal the recorded answers. Call it again if the customer answers differently for
-        another transaction. It does not change the database.
+        possession?" and "Do you believe your PIN may have been compromised?". File each debit dispute with
+        the card_in_possession and pin_compromised recorded for its card; a requested dispute with no recorded
+        answers, or a filing that differs from them, is listed in the open items. Call it again if the customer
+        answers differently for another transaction. It does not change the database.
 
         Args:
             card_id: The debit card the dispute is filed on.
