@@ -158,6 +158,71 @@ def with_address_asks(calls: list[ToolCall], address_of: Callable[[str], str | N
     return out
 
 
+UNLOCK = "unlock_discoverable_agent_tool"
+LOOKUP_SUFFIX = "-lookup"
+
+
+def _lookup(db, value: str) -> tuple[str, dict, bool] | None:
+    """The read an agent makes to see identifier `value`: (tool, arguments, hidden), from the table that holds it in
+    `db`; None when no table holds it (an id an earlier write created shows in that write's own result)."""
+    def table(name: str) -> dict:
+        return getattr(db, name).data
+
+    if value in table("users"):
+        return "get_user_information_by_name", {"customer_name": table("users")[value].get("name")}, False
+    if value in table("credit_card_accounts"):
+        return "get_credit_card_accounts_by_user", {"user_id": table("credit_card_accounts")[value].get("user_id")}, False
+    if value in table("credit_card_transaction_history"):
+        user = table("credit_card_transaction_history")[value].get("user_id")
+        return "get_credit_card_transactions_by_user", {"user_id": user}, False
+    if value in table("accounts"):
+        return "get_all_user_accounts_by_user_id_3847", {"user_id": table("accounts")[value].get("user_id")}, True
+    if value in table("debit_cards"):
+        return "get_debit_cards_by_account_id_7823", {"account_id": table("debit_cards")[value].get("account_id")}, True
+    if value in table("bank_account_transaction_history"):
+        account = table("bank_account_transaction_history")[value].get("account_id")
+        return "get_bank_account_transactions_9173", {"account_id": account}, True
+    return None
+
+
+def with_lookups(calls: list[ToolCall], db) -> list[ToolCall]:
+    """`calls` with, before each assistant call that names an identifier (an argument named `*_id`) for the first
+    time, the read an agent makes to see it (`_lookup` on the initial database `db`; ids `<call id>-lookup-<n>`, a
+    hidden read unlocked first): τ²'s gold actions carry almost none of the lookups a conversation makes, and the
+    identifier-provenance deny (glint.gates.aids, N10) judges a write on the earlier tool results. τ² logs no read its
+    gold lacks, so the scored database is unchanged."""
+    out, shown, unlocked = [], set(), set()
+    for c in calls:
+        args = c.arguments or {}
+        inner = (parse_hidden_arguments(args.get("arguments", "{}")) or {}) if c.name == WRAPPER else dict(args)
+        if c.requestor == "assistant":
+            for key, value in sorted(inner.items()):
+                if not (key.endswith("_id") and isinstance(value, str)) or value in shown:
+                    continue
+                shown.add(value)
+                read = _lookup(db, value)
+                if read is None:
+                    continue
+                tool, read_args, hidden = read
+                n = sum(o.id.startswith(f"{c.id}{LOOKUP_SUFFIX}") for o in out)
+                if hidden and tool not in unlocked:
+                    unlocked.add(tool)
+                    out.append(ToolCall(id=f"{c.id}{LOOKUP_SUFFIX}-{n}", name=UNLOCK, requestor="assistant",
+                                        arguments={"agent_tool_name": tool}))
+                    n += 1
+                out.append(ToolCall(id=f"{c.id}{LOOKUP_SUFFIX}-{n}", requestor="assistant", **(
+                    {"name": WRAPPER, "arguments": {"agent_tool_name": tool, "arguments": json.dumps(read_args)}}
+                    if hidden else {"name": tool, "arguments": read_args})))
+        out.append(c)
+    return out
+
+
+def lookups(calls: list[ToolCall], db) -> list[ToolCall]:
+    """Only the reads `with_lookups` would insert for `calls`: what an agent looks up first to see every identifier
+    those calls name (for conversations built call by call, such as the tests)."""
+    return [c for c in with_lookups(calls, db) if LOOKUP_SUFFIX in c.id]
+
+
 def with_address_confirmations(calls: list[ToolCall]) -> list[ToolCall]:
     """`calls` with a record_address_confirmation call before each card's first replacement order (id `<order
     id>-address`), carrying that order's shipping address: the confirmation an agent following the address_ask gate's

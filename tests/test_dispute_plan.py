@@ -17,7 +17,7 @@ from glint.assist import banking
 from glint.assist.tau2_tools import BankingDecisionTools, DisputePlanTools, add_plan_tool, install
 from glint.gates import Enforcer, EventLog, enforce, rules
 from glint.gates.core import run_gate
-from glint.gates.replayplan import PLAN_FIELDS, filing, plan_arguments, with_plans
+from glint.gates.replayplan import PLAN_FIELDS, filing, lookups, plan_arguments, with_plans
 
 logger.remove()
 TASKS = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
@@ -39,7 +39,20 @@ def _env(task, enforcer: Enforcer | None = None):
     env.set_state(init.initialization_data if init else None, init.initialization_actions if init else None, [])
     if enforcer is not None:
         enforcer.attach(env)
+        _look_up(env, task)
     return env
+
+
+def _look_up(env, task, send=None) -> None:
+    """The reads that show every identifier gold names, as an agent makes them before acting (the identifier-
+    provenance deny, N10); `send(name, **arguments)` when the caller keeps a history."""
+    calls = [ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant")
+             for k, a in enumerate(task.evaluation_criteria.actions)]
+    for read in lookups(calls, env.tools.db):
+        if send is None:
+            env.get_response(read)
+        else:
+            send(read.name, **read.arguments)
 
 
 def _gold_disputes(task) -> list[dict]:
@@ -62,6 +75,7 @@ def _file(env, args: dict):
 
 def _verify(env, user_id: str) -> None:
     u = env.tools.db.users.data[user_id]
+    _call(env, "get_user_information_by_name", customer_name=u["name"])  # shows the user id (provenance, N10)
     _call(env, "log_verification", time_verified="2025-11-14 03:40:00 EST",
           **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
 
@@ -368,9 +382,11 @@ def test_replies_carry_the_open_items_and_replay_them_unchanged():
 
     assert "[open]" not in send("get_current_time").content  # nothing planned yet
     u = env.tools.db.users.data[user]
+    send("get_user_information_by_name", customer_name=u["name"])  # shows the user id (provenance, N10)
     send("log_verification", time_verified="2025-11-14 03:40:00 EST",
          **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
     send("give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
+    _look_up(env, task, send)
     send("unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
     send(WRAPPER, agent_tool_name=banking.DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": user}))
     plan = send("plan_disputes", other_requests=[], user_id=user, transactions=_items(gold))
@@ -437,9 +453,11 @@ def test_plan_gate_decisions_replay_unchanged_in_taus_strict_replay():
         return reply
 
     u = env.tools.db.users.data[gold[0]["user_id"]]
+    send("get_user_information_by_name", customer_name=u["name"])  # shows the user id (provenance, N10)
     send("log_verification", time_verified="2025-11-14 03:40:00 EST",
          **{k: u[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
     send("give_discoverable_user_tool", discoverable_tool_name=banking.CARD_DIGITS_TOOL)
+    _look_up(env, task, send)
     send("unlock_discoverable_agent_tool", agent_tool_name=banking.DISPUTE_HISTORY_TOOL)
     send(WRAPPER, agent_tool_name=banking.DISPUTE_HISTORY_TOOL, arguments=json.dumps({"user_id": gold[0]["user_id"]}))
     send("unlock_discoverable_agent_tool", agent_tool_name=rules.DISPUTE)
@@ -480,6 +498,7 @@ def test_glint_bank_always_publishes_plan_disputes_and_its_plan_gates_the_filing
             names = {t.name for t in (await client.list_tools()).tools}
             await client.call_tool("load_scenario", {"task_id": "task_037"})
             env = server.session().env
+            _look_up(env, _task("task_037"))
             _verify(env, gold[0]["user_id"])
             await client.call_tool("give_discoverable_user_tool",
                                    {"discoverable_tool_name": banking.CARD_DIGITS_TOOL})
@@ -723,6 +742,7 @@ def test_a_ready_check_names_the_filing_call_with_the_plans_values():
                       dispute_reason=d["dispute_reason"], contacted_merchant=d["contacted_merchant"])
         return json.loads(reply.content.split("\n\n[open]")[0])
 
+    _look_up(env, task)
     _verify(env, user)
     _read_history(env, user)
     _give_card_digits(env)

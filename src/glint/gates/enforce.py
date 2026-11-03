@@ -43,8 +43,11 @@ conversation checks, model verifiers and a human approver around the gates. `unc
 "[review]" open item for each no_rule_yet write that ran; it reminds instead of refusing, because refusing those writes
 would refuse every training-gold write on the no_rule_yet tools.
 
-Since 2026-11-03 (fix research 2026-11-02; glint.gates.aids) it also keeps the writes that ran (`glint_ran`, for the
-duplicate-write deny) and the shipping address recorded with record_address_confirmation (`glint_address_confirmed`). An account read's reply carries the one-credit-per-checking-
+Since 2026-11-03 (fix research 2026-11-02; glint.gates.aids) it also keeps: the writes that ran (`glint_ran`, for the
+duplicate-write deny), every assistant tool result that is not an error (`glint_seen`, for the identifier-provenance
+deny; in τ²'s replay, where READ calls are skipped, each call is judged on the results before it in the replayed
+message history, so the decision replays unchanged), and the shipping address recorded with
+record_address_confirmation (`glint_address_confirmed`). An account read's reply carries the one-credit-per-checking-
 account fact (bank_accounts_(general)_017) ahead of the open items.
 
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
@@ -624,6 +627,8 @@ class Enforcer:
         env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
         env.tools.glint_trace = []  # replayed assistant calls that ran, hidden tools unwrapped (glint.declare)
         env.tools.glint_replayed = 0  # calls τ²'s evaluator replays (mutating tools), any requestor
+        env.tools.glint_seen = []  # every assistant tool result that is not an error, for identifier provenance (N10)
+        history = {"before": {}}  # in τ²'s replay: tool message id -> the results before it (aids.seen_before)
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
             if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in GLINT_RECORDS
@@ -637,9 +642,16 @@ class Enforcer:
                 items = [note, *items] if note else items
             return reply.model_copy(update={"content": f"{reply.content}\n\n" + "\n".join(items)}) if items else reply
 
+        def seen(reply: ToolMessage) -> ToolMessage:
+            if aids.counts_as_seen(reply):
+                env.tools.glint_seen.append(str(reply.content))
+            return reply
+
         def get_response(message: ToolCall) -> ToolMessage:
             replayed = _replayed(env, message.name)
             env.tools.glint_replayed += replayed
+            if state["replay"] and str(message.id) in history["before"]:  # judge on what the live check saw
+                env.tools.glint_seen = list(history["before"][str(message.id)])
             write = self.write_call(env, message)
             if write is None:
                 reply = original_response(message)
@@ -652,7 +664,7 @@ class Enforcer:
                 self._record_address(env, message, reply, state["replay"])
                 self._record_verdict(env, message, reply)
                 self._record_check(message, reply, state["replay"])
-                return with_open_items(message, reply)
+                return seen(with_open_items(message, reply))
             result = self.check(*write, env.tools.db, replay=state["replay"], toolkit=env.tools)
             if result.allowed:
                 before = increase_request_ids(env.tools.db) if write[0] == SUBMIT else None
@@ -668,7 +680,7 @@ class Enforcer:
                         env.tools.glint_uncovered.append((write[0], target))
                 _trace(env, message, reply, replayed)
                 self._flag_transfer(env, write[0], state["replay"])
-                return with_open_items(message, reply)
+                return seen(with_open_items(message, reply))
             asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
             if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
                 asked[result.rule_id].add(str((write[1] or {}).get("credit_card_account_id", "")))
@@ -680,10 +692,13 @@ class Enforcer:
 
         def set_state(*args, **kwargs):  # τ²'s evaluator replays the trajectory here: those events say replay=true
             state["replay"] = True
+            messages = args[2] if len(args) > 2 else kwargs.get("message_history")
+            history["before"], texts = aids.seen_before(messages)
             try:
                 return original_set_state(*args, **kwargs)
             finally:
                 state["replay"] = False
+                history["before"], env.tools.glint_seen = {}, list(texts)
 
         env.get_response, env.set_state, env.glint_enforcer = get_response, set_state, self
         return env

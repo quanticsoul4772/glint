@@ -1,7 +1,10 @@
-"""Fix research 2026-11-02 rows 8, 14, 15 and appendix N2: the address confirmation record, the one-credit fact at
-the account reads, the search-loop guard (and its firing count) and the duplicate-write deny. Banking TRAIN tasks only (never the test_untouched 20 of split-partition-banking.json)."""
+"""Fix research 2026-11-02 rows 8, 14, 15 and appendix N2, N10: the address confirmation record, the one-credit fact
+at the account reads, the search-loop guard (and its firing count), the duplicate-write deny and the identifier-
+provenance deny. Banking TRAIN tasks only (never the test_untouched 20 of split-partition-banking.json)."""
 import json
+from types import SimpleNamespace
 
+import pytest
 import search_guard_count
 from loguru import logger
 from tau2.data_model.message import AssistantMessage, ToolCall, ToolMessage
@@ -13,11 +16,10 @@ from glint import paths
 from glint.assist import banking
 from glint.assist.tau2_tools import assist_environment
 from glint.gates import Enforcer, EventLog, aids, rules
-from glint.gates.replayplan import with_address_confirmations, with_plans
+from glint.gates.replayplan import LOOKUP_SUFFIX, UNLOCK, with_address_confirmations, with_lookups, with_plans
 
 logger.remove()
 WRAPPER = "call_discoverable_agent_tool"
-UNLOCK = "unlock_discoverable_agent_tool"
 TASKS = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
                                          "tasks.json").read_text(encoding="utf-8"))}
 TEST_SPLIT = set(json.loads(splits.BANKING.read_text(encoding="utf-8"))["test_untouched"])
@@ -40,12 +42,12 @@ def _name(call) -> str:
 
 
 def _play(env, task, tool: str, send=None) -> ToolCall:
-    """Send gold (with the replays' inserted plans and address records) up to the first call of `tool`;
+    """Send gold (with the replays' inserted plans, address records and lookups) up to the first call of `tool`;
     return that call unsent."""
     send = send or env.get_response
     gold = [ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
             for k, a in enumerate(task.evaluation_criteria.actions)]
-    for call in with_address_confirmations(with_plans(gold)):
+    for call in with_lookups(with_address_confirmations(with_plans(gold)), env.tools.db):
         if _name(call) == tool and call.name != UNLOCK:
             return call
         assert "was NOT executed" not in str(send(call).content), call
@@ -238,16 +240,51 @@ def test_transfers_and_the_increase_submit_have_no_duplicate_gate():
     registry_ = rules.build_registry("banking_knowledge")
     names = {g.name for g in registry_.gates()}
     for tool in aids.DUPLICATE_EXEMPT:
-        assert f"procedure_duplicate_{tool}" not in names
+        assert f"procedure_duplicate_{tool}" not in names and f"procedure_provenance_{tool}" in names
     assert "procedure_duplicate_change_user_email" in names
     # an allow by these gates is not a rule check
     from glint.gates.enforce import attestation_classes
-    assert attestation_classes(["procedure_duplicate_x"]) == ["uncovered"]
+    assert attestation_classes(["procedure_duplicate_x", "procedure_provenance_x"]) == ["uncovered"]
 
 
-def test_duplicate_decisions_replay_unchanged_in_taus_strict_replay():
-    """The writes that ran replay, so the duplicate record is rebuilt and a refusal replays with the same content
-    (strict=True raises on any difference)."""
+# ---- N10: identifier provenance -----------------------------------------------------------------------------------
+
+def test_identifiers_are_the_id_arguments_only():
+    assert aids.identifiers({"user_id": "u1", "card_last_4_digits": "1234", "account_id": " ", "amount": 3.0,
+                             "transaction_id": 5.0, "card_id": "dbc_1"}) == {"card_id": "dbc_1", "user_id": "u1"}
+
+
+def test_a_write_naming_an_identifier_no_lookup_showed_is_refused_until_it_is_looked_up():
+    env, task, events = _bank("task_072")
+    verify = next(a for a in task.evaluation_criteria.actions if a.name == "log_verification")
+    call = ToolCall(id="v", name="log_verification", arguments=verify.arguments, requestor="assistant")
+    reply = env.get_response(call)
+    assert reply.error and _rule(events) == "glint.identifier_provenance" and "user_id" in reply.content
+    user = env.tools.db.users.data[verify.arguments["user_id"]]
+    env.get_response(ToolCall(id="l", name="get_user_information_by_name", requestor="assistant",
+                              arguments={"customer_name": user["name"]}))
+    assert "was NOT executed" not in env.get_response(call.model_copy(update={"id": "v2"})).content
+
+
+def test_provenance_allows_when_no_record_is_kept():
+    assert aids.provenance("x")(SimpleNamespace(), {"user_id": "u"}).allowed
+    assert not aids.provenance("x")(SimpleNamespace(glint_seen=["other"]), {"user_id": "u"}).allowed
+
+
+def test_the_seen_record_takes_only_assistant_results_that_are_not_errors():
+    msgs = [ToolMessage(id="a", role="tool", content="u1 shown"),
+            ToolMessage(id="b", role="tool", content="Error: no", error=False),
+            ToolMessage(id="c", role="tool", content="u2", requestor="user"),
+            ToolMessage(id="d", role="tool", content="x", error=True),
+            AssistantMessage(role="assistant", content="hi"),
+            ToolMessage(id="e", role="tool", content="u3")]
+    before, texts = aids.seen_before(msgs)
+    assert texts == ("u1 shown", "u3") and before["a"] == () and before["e"] == ("u1 shown",)
+
+
+def test_provenance_and_duplicate_decisions_replay_unchanged_in_taus_strict_replay():
+    """READ calls are skipped in τ²'s replay; each write is judged on the results before it in the history, so a
+    refusal and the allowed retry replay with the same content (strict=True raises on any difference)."""
     enforcer = Enforcer("banking_knowledge", EventLog(":memory:"))
     env, task, _ = _bank("task_072", enforcer)
     history = []
@@ -257,8 +294,34 @@ def test_duplicate_decisions_replay_unchanged_in_taus_strict_replay():
         history.extend([AssistantMessage(role="assistant", tool_calls=[call]), reply])
         return reply
 
-    credit = _play(env, task, aids.CREDIT_TOOL, send=send)
+    verify = next(a for a in task.evaluation_criteria.actions if a.name == "log_verification")
+    call = ToolCall(id="v0", name="log_verification", arguments=verify.arguments, requestor="assistant")
+    assert send(call).error  # nothing looked up yet
+    credit = _play(env, task, aids.CREDIT_TOOL, send=send)  # gold with its lookups: the verification now runs
     assert "was NOT executed" not in send(credit).content
-    assert send(credit.model_copy(update={"id": "again"})).error
     replay, _, _ = _bank("task_072", enforcer, history)
     assert replay.tools.glint_ran == env.tools.glint_ran != set()
+    assert replay.tools.glint_seen == env.tools.glint_seen
+
+
+def test_replays_insert_the_lookup_that_shows_each_identifier_once():
+    env, task, _ = _bank("task_072")
+    gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
+            for k, a in enumerate(task.evaluation_criteria.actions)]
+    calls = with_lookups(gold, env.tools.db)
+    inserted = [c for c in calls if LOOKUP_SUFFIX in c.id]
+    assert inserted[0].name == "get_user_information_by_name"
+    unlocks = [c.arguments["agent_tool_name"] for c in inserted if c.name == UNLOCK]
+    assert len(unlocks) == len(set(unlocks))
+    assert with_lookups([ToolCall(id="n", name="x", arguments={"card_id": "no-such"}, requestor="assistant")],
+                        env.tools.db)[0].id == "n"
+
+
+@pytest.mark.parametrize("table", ["credit_card_accounts", "credit_card_transaction_history", "debit_cards",
+                                   "bank_account_transaction_history"])
+def test_every_table_has_a_lookup(table):
+    from glint.gates.replayplan import _lookup
+    env, _, _ = _bank("task_072")
+    value = next(iter(getattr(env.tools.db, table).data))
+    tool, args, _ = _lookup(env.tools.db, value)
+    assert tool and all(args.values())
