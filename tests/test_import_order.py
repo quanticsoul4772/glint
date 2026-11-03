@@ -27,6 +27,8 @@ def test_declare_grade_script_starts():
     assert done.returncode == 2 and "Usage: python scripts/declare_grade.py" in done.stdout
 
 
-def test_llm_harness_tests_pass_when_run_alone():
-    done = _run(["-m", "pytest", "-q", "-p", "no:cacheprovider", "--no-cov", str(ROOT / "tests" / "test_llm_harness.py")])
+def test_llm_harness_tests_pass_when_run_alone(tmp_path):
+    # its own --basetemp: the default (.pytest_tmp, pyproject addopts) is this session's, and pytest clears it at start
+    done = _run(["-m", "pytest", "-q", "-p", "no:cacheprovider", "--no-cov", f"--basetemp={tmp_path / 'child'}",
+                 str(ROOT / "tests" / "test_llm_harness.py")])
     assert done.returncode == 0, (done.stdout + done.stderr)[-3000:]
