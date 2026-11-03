@@ -28,7 +28,7 @@ from glint.gates import extend
 from glint.gates.rules import parse_hidden_arguments
 
 log = logging.getLogger("glint.gates")
-WRAPPER = declare.WRAPPER
+# glint.declare imports glint.gates, so it may be partly initialized here: read its names at call time, never at import
 REMINDERS = ("declare",)  # the reminders (Enforcer(reminders=...)); each only adds [open] lines, never refuses
 CLAUSES = Path(__file__).resolve().parents[3] / "data-public" / "clauses" / "reconciled.json"
 # appendix #69 (reader 3 K5; B2 §1): a step-limit warning listing the open items. Glint convention: the gates see tool
@@ -65,7 +65,7 @@ def _trace(env, call: ToolCall, reply: ToolMessage, replayed: bool) -> None:
     if call.requestor != "assistant" or not replayed or reply.error or str(reply.content).startswith("Error"):
         return
     name, args = call.name, call.arguments or {}
-    if name == WRAPPER:
+    if name == declare.WRAPPER:
         name, args = str(args.get("agent_tool_name", "")), parse_hidden_arguments(args.get("arguments", "{}"))
     if args is not None:
         env.tools.glint_trace.append({"tool": name, "args": args})
