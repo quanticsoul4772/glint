@@ -401,8 +401,8 @@ def test_attach_raises_when_the_toolkit_has_a_write_no_gate_covers(monkeypatch):
     monkeypatch.setattr(rules.travel, "send_certificate", None)
     real = rules.build_registry
 
-    def without_certificate(domain):
-        reg = real(domain)
+    def without_certificate(domain, request_gate=True):
+        reg = real(domain, request_gate)
         reg._gates.pop("airline_send_certificate_gate", None)
         return reg
     monkeypatch.setattr("glint.gates.enforce.build_registry", without_certificate)

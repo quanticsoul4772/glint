@@ -54,8 +54,8 @@ Extending the enforcer (glint.gates.extend). A new feature registers an option (
 one-line doc and gates.manifest keys) and hooks (ordered functions run when an environment is attached, before each
 call, after a read, before and after an allowed write, on every reply, and for extra open items) in its own module,
 instead of editing `Enforcer.__init__`, the gates.manifest call or `get_response`. The options and hooks of the
-features this module owns are registered at its end; glint.gates.stages, glint.gates.aids and glint.gates.reminders
-(the opt-in reminders, step_warn and the transfer flag) register theirs.
+features this module owns are registered at its end; glint.gates.stages, glint.gates.aids, glint.gates.reminders
+(the opt-in reminders, step_warn and the transfer flag) and glint.gates.request_switch (request_gate) register theirs.
 
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -93,6 +93,7 @@ from glint.assist.banking import (
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates import aids, debit, extend
 from glint.gates import reminders as _reminders  # noqa: F401  (registers the reminders, step_warn and their hooks)
+from glint.gates import request_switch as _request_switch  # noqa: F401  (registers the request_gate option)
 from glint.gates import stages as _stages  # noqa: F401  (registers the stages option and hook)
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
@@ -122,10 +123,10 @@ GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL,
 CHECK_TOOLS = ("check_card_dispute", "check_verification", VERDICT_TOOL)  # decision tools logged as check.recorded
 
 
-def _open_items(tools) -> list[str]:
+def _open_items(tools, request_gate: bool = True) -> list[str]:
     """The customer's open items as the recorded plans, the increase record and the database show them: disputes
     planned and not filed, cards the customer chose to cancel and replace with no replacement ordered today, increases
-    submitted and not decided. Deterministic."""
+    submitted and not decided, and, with the request gate on, the request record not made yet. Deterministic."""
     db, items = tools.db, []
     for user, plan in sorted(getattr(tools, "glint_plans", {}).items()):
         filed = {r.get("transaction_id") for r in db.transaction_disputes.data.values() if r.get("user_id") == user}
@@ -159,7 +160,7 @@ def _open_items(tools) -> list[str]:
                      "asked for")
     verified = [r.get("user_id") for r in db.verification_history.data.values()
                 if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
-    if verified and getattr(tools, "glint_requests", "absent") is None:
+    if request_gate and verified and getattr(tools, "glint_requests", "absent") is None:
         # banking-test-gated (2026-11-02): the request gate refused 17 writes τ² expects before the agent recorded
         # them; this reminder comes before the first account change instead of after a refusal
         items.append(f"[open] the customer's requests are not recorded yet: before any account change, call "
@@ -655,7 +656,7 @@ def _with_open_items(call: extend.Call, reply: ToolMessage) -> ToolMessage | Non
     if (call.enforcer.domain != "banking_knowledge" or message.requestor != "assistant"
             or message.name in GLINT_RECORDS or not extend.ran(reply)):
         return None
-    items = _open_items(call.tools) + extend.open_items(call)
+    items = _open_items(call.tools, call.enforcer.request_gate) + extend.open_items(call)
     if message.name == WRAPPER:
         args = message.arguments or {}
         hidden = parse_hidden_arguments(args.get("arguments", "{}")) or {}

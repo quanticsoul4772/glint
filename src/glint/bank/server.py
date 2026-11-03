@@ -1,7 +1,7 @@
 """glint-bank: one live τ² banking_knowledge environment per Muse session, served over MCP (stdio), every assistant
 write gated by glint.gates.
 
-Run: python -m glint.bank.server [--decision-tools]    (stdio MCP server)
+Run: python -m glint.bank.server [--decision-tools] [--no-request-gate]    (stdio MCP server)
      python -m glint.bank.server --selftest           (warm up, then a stdio tools/list round trip; exit 0 when ok)
      python -m glint.bank.server brief TASK_ID        (the customer card for a human playing the customer)
      python -m glint.bank.server log SESSION_ID       (a session's gate log, and its hash-chain check)
@@ -18,6 +18,8 @@ Run: python -m glint.bank.server [--decision-tools]    (stdio MCP server)
   the Muse plugin's server command passes; without the flag the server has the gates only. `plan_disputes` is always published: the plan gate denies
   every credit card dispute filed without its plan, so a client without the tool could file none. It is annotated
   read-only (it never changes the bank) although τ² types it as mutating so its evaluator replays it.
+  `--no-request-gate` turns the request gate off (research row 6): no request gates, no request-record reminder, and
+  record_requests is not published.
 - **Results.** A gate deny and a τ² tool error both return `is_error=true` with the message text (a deny carries the
   rule, what the check found, the facts it used, why it matters, the next step and the verdict). An unknown tool is
   a protocol error.
@@ -133,9 +135,10 @@ class BankServer:
     """The sessions and the MCP handlers. Every τ² call runs under its session's lock (τ²'s environment is not
     thread-safe, and Muse may issue calls in parallel)."""
 
-    def __init__(self, home: Path | None = None, decision_tools: bool = False, sid: str | None = None):
+    def __init__(self, home: Path | None = None, decision_tools: bool = False, sid: str | None = None,
+                 request_gate: bool = True):
         self.home = Path(home) if home is not None else bank_home()
-        self.decision_tools = decision_tools
+        self.decision_tools, self.request_gate = decision_tools, request_gate
         self.sid = sid or default_session_id()
         self.sessions: dict[str, BankSession] = {}
         self._lock = threading.Lock()
@@ -154,7 +157,7 @@ class BankServer:
                     raise MCPError(types.INTERNAL_ERROR, f"{e}. Restart the server with {KEY_ENV} as it was when "
                                    "this session's log was created, or start a new session.") from e
                 s = BankSession(sid, events)
-                s.enforcer = Enforcer(DOMAIN, s.events, context=s.context)
+                s.enforcer = Enforcer(DOMAIN, s.events, context=s.context, request_gate=self.request_gate)
                 self.sessions[sid] = s
         with s.lock:
             if s.env is None:
@@ -170,7 +173,7 @@ class BankServer:
             s.enforcer.attach(env)
         s.env = env
         s.published = set(env.tools.get_tools()) if self.decision_tools else base | {
-            PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL}
+            PLAN_TOOL, RETENTION_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL} | ({REQUESTS_TOOL} if self.request_gate else set())
 
     def load_scenario(self, sid: str | None, task_id: str) -> tuple[str, bool]:
         """A fresh environment at the task's initial state (the base database for an empty task_id). Returns only the
@@ -336,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", nargs="?", choices=("serve", "brief", "log"), default="serve")
     parser.add_argument("target", nargs="?", help="brief: a task id; log: a session id")
     parser.add_argument("--decision-tools", action="store_true", help="also publish Glint's banking decision tools")
+    parser.add_argument("--no-request-gate", action="store_true",
+                        help="turn the request gate off: no request gates, record_requests not published")
     parser.add_argument("--selftest", action="store_true", help="warm up and run a stdio round trip, then exit")
     args = parser.parse_args(argv)
     from loguru import logger  # τ² logs its whole registry at DEBUG; the server keeps warnings only, on stderr
@@ -349,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"{args.command} needs a {'task id' if args.command == 'brief' else 'session id'}")
         print(brief(args.target) if args.command == "brief" else show_log(args.target))
         return 0
-    anyio.run(BankServer(decision_tools=args.decision_tools).run_stdio)
+    anyio.run(BankServer(decision_tools=args.decision_tools, request_gate=not args.no_request_gate).run_stdio)
     return 0
 
 

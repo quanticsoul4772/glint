@@ -97,9 +97,10 @@ def test_the_built_in_hooks_keep_the_order_the_wrapper_had():
     assert names["after_read"] == ["_trace_read", "_after_read_records"]
     assert names["before_call"] == ["_count_replayed", "_replayed_seen"]
     assert names["before_write"] == ["_increase_snapshot"] and names["open_items"] == ["_extra_items"]
-    # enforce, stages, aids, reminders
-    assert names["attach"] == ["_init_uncovered", "_init_records", "_init_records", "_init_records"]
-    assert [o.name for o in extend.options()][3:5] == ["reminders", "step_warn"]
+    # enforce, stages, aids, reminders, request_switch
+    assert names["attach"] == ["_init_uncovered", "_init_records", "_init_records", "_init_records",
+                               "_drop_request_tool"]
+    assert [o.name for o in extend.options()][3:6] == ["reminders", "step_warn", "request_gate"]
 
 
 def test_open_items_and_reply_hooks_reach_a_banking_reply_and_get_the_call(monkeypatch):

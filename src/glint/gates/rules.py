@@ -396,7 +396,7 @@ def _no_rule(tool: str):
     return gate
 
 
-def _register_banking(reg: GateRegistry) -> None:
+def _register_banking(reg: GateRegistry, request_gate: bool = True) -> None:
     reg.register(Gate("banking_dispute_gate", (DISPUTE,), "Knowledge base credit_cards_(general)_014/_015: the "
                       "card_action and provisional credit a dispute must carry.", _dispute))
     reg.register(Gate("banking_cli_submit_gate", (SUBMIT,), "credit_card_account_logistics_005: the maximum "
@@ -465,7 +465,7 @@ def _register_banking(reg: GateRegistry) -> None:
         reg.register(Gate(f"banking_{tool}_gate", (tool,), purpose, fn, toolkit=fn is procedure.transfer))
     reg.register(Gate("banking_retention_answer_gate", ("close_credit_card_account_7834",), "credit_card_account_logistics_003 steps 5-6: after a reason is logged, close only on a declined retention offer recorded with "
                       "record_retention_answer.", bank_rules.retention_answered, toolkit=True))
-    for tool in REQUEST_TOOLS:
+    for tool in REQUEST_TOOLS if request_gate else ():  # off: research row 6, the request gate removed
         reg.register(Gate(f"banking_request_{tool}", (tool,), "Act only on what the customer asked for: the "
                           "write is covered by the record_requests record (a reversible write without one runs, "
                           "flagged).", bank_rules.requested(tool),
@@ -504,7 +504,10 @@ def _register_banking(reg: GateRegistry) -> None:
                           "was shown by an earlier tool result.", aids.provenance(tool), toolkit=True))
 
 
-def build_registry(domain: str) -> GateRegistry:
+def build_registry(domain: str, request_gate: bool = True) -> GateRegistry:
+    """The domain's gates. `request_gate` False leaves out banking's request gates (`banking_request_<tool>`, the
+    record_requests check): the switch for research row 6 (fix-research-2026-11-02), a Glint convention; on by
+    default."""
     reg = GateRegistry()
     if domain == "retail":
         for tool, action in RETAIL_ACTIONS.items():
@@ -522,7 +525,7 @@ def build_registry(domain: str) -> GateRegistry:
         reg.register(Gate("airline_send_certificate_gate", ("send_certificate",), "Airline policy, Refunds and "
                           "Compensation: who may get a certificate, and for what.", travel.send_certificate))
     elif domain == "banking_knowledge":
-        _register_banking(reg)
+        _register_banking(reg, request_gate)
     else:
         raise ValueError(f"no gates for domain {domain!r}")
     for tool in NO_RULE_YET[domain]:
