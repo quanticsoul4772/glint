@@ -230,6 +230,12 @@ def with_lookups(calls: list[ToolCall], db) -> list[ToolCall]:
     return out
 
 
+def lookups(calls: list[ToolCall], db) -> list[ToolCall]:
+    """Only the reads `with_lookups` would insert for `calls`: what an agent looks up first to see every identifier
+    those calls name (for conversations built call by call, such as the tests)."""
+    return [c for c in with_lookups(calls, db) if LOOKUP_SUFFIX in c.id]
+
+
 def with_address_confirmations(calls: list[ToolCall]) -> list[ToolCall]:
     """`calls` with a record_address_confirmation call before each card's first replacement order (id `<order
     id>-address`), carrying that order's shipping address: the confirmation an agent following the address_ask gate's
