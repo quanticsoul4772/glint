@@ -100,7 +100,7 @@ def test_the_cli_flag_turns_the_gate_off(monkeypatch):
     seen = {}
 
     class Fake:
-        def __init__(self, decision_tools=False, request_gate=True):
+        def __init__(self, decision_tools=False, request_gate=True, **switches):
             seen.update(decision_tools=decision_tools, request_gate=request_gate)
 
         async def run_stdio(self):

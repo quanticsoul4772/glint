@@ -38,10 +38,12 @@ check_credit_limit_increase is GENERIC with mutates_state=True so the replay reb
 038 trial 3 each made the plan and filed none of its disputes before the customer ended the conversation. The items are a function of what the replay rebuilds, so a write's
 reply, footer included, replays unchanged.
 
-Two options are off by default (research fix-research-2026-11-02 appendix). `stages` (glint.gates.stages) adds
-conversation checks, model verifiers and a human approver around the gates. `uncovered_reminder` (#15) adds a
-"[review]" open item for each no_rule_yet write that ran; it reminds instead of refusing, because refusing those writes
-would refuse every training-gold write on the no_rule_yet tools.
+Two options from the research appendix (fix-research-2026-11-02) are on by default since the owner's decision of
+2026-11-03 (every fix on by default). `stages` (glint.gates.stages) adds conversation checks, model verifiers and a
+human approver around the gates; each configured stage runs, and with no model configured (stages.MODEL empty) none
+does and no write changes. `uncovered_reminder` (#15) adds a "[review]" open item for each no_rule_yet write that ran;
+it reminds instead of refusing, because refusing those writes would refuse every training-gold write on the
+no_rule_yet tools. Off switches: `stages=None`, `uncovered_reminder=False`.
 
 Since 2026-11-03 (fix research 2026-11-02; glint.gates.aids) it also keeps: the writes that ran (`glint_ran`, for the
 duplicate-write deny), every assistant tool result that is not an error (`glint_seen`, for the identifier-provenance
@@ -55,7 +57,8 @@ one-line doc and gates.manifest keys) and hooks (ordered functions run when an e
 call, after a read, before and after an allowed write, on every reply, and for extra open items) in its own module,
 instead of editing `Enforcer.__init__`, the gates.manifest call or `get_response`. The options and hooks of the
 features this module owns are registered at its end; glint.gates.stages, glint.gates.aids, glint.gates.reminders
-(the opt-in reminders, step_warn and the transfer flag) and glint.gates.request_switch (request_gate) register theirs.
+(the reminders, step_warn and the transfer flag), glint.gates.request_switch (request_gate) and
+glint.gates.module_switches (entry_wait_fraud, credit_amount_mode, constraints, search_compact_after) register theirs.
 
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -92,6 +95,7 @@ from glint.assist.banking import (
 )
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates import aids, debit, extend
+from glint.gates import module_switches as _module_switches  # noqa: F401  (registers the module-value switches)
 from glint.gates import reminders as _reminders  # noqa: F401  (registers the reminders, step_warn and their hooks)
 from glint.gates import request_switch as _request_switch  # noqa: F401  (registers the request_gate option)
 from glint.gates import stages as _stages  # noqa: F401  (registers the stages option and hook)
@@ -154,7 +158,7 @@ def _open_items(tools, request_gate: bool = True) -> list[str]:
     items += _closure_items(tools)
     for tool, target in getattr(tools, "glint_uncovered", []):
         # research appendix #15 (fail closed on writes no rule covers) as a reminder: a refusal would refuse every
-        # training-gold write on the no_rule_yet tools; Enforcer(uncovered_reminder=True) only, off by default
+        # training-gold write on the no_rule_yet tools; on by default, Enforcer(uncovered_reminder=False) is off
         items.append(f"[review] {tool} ran on {target or '(no target)'} with no policy rule checking it "
                      f"({NO_RULE_REASONS.get(tool, 'no rule yet')}): confirm with the customer that it is what they "
                      "asked for")
@@ -603,14 +607,14 @@ def _setup_wording(enforcer: Enforcer, wording: str) -> None:
 
 extend.option("wording", "plain", "how a refusal is worded to the agent (glint.gates.core.WORDINGS)", order=10,
               owner=__name__, setup=_setup_wording, manifest=lambda enforcer, wording: {"wording": wording})
-extend.option("uncovered_reminder", False, "research appendix #15: a [review] open item for each no_rule_yet write "
-              "that ran; off by default", order=30, owner=__name__,
+extend.option("uncovered_reminder", True, "research appendix #15: a [review] open item for each no_rule_yet write "
+              "that ran; on by default (owner's decision, 2026-11-03)", order=30, owner=__name__,
               manifest=lambda enforcer, on: {"uncovered_reminder": True} if on else {})
 
 
 @extend.hook("attach", order=10)
 def _init_uncovered(enforcer: Enforcer, env) -> None:
-    env.tools.glint_uncovered = []  # (tool, target) of no_rule_yet writes that ran, with uncovered_reminder only
+    env.tools.glint_uncovered = []  # (tool, target) of no_rule_yet writes that ran, while uncovered_reminder is on
 
 
 @extend.hook("after_read", order=10)
@@ -646,7 +650,7 @@ def _increase_record(call: extend.Call, reply: ToolMessage) -> None:
 
 @extend.hook("after_write", order=40)
 def _uncovered_write(call: extend.Call, reply: ToolMessage) -> None:
-    """research appendix #15 as a reminder, with Enforcer(uncovered_reminder=True) only (see _open_items)."""
+    """research appendix #15 as a reminder, unless Enforcer(uncovered_reminder=False) (see _open_items)."""
     tool, args = call.write
     if not extend.ran(reply) or not call.enforcer.uncovered_reminder:
         return

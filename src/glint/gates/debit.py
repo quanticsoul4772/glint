@@ -50,9 +50,11 @@ ENTRY_WAIT_DAYS = 2  # _029: 48 hours after a closure; the database dates closur
 # The 48-hour wait after a fraud_suspected closure. _029 states the wait for every entry-tier replacement; _031 maps a
 # card_present_fraud or card_not_present_fraud dispute to close_and_reissue (close the card AND issue a replacement)
 # with no wait. The two documents conflict, and τ²'s training task_091 orders an entry-tier replacement right after a
-# fraud_suspected closure (fitted to τ² gold). "flag" (default): allowed and logged under ENTRY_WAIT_FLAG; "deny":
-# refused like any other closure reason, which refuses task_091's gold and fails the gold replay.
-ENTRY_WAIT_FRAUD = "flag"
+# fraud_suspected closure (fitted to τ² gold). "deny" (default since the owner's decision of 2026-11-03, every fix on
+# by default): refused like any other closure reason, which refuses task_091's gold in the gold replay; "flag":
+# allowed and logged under ENTRY_WAIT_FLAG. The off switch is Enforcer(entry_wait_fraud="flag")
+# (glint.gates.module_switches).
+ENTRY_WAIT_FRAUD = "deny"
 ENTRY_WAIT_FLAG = "debit.order.entry_wait.fraud_exempt_flagged"
 ENTRY_WAIT_CONFLICT = ("an entry-tier replacement within 48 hours of a fraud_suspected closure: _029 sets a 48-hour "
                        "wait, _031 maps fraud disputes to close_and_reissue with none (document conflict, 029 vs 031); "

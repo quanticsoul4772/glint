@@ -166,7 +166,7 @@ def test_generate_prints_gates_for_the_gated_arm_only(stand_in, make_sim, monkey
     log = gate_log(tmp_path / "gates.sqlite", DECISIONS)
     made = []
 
-    def enforcer(cfg_, domain, data):
+    def enforcer(cfg_, domain, data, transcript=None):
         made.append(domain)
         return types.SimpleNamespace(events=log)
 

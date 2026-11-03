@@ -1,6 +1,10 @@
-"""Optional stages around the write gates: conversation checks, model verifiers, a human approver. All off by default.
+"""Stages around the write gates: conversation checks, model verifiers, a human approver.
 
-`Stages()` with no arguments enables nothing, and the enforcer then behaves exactly as without it. Each stage comes
+On by default since the owner's decision of 2026-11-03 (every fix on by default): the enforcer option `stages`
+defaults to AUTO, which builds `default_stages(resolve_model())`, so each configured stage runs. MODEL is the config
+entry ("module:function" naming a function prompt -> reply text); it is empty by default and the repo ships no
+function that calls a paid service, so with no model configured AUTO is `Stages()`, which enables nothing: the
+enforcer behaves exactly as without stages and no write changes. `stages=None` is the off switch. Each stage comes
 from the research note fix-research-2026-11-02, appendix "Request gate, holds and defaults", where it failed the
 Nov 4 gate because it needs conversation text, a model, or a person (glint.gates.conversation has the checks):
 
@@ -24,6 +28,7 @@ then refuses (a check that cannot decide blocks, as core.run_gate); a flag-mode 
 """
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 from collections import Counter
@@ -37,6 +42,13 @@ from glint.gates.core import CANNOT_DECIDE, GateResult, deny
 from glint.gates.rules import REPLACE
 
 log = logging.getLogger("glint.gates")
+# config entry: "module:function" of the model call the model-based stages use; empty (default): no model configured,
+# so no stage runs and nothing is called
+MODEL = ""
+AUTO = "auto"  # the `stages` option's default: default_stages(resolve_model())
+# (deny_below, allow_at) of the default cascade (#26): the values tests/test_stages.py uses. No labeled benign set exists
+# to calibrate them (conversation.calibrate), so they are unvalidated (Glint convention)
+CASCADE_THRESHOLDS = (0.2, 0.8)
 MODES = ("flag", "deny")
 # the request gate's refusals; the suggested ask_rules for research #16 (18 false refusals by gold, research row 0)
 REQUEST_RULES = ("banking.request.no_record", "banking.request.not_requested", "banking.request.other_target")
@@ -103,6 +115,32 @@ class Stages:
     @property
     def enabled(self) -> bool:
         return any(self.describe()[k] for k in self.describe())
+
+
+def resolve_model(spec: str | None = None) -> conv.ModelCall | None:
+    """The function a "module:function" spec names (MODEL when `spec` is None), or None for an empty spec: no model
+    configured."""
+    spec = MODEL if spec is None else spec
+    if not spec:
+        return None
+    module, _, name = spec.partition(":")
+    if not module or not name:
+        raise ValueError(f"a stage model is named as module:function, got {spec!r}")
+    fn = getattr(importlib.import_module(module), name)
+    if not callable(fn):
+        raise TypeError(f"{spec} is not callable")
+    return fn
+
+
+def default_stages(model: conv.ModelCall | None, transcript: Callable[[], list[conv.Turn]] | None = None) -> Stages:
+    """Every stage a model can run: none without a model, or without a transcript source, since each one reads the
+    conversation (Stages(): nothing runs); with both, #9, #8, #16, #10 and #11 in flag mode, and #26. The approver
+    (#12) needs a person and is not included."""
+    if model is None or transcript is None:
+        return Stages()
+    return Stages(transcript=transcript, extractor=model, address_check=True, address_model=model,
+                  ask_rules=REQUEST_RULES, confirm_model=model, checklist=model, alignment=model,
+                  cascade=conv.Cascade(conv.model_score(model), *CASCADE_THRESHOLDS))
 
 
 _MISSING = object()
@@ -288,12 +326,17 @@ class StageRunner:
 
 # The stages' enforcer option and records (glint.gates.extend).
 
-def _setup(enforcer, stages: Stages | None) -> None:
+def _setup(enforcer, stages: Stages | str | None) -> None:
+    if isinstance(stages, str):
+        if stages != AUTO:
+            raise ValueError(f"stages {stages!r}: a Stages(), {AUTO!r} or None")
+        stages = default_stages(resolve_model())
     enforcer.stages = (StageRunner(stages, enforcer.events, enforcer.context)
                        if stages is not None and stages.enabled else None)
 
 
-extend.option("stages", None, "a Stages() of conversation checks, model verifiers and an approver; off by default",
+extend.option("stages", AUTO, "a Stages() of conversation checks, model verifiers and an approver; \"auto\" "
+              "(default) runs each configured stage, None is off",
               order=20, owner=__name__, setup=_setup,
               manifest=lambda enforcer, stages: {"stages": stages.describe()} if enforcer.stages else {})
 

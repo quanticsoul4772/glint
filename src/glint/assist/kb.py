@@ -75,8 +75,9 @@ def diagnosis(pipeline, results: list[tuple[str, float]], returned: list[str], s
     """A compact search answer for a conversation past its search budget (appendix #72, reader 3 R6: "explicit
     diagnosis replaces accumulated search output"): titles and IDs only, documents an earlier search already returned
     named apart, and one line saying what the searching has found so far. A context budget, not a policy rule;
-    used only when glint.assist.tau2_tools.SEARCH_COMPACT_AFTER is set (default off: overflow occurred only in the
-    alone arm, so turning it on changes the tools arm's context handling, not the baseline's)."""
+    used only when glint.assist.tau2_tools.SEARCH_COMPACT_AFTER is set (default 20 since the owner's decision of
+    2026-11-03, every fix on by default; overflow occurred only in the alone arm, so it changes the tools arm's
+    context handling, not the baseline's)."""
     top = [doc_id for doc_id, _ in results[:TOP_DOCS]]
     new = [d for d in top if d not in returned]
     lines = [f"Search {searches} in this conversation; {len(set(returned))} distinct documents returned so far."]

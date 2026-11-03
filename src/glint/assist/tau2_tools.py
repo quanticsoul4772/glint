@@ -16,9 +16,11 @@ from tau2.registry import registry
 from glint.assist import airline, banking, kb, retail
 
 SEARCH_WARN = 60  # knowledge-base calls in one conversation before the run log warns (see _count_search)
-# KB_search/grep calls after which new searches get kb.diagnosis instead of documents (appendix #72); None: off. A
-# tools_ab set turns it on with the key `search_compact_after`.
-SEARCH_COMPACT_AFTER: int | None = None
+# KB_search/grep calls after which new searches get kb.diagnosis instead of documents (appendix #72); None: off. On
+# by default at 20 since the owner's decision of 2026-11-03 (every fix on by default; 20 chosen by a parallax score at
+# the owner's request: 20 scored 82, 30: 66, 10: 48). The off switch is Enforcer(search_compact_after=None)
+# (glint.gates.module_switches) or the tools_ab set key `search_compact_after` null.
+SEARCH_COMPACT_AFTER: int | None = 20
 # knowledge-base calls with no write between them before the search-loop guard adds the open items (see _guard).
 # scripts/search_guard_count.py on recorded train runs (in-sample, 2026-11-03): at 20, banking-unseen-v10-gated's tools
 # arm fires in 82 of 118 runs (6 of them passing), banking12-plan-v9-gated's in 3 of 40 tuned runs (none passing)

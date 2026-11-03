@@ -21,10 +21,9 @@ Fee schedules (knowledge base document ids, `doc_checking_accounts_*`):
 
 READINGS lists what the documents leave open and how each was settled.
 
-Mode (CREDIT_AMOUNT_MODE): "flag" (default) allows a credit whose amount differs and logs it under
-`banking.checking_credit.amount_unmatched`; "deny" refuses it; "off" skips the rule. The deny mode is not the default
-because it would change live outcomes, and the rule was not on the decision table's Nov 4 list
-(research/fix-research-2026-11-02.md, "Not before Nov 4").
+Mode (CREDIT_AMOUNT_MODE): "deny" (default since the owner's decision of 2026-11-03, every fix on by default) refuses
+a credit whose amount differs; "flag" allows it and logs it under `banking.checking_credit.amount_unmatched`; "off"
+skips the rule. The off switch is Enforcer(credit_amount_mode="flag") or "off" (glint.gates.module_switches).
 """
 from __future__ import annotations
 
@@ -34,7 +33,7 @@ from glint.gates.bankdb import money
 from glint.gates.core import GateResult, allow, deny
 
 SOURCE = "bank_accounts_(general)_017 (net correction); checking account fee schedules (glint.gates.fees)"
-CREDIT_AMOUNT_MODE = "flag"
+CREDIT_AMOUNT_MODE = "deny"
 MODES = ("off", "flag", "deny")
 UNMATCHED = "banking.checking_credit.amount_unmatched"
 WITHDRAWAL, FEE, REBATE = "atm_withdrawal", "atm_fee", "fee_rebate"

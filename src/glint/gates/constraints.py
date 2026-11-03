@@ -8,8 +8,10 @@ at import: an argument line "name (type): ... Must be one of: 'a', 'b'" gives an
 moves the rejection before the call and gives it the gate's deny format; the schema keeps the value from being
 generated at all.
 
-Both are OFF by default (ENABLED False): with ENABLED the banking registry gets one constraint gate per constrained
-tool (`register`), which changes what an agent sees on such a call. The decode-time path (`guided_decoding`) returns
+The check is ON by default (ENABLED True since the owner's decision of 2026-11-03, every fix on by default): the
+banking registry gets one constraint gate per constrained tool (`register`), which changes what an agent sees on such
+a call. The off switch is Enforcer(constraints=False) (glint.gates.module_switches). The decode-time path
+(`guided_decoding`) returns
 the request field a vLLM server takes for guided JSON; no serving code calls it, and checking its effect needs a paid
 run (D§8: no deny reaches the log on that path).
 """
@@ -21,7 +23,7 @@ from functools import lru_cache
 
 from glint.gates.core import Gate, GateRegistry, GateResult, allow, deny
 
-ENABLED = False
+ENABLED = True
 SOURCE = "τ² banking tool docstrings (tau2.domains.banking_knowledge.tools)"
 _ARG = re.compile(r"^\s*(\w+) \((\w+)\):(.*)$")
 _ENUM = re.compile(r"[Mm]ust be one of:\s*(.*)$")

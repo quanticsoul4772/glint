@@ -201,17 +201,32 @@ def test_order_on_an_entry_tier_account_waits_48_hours_after_closure():
     gold = _play(env, task, "order_debit_card_5739")
     gff = gold | {"account_id": "chk_tm92c4d7e8_gff", "delivery_option": "STANDARD", "delivery_fee": 0}
     assert _denied(_hidden(env, "order_debit_card_5739", **gff), "48 hours")
-    # task_091: a fraud_suspected closure on an entry-tier account is replaced at once
+    # task_091: a fraud_suspected closure on an entry-tier account waits too, by default (entry_wait_fraud "deny",
+    # owner's decision 2026-11-03); with the off switch ("flag") it is replaced at once
     env, task, _ = _bank("task_091")
     gold = _play(env, task, "order_debit_card_5739", 1)
     assert gold["account_id"] == "chk_tw34a7d9e2_lightblue"
+    assert _denied(_hidden(env, "order_debit_card_5739", **gold), "48 hours")
+    env, task, _ = _bank("task_091", Enforcer("banking_knowledge", EventLog(":memory:"), entry_wait_fraud="flag"))
+    gold = _play(env, task, "order_debit_card_5739", 1)
     assert _ran(_hidden(env, "order_debit_card_5739", **gold))
 
 
-def test_order_past_the_replacement_limit_needs_the_excess_fee():
+@pytest.fixture
+def entry_wait_flag(monkeypatch):
+    """The entry-wait off switch for a test about another rule; the module value is restored after the test."""
+    from glint.gates import debit
+    monkeypatch.setattr(debit, "ENTRY_WAIT_FRAUD", debit.ENTRY_WAIT_FRAUD)
+    events = EventLog(":memory:")
+    return Enforcer("banking_knowledge", events, entry_wait_fraud="flag"), events
+
+
+def test_order_past_the_replacement_limit_needs_the_excess_fee(entry_wait_flag):
     """task_073's Light Green card (entry tier, limit 2) is a replacement from 08/2025; one more fraud replacement
-    reaches the limit, so the next order needs the $25 excess fee."""
-    env, _, events = _bank("task_073")
+    reaches the limit, so the next order needs the $25 excess fee. The entry wait after the fraud closures is
+    switched off here (entry_wait_fraud "flag") so the limit is what is checked."""
+    enforcer, events = entry_wait_flag
+    env, _, _ = _bank("task_073", enforcer)
     user, account = "kj93a7b2e1", "chk_kj93a7b2e1_3"
     _verify(env, user)
     _request_any(env, user)
@@ -281,8 +296,10 @@ def test_checking_credit_once_per_account_and_within_the_fees():
     other = next(k for k in ("chk_kj93a7b2e1_1", "chk_kj93a7b2e1_2", "chk_kj93a7b2e1_3") if k != first["account_id"])
     assert _denied(_hidden(env, "apply_checking_account_credit_5829", account_id=other, amount=5000.0,
                            credit_type="fee_refund"), "larger than the fees charged")
-    assert _ran(_hidden(env, "apply_checking_account_credit_5829", account_id=other, amount=1.0,
-                        credit_type="rebate_credit"))
+    # an amount the fee schedule does not give is refused by default (credit_amount_mode "deny", owner's decision
+    # 2026-11-03)
+    assert _denied(_hidden(env, "apply_checking_account_credit_5829", account_id=other, amount=1.0,
+                           credit_type="rebate_credit"), "net correction")
 
 
 def test_closure_reason_only_for_an_account_that_can_close():
