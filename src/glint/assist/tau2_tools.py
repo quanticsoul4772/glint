@@ -514,6 +514,33 @@ def add_plan_tool(env):
     return env
 
 
+class _WithoutRequestRecord:
+    """Mixed in ahead of a banking toolkit class: its tool list leaves out record_requests (the request gate is off,
+    research row 6). A plain class: τ²'s toolkit metaclass gives the composed class its own `_func_tools`, which
+    reads this one through super()."""
+
+    @property
+    def _func_tools(self):
+        tools = dict(super()._func_tools)
+        tools.pop(banking.REQUESTS_TOOL, None)
+        return tools
+
+
+_UNRECORDED_BANKING: dict[type, type] = {}  # banking toolkit class -> its subclass without record_requests
+
+
+def drop_request_tool(env):
+    """Take record_requests off a banking environment's toolkit (in place), unless it is off already. Used by
+    glint.gates.enforce when the request gate is off: with no gate reading the record, the tool is not offered."""
+    cls = type(env.tools)
+    if issubclass(cls, _WithoutRequestRecord):
+        return env
+    if cls not in _UNRECORDED_BANKING:
+        _UNRECORDED_BANKING[cls] = type(f"Unrecorded{cls.__name__}", (_WithoutRequestRecord, cls), {})
+    env.tools.__class__ = _UNRECORDED_BANKING[cls]
+    return env
+
+
 def assist_environment(env, domain: str, enforcer=None):
     """Give one environment the decision tools, on its own live database. Used by install() for every environment
     of a domain, and by the Bank Desk for just the tools pane. With an `enforcer` (glint.gates.Enforcer), THAT
