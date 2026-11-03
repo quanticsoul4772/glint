@@ -43,11 +43,13 @@ def test_wt_sh_finds_the_venv_of_the_main_checkout_from_the_repo_location():
     main = Path(common).parent
     venv = [p for p in (main / ".venv" / "Scripts" / "python.exe", main / ".venv" / "bin" / "python") if p.exists()]
     env = {k: v for k, v in os.environ.items() if k != "PY"}
-    r = subprocess.run(["bash", "scripts/wt.sh", "-c", "import sys; print(sys.executable)"], cwd=ROOT,
+    # sys.prefix, not sys.executable: a venv's python can be a symlink to the system interpreter (CI on Linux), and
+    # resolving it would leave the venv; sys.prefix is the venv folder itself
+    r = subprocess.run(["bash", "scripts/wt.sh", "-c", "import sys; print(sys.prefix)"], cwd=ROOT,
                        check=False, env=env, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr
     used = Path(r.stdout.strip().splitlines()[-1]).resolve()
     if venv:
-        assert used.parent.parent.resolve() == venv[0].parent.parent.resolve()
+        assert used == (main / ".venv").resolve()
     else:
         assert used.exists()  # PATH's python
