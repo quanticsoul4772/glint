@@ -81,7 +81,10 @@ flowchart LR
     E -- "write" --> G{"Glint gate<br/>policy as code"}
     G -- "allow" --> W["write runs"]
     G -- "deny: rule, facts, next step" --> A
+    G -- "hold: ask the customer first" --> A
     G -. "every decision" .-> L[("hash-chained<br/>gate log")]
+    F["LlamaFirewall 1.0.3<br/>glint_gates scanner"] -- "assistant tool call" --> G
+    G -- "BLOCK / HUMAN_IN_THE_LOOP / ALLOW<br/>(read only, not logged)" --> F
     A -. "optional" .-> T["Glint decision tools<br/>(MCP)"]
     M["Muse Code<br/>+ glint-bank plugin"] -- "MCP" --> S["glint-bank server"] --> E
 ```
