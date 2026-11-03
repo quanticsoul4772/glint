@@ -5,20 +5,20 @@
 **The model proposes. The policy decides. A refused write never runs.**
 
 [![tests](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml/badge.svg)](https://github.com/quanticsoul4772/glint/actions/workflows/tests.yml)
-[![coverage 97%](https://img.shields.io/badge/coverage-97%25-brightgreen)](docs/testing-strategy.md)
-[![909 tests passed](https://img.shields.io/badge/tests-909%20passed-brightgreen)](tests/)
+[![coverage 97% (96.86%, PR #45 run)](https://img.shields.io/badge/coverage-97%25-brightgreen)](docs/testing-strategy.md "coverage 97% (96.86%, PR #45 run)")
+[![tests: 909 passed (local, 2026-11-03)](https://img.shields.io/badge/tests-909%20passed%20%28local%2C%202026--11--03%29-brightgreen)](docs/testing-strategy.md)
 [![license MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 <!-- GIF placeholder (block, fix, pass; under 10 MB), produced by the video build: ![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](video/demo.gif) -->
 
-**[Watch (3 min)](https://youtu.be/56g7D-g_iNI)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
+**[Watch (2:31)](https://youtu.be/56g7D-g_iNI)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
 
 Glint is write authorization for AI agents that touch money. Every account change the agent attempts goes through a gate before it runs; where the bank's written policy has a rule, the gate applies it as code to the live account records. An allowed write runs. A refused write does not run, and the agent gets the rule, the facts and the fix. Every decision lands in a hash-chained, tamper-evident log. Built on Meta's open-weight Muse Glimmer 30B, Muse Spark and Muse Code.
 
 ## Why it matters
 - **Agents are getting payment access.** Visa (Intelligent Commerce, April 30, 2025) and Mastercard (Agent Pay, April 29, 2025) launched programs that let AI agents pay ([Retail TouchPoints](https://www.retailtouchpoints.com/topics/payments/visa-mastercard-paypal-dive-into-agentic-era-with-tools-that-help-consumers-use-ai-to-buy)). 64% of larger US banks were testing or deploying agentic AI, against 38% of smaller ones (SoundHound-commissioned Arizent/American Banker survey, n=201, [Nasdaq/GlobeNewswire](https://www.nasdaq.com/press-release/research-finds-two-three-us-banking-executives-believe-agentic-ai-will-change-how)).
 - **Risk controls decide which projects survive.** Gartner predicts over 40% of agentic AI projects will be canceled by the end of 2027, citing costs, unclear value or "inadequate risk controls" ([Gartner](https://www.gartner.com/en/newsroom/press-releases/2025-06-25-gartner-predicts-over-40-percent-of-agentic-ai-projects-will-be-canceled-by-end-of-2027)).
-- **Automated account actions are already an enforcement target (a non-AI parallel).** The CFPB's 2022 order against Wells Fargo, $2 billion in redress plus a $1.7 billion penalty ($3.7 billion in all), cited account freezes in "more than 1 million instances" driven by "a faulty automated filter" ([CFPB](https://www.consumerfinance.gov/enforcement/actions/wells-fargo-bank-na-2022/)).
+- **Automated account actions are already an enforcement target (a non-AI parallel).** The CFPB's 2022 order against Wells Fargo, more than $2 billion in redress plus a $1.7 billion penalty (over $3.7 billion in all), cited account freezes in "more than 1 million instances" driven by "a faulty automated filter" ([CFPB](https://www.consumerfinance.gov/enforcement/actions/wells-fargo-bank-na-2022/)).
 - **Wrong account actions are expensive at scale.** Chargebacks: 261 million worth $33.8 billion in 2025 (Mastercard and Datos Insights estimate, [Mastercard](https://b2b.mastercard.com/news-and-insights/blog/what-s-the-true-cost-of-a-chargeback-in-2025)).
 
 ## What makes it different
@@ -31,7 +31,7 @@ Glint is write authorization for AI agents that touch money. Every account chang
 | Approach | What it checks | Deterministic? | Explains the fix? | Tamper-evident record? |
 |---|---|---|---|---|
 | Content filters ([Llama Guard 4](https://build.nvidia.com/meta/llama-guard-4-12b/modelcard), [Lakera Guard](https://www.checkpoint.com/press-releases/check-point-acquires-lakera-to-deliver-end-to-end-ai-security-for-enterprises/), [Model Armor](https://docs.cloud.google.com/model-armor/help/configure-model-armor-gateway)) | Unsafe content, prompt injection, sensitive data in prompts, responses and tool payloads | No: model or classifier | Not described | Not described |
-| Generic authorization ([Cedar in AgentCore Policy](https://aws.amazon.com/de/about-aws/whats-new/2026/03/policy-amazon-bedrock-agentcore-generally-available/), [OPA](https://www.openpolicyagent.org/docs/management-decision-logs), [Cerbos](https://cerbos.dev/features-benefits-and-use-cases/ai-security)) | Which tools or actions an identity may call | Yes | No: allow or deny | Decision logs; hash-chaining not described |
+| Generic authorization ([Cedar in AgentCore Policy](https://aws.amazon.com/about-aws/whats-new/2026/03/policy-amazon-bedrock-agentcore-generally-available/), [OPA](https://www.openpolicyagent.org/docs/management-decision-logs), [Cerbos](https://cerbos.dev/features-benefits-and-use-cases/ai-security)) | Whether an identity may call a tool or action, optionally with conditions on its inputs | Yes | Not described (allow or deny) | Decision logs; hash-chaining not described |
 | Model judges ([Microsoft Task Adherence](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/quickstart-task-adherence), [LlamaFirewall AlignmentCheck](https://arxiv.org/abs/2505.03574v1)) | Whether a proposed call or the agent's reasoning fits its task | No: model | Not described | Not described |
 | **Glint** | Each write against the bank's written policy and the live account records | **Yes:** plain Python functions | **Yes:** the rule, the facts and the next step | **Yes:** hash chain, HMAC-keyed with `GLINT_LOG_KEY` |
 
@@ -42,7 +42,7 @@ Glint complements content filters rather than replacing them: a prompt-injection
 |---|---|---|
 | Enforcement by construction | Every one of **964 write calls** in four gated sets went through a gate; **89 of 89** refusals in replayed runs were refused again | Measured on Glimmer's runs in the four gated banking sets (v9, unseen, v10, pressure); holds by construction for any model behind the gate ([details](docs/results.md#live-gate-decisions-across-the-four-gated-banking-sets)) |
 | Precision | **1 false refusal in 407 correct write calls** on 59 tasks no gate rule came from: 0.25%, upper bound 1.2% (one-sided 95%); 4.9% counting every hold as a cost | Untuned tasks, judged against τ²'s expected writes ([details](docs/results.md#live-gate-decisions-across-the-four-gated-banking-sets)) |
-| Banking test split after the fix research | **11 of 40** runs passed (gated arm, 2026-11-03) against **7 of 40** for both arms (2026-11-02); by task p = 0.125 against the earlier gated run and p = 0.25 against alone | **Tuned, in-sample, cross-day; the alone arm was not rerun; may be chance** ([details](docs/results.md#banking-test-split-gated-arm-after-the-fix-research-2026-11-03)) |
+| Banking test split after the fix research | **11 of 40** runs passed (gated arm, 2026-11-03) against **7 of 40** for both arms (2026-11-02); by task p = 0.125 against the earlier gated run and p = 0.25 against alone, by task, sign test, two-sided. Against τ²'s offline re-grade of the alone arm (10/40): 3 better, 1 worse, p = 0.63. | **Tuned, in-sample, cross-day; the alone arm was not rerun; may be chance** ([details](docs/results.md#banking-test-split-gated-arm-after-the-fix-research-2026-11-03)) |
 
 No outcome gain on unseen tasks has been shown; see [Limits](#limits-each-answered) and [What was measured](#what-was-measured).
 
@@ -105,17 +105,17 @@ An agent that can move money is only as safe as its worst call. A 30B model hold
 - **Buyers:**
   - bank risk, compliance and model-risk teams, who own model validation under [SR 11-7](https://www.federalreserve.gov/supervisionreg/srletters/sr1107.htm);
   - fintech and banking-software platforms;
-  - agent vendors selling into banks, who face the "security and compliance" and "autonomy" objections (51% each as top barriers to agentic AI, SoundHound-commissioned survey, n=201, [Nasdaq/GlobeNewswire](https://www.nasdaq.com/press-release/research-finds-two-three-us-banking-executives-believe-agentic-ai-will-change-how)).
+  - agent vendors selling into banks, who face the barriers bank executives rank highest: security and compliance, and autonomy (51% each, SoundHound-commissioned survey, n=201, [Nasdaq/GlobeNewswire](https://www.nasdaq.com/press-release/research-finds-two-three-us-banking-executives-believe-agentic-ai-will-change-how)).
 - **Price floor:** generic authorization already sells: Cerbos Hub Production starts at $933 a month, with one year of audit logs ([Cerbos pricing](https://www.cerbos.dev/pricing)).
 - **The offer:** an annual bank package on the open-source core: policy encoding for each product line, validation evidence for model risk, the tamper-evident audit trail, and support.
 - **The value, in the bank's own numbers:** value per year = (agent write actions per year) × (error rate without the gate, measured on the bank's own traffic) × (average remediation cost per wrong action, from the bank's dispute and complaint data) + audit hours saved. The bank supplies every input; Glint supplies the gate and its measured with-and-without results on τ²-bench above.
 
 ## Limits, each answered
 - **The 2026-11-02 test-split run had 18 false refusals of 35 judged** (17 by the request gate, 1 by verify once, against τ²'s gold). *Answer:* PRs #29 onward changed the request gate: reversible writes are allowed and flagged instead of refused, a refusal carries the filled-in `record_requests` call, and PR #41 added a switch that removes the request gate. These changes were fitted to that split, and the 2026-11-03 run's refusals by rule are not yet analyzed ([details](#rule-changes-from-the-test-split-prs-29-44)).
-- **No outcome gain on unseen tasks.** On 59 unseen tasks Glimmer alone passed 21 of 108 matched runs and gated 19. *Answer:* the claim is enforcement integrity, which holds by construction; fewer wrong writes depends on which policy clauses the rules encode, and is measured per bank on its own traffic in the value formula above.
+- **No outcome gain on unseen tasks.** On 59 unseen tasks Glimmer alone passed 21 of 108 matched runs and gated 19. Alone's 21 includes at least 27 runs lost to context overflows, counted as failures; 41 gated runs hit the step limit. *Answer:* the claim is enforcement integrity, which holds by construction; fewer wrong writes depends on which policy clauses the rules encode, and can be measured by each bank on its own traffic, as in the value formula above.
 - **The replays are in-sample.** The 289 gold writes and the 24 of 32 stopped failures come from the tasks the rules were written on. *Answer:* they show the gates work as designed; the precision row above comes from 59 tasks no gate rule came from.
 - **A gate checks only what its rules encode.** On those 59 tasks, 31% of live write decisions (206 of 660) were writes no rule covered. *Answer:* every such write is allowed and logged as `no_rule_yet` with the reason, enforcement refuses to start unless every write tool has a gate, and rules have since been added for savings interest and debit disputes ([The gates](#the-gates)).
-- **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard. *Answer:* both arms of every comparison run on the same backend and seeds, reported by task.
+- **Within-harness only.** Muse Spark plays the customer, so the numbers are not comparable with the τ²-bench leaderboard. *Answer:* both arms run on the same backend and seeds in every comparison except the 2026-11-03 test-split rerun (gated arm only, cross-day), reported by task.
 - **The demos are illustrations.** The desk's pairs are selected, and the Muse Code run was scripted. *Answer:* the desk shows each task's real pass counts beside the pair, and the replays run without a GPU for anyone to check.
 - **The LlamaFirewall adapter has not run inside LlamaFirewall,** and interactive Muse Code is not shown to work (headless is). *Answer:* both are stated in [docs/llamafirewall.md](docs/llamafirewall.md) and [Limitations in detail](#limitations-in-detail).
 
