@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from dataclasses import replace
 
 from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
@@ -80,6 +81,7 @@ from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, allow, assert_required, deny, run_gate
 from glint.gates.eventlog import EventLog
+from glint.gates.procedure import TRANSFER_UNCODED
 from glint.gates.rules import (
     ADDRESS_ASK,
     APPROVE,
@@ -204,17 +206,21 @@ REPEAT_NOTE = ("\n\nThis exact call was already refused for the same reason, so 
                "cannot be resolved.")
 
 
-def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] = ()) -> list[str]:
+def attestation_classes(passed: list[str], flagged: list[str] | tuple[str, ...] = (),
+                        uncoded: list[str] | tuple[str, ...] = ()) -> list[str]:
     """What stood behind an allowed write, from the names of the gates that allowed it: 'rule_checked' (a policy rule
     on the write's values or state), 'customer_requested' (the request record covers it), or 'uncovered' (only the
     procedure gates and a no_rule_yet allow). `flagged` names the request gates that allowed the write without a
-    covering request (bank_rules.UNRECORDED): those add 'request_unrecorded', never 'customer_requested'."""
+    covering request (bank_rules.UNRECORDED): those add 'request_unrecorded', never 'customer_requested'. `uncoded`
+    names the gates that allowed a transfer with no doc-042 reason code (procedure.TRANSFER_UNCODED): those add
+    'transfer_reason_uncoded', never 'rule_checked'."""
     classes = []
-    if any(not g.startswith(("no_rule_", "procedure_", "banking_request_")) for g in passed):
+    if any(not g.startswith(("no_rule_", "procedure_", "banking_request_")) and g not in uncoded for g in passed):
         classes.append("rule_checked")
     if any(g.startswith("banking_request_") and g not in flagged for g in passed):
         classes.append("customer_requested")
-    return (classes or ["uncovered"]) + (["request_unrecorded"] if flagged else [])
+    return ((classes or ["uncovered"]) + (["request_unrecorded"] if flagged else [])
+            + (["transfer_reason_uncoded"] if uncoded else []))
 
 
 class Enforcer:
@@ -249,7 +255,8 @@ class Enforcer:
 
     def check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None) -> GateResult:
         """Run every gate on the write; the first deny wins. Each gate's decision is logged as gate.fired. A gate with
-        `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`."""
+        `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`. The returned allow carries every
+        passing gate's note, which get_response appends to the tool's reply."""
         if args is None:
             result = deny("unparsed_arguments", "glint.gates.enforce", "the hidden tool's arguments could not be "
                           "read, so no check could judge the write", "Pass `arguments` as a JSON object string.",
@@ -257,7 +264,7 @@ class Enforcer:
                           "of the request is not affected.", facts=["`arguments` is not a JSON object"])
             self._log(tool, args, result, 0.0, replay, "unparsed")
             return result
-        final, passed, flagged, extra = None, [], [], []
+        final, passed, flagged, uncoded, notes, extra = None, [], [], [], [], []
         stages = self.stages if toolkit is not None else None
         if stages:
             stages.prime(toolkit, tool, args, replay)
@@ -281,6 +288,10 @@ class Enforcer:
             passed.append(gate.name)
             if result.rule_id == UNRECORDED:
                 flagged.append(gate.name)
+            if result.rule_id == TRANSFER_UNCODED:
+                uncoded.append(gate.name)
+            if result.note:
+                notes.append(result.note)
             final = final or result
         if final is None and not extra:  # attach() refuses an environment with an ungated write; a second line
             raise RuntimeError(f"write {tool} has no gate")
@@ -290,17 +301,18 @@ class Enforcer:
                 self._log(tool, args, refusal, 0.0, replay, f"stage_{refusal.rule_id}")
                 return refusal
             extra += classes
-        self._attest(tool, passed, replay, flagged, extra)
-        return final or allow("stage.asked_confirmed", "glint.gates.stages", {"tool": tool})
+        self._attest(tool, passed, replay, flagged, uncoded, extra)
+        final = final or allow("stage.asked_confirmed", "glint.gates.stages", {"tool": tool})
+        return replace(final, note="\n\n".join(notes))
 
     def _attest(self, tool: str, passed: list[str], replay: bool, flagged: list[str] | None = None,
-                extra: list[str] | None = None) -> None:
+                uncoded: list[str] | None = None, extra: list[str] | None = None) -> None:
         """A write.attested event for each allowed write: which kind of check stood behind it (attestation_classes).
         Never decides anything; a failure to log is logged, not raised."""
         try:
             self.events.emit("write.attested", {"domain": self.domain, "tool": tool,
-                                                "classes": attestation_classes(passed, flagged or ()) + sorted(
-                                                    set(extra or ())), "gates": passed,
+                                                "classes": attestation_classes(passed, flagged or (), uncoded or ())
+                                                + sorted(set(extra or ())), "gates": passed,
                                                 "replay": replay, **self.context()})
         except Exception:
             log.exception("the write.attested event was not logged")
@@ -519,6 +531,8 @@ class Enforcer:
             if result.allowed:
                 before = increase_request_ids(env.tools.db) if write[0] == SUBMIT else None
                 reply = original_response(message)
+                if result.note:  # an allow's reminder (procedure.TRANSFER_UNCODED): deterministic, so it replays
+                    reply = reply.model_copy(update={"content": f"{reply.content}\n\n{result.note}"})
                 self._record_increase(env, *write, reply, before)
                 if (self.uncovered_reminder and write[0] in NO_RULE_YET.get(self.domain, ())
                         and not reply.error and not str(reply.content).startswith("Error")):
