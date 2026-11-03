@@ -197,6 +197,30 @@ class DisputePlanTools(ToolKitBase):
         return banking.record_retention_answer(self.db, credit_card_account_id, user_id, offer, accepted,
                                                customer_words)
 
+    @is_tool(ToolType.GENERIC, mutates_state=True)
+    def record_dispute_answers(self, card_id: str, user_id: str, card_in_possession: bool, pin_compromised: str,
+                               customer_words: str) -> dict:
+        """Record the customer's answers to the two questions a debit card dispute asks (knowledge base
+        bank_accounts_(general)_031), before filing it: "Do you still have your physical debit card in your
+        possession?" and "Do you believe your PIN may have been compromised?". A debit dispute filing is checked
+        against the latest record for its card: no filing without one, and its card_in_possession and
+        pin_compromised must equal the recorded answers. Call it again if the customer answers differently for
+        another transaction. It does not change the database.
+
+        Args:
+            card_id: The debit card the dispute is filed on.
+            user_id: The customer's user id.
+            card_in_possession: true if the customer still has the physical card, false if not.
+            pin_compromised: One of 'yes_shared' (the customer shared the PIN), 'yes_observed' (observed or
+                skimmed), 'no', 'unknown' (the customer is unsure).
+            customer_words: The customer's own words answering both questions, quoted.
+
+        Returns:
+            dict: recorded, the answers as recorded, and the next step; or an error.
+        """
+        return banking.record_dispute_answers(self.db, card_id, user_id, card_in_possession, pin_compromised,
+                                              customer_words)
+
 
     @is_tool(ToolType.GENERIC, mutates_state=True)
     def record_requests(self, user_id: str, requests: list[dict]) -> dict:

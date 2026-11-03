@@ -53,7 +53,15 @@ from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
 from glint.assist import as_flag
-from glint.assist.banking import ORDER_TOOL, PLAN_TOOL, REQUESTS_TOOL, RETENTION_TOOL, TODAY, replacements_today
+from glint.assist.banking import (
+    DISPUTE_ANSWERS_TOOL,
+    ORDER_TOOL,
+    PLAN_TOOL,
+    REQUESTS_TOOL,
+    RETENTION_TOOL,
+    TODAY,
+    replacements_today,
+)
 from glint.assist.tau2_tools import add_plan_tool
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
@@ -75,6 +83,7 @@ from glint.gates.rules import (
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
 VERDICT_TOOL = "check_credit_limit_increase"
+GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL)  # replies carry no open items
 CHECK_TOOLS = ("check_card_dispute", "check_verification", VERDICT_TOOL)  # decision tools logged as check.recorded
 
 
@@ -328,6 +337,26 @@ class Enforcer:
         except Exception:
             log.exception("the retention_answer.recorded event was not logged")
 
+    def _record_dispute_answers(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
+        """Keep the customer's recorded answers to the two debit dispute questions, per card (the latest wins)."""
+        if call.requestor != "assistant" or call.name != DISPUTE_ANSWERS_TOOL or reply.error:
+            return
+        try:
+            answer = json.loads(reply.content)
+        except (TypeError, json.JSONDecodeError):
+            return
+        if not isinstance(answer, dict) or not as_flag(answer.get("recorded")):
+            return
+        answer["card_in_possession"] = as_flag(answer.get("card_in_possession"))  # τ² shows bools as "True"/"False"
+        env.tools.glint_dispute_answers[answer["card_id"]] = answer
+        try:
+            self.events.emit("dispute_answers.recorded", {
+                "domain": self.domain, "card_id": answer["card_id"], "card_in_possession": answer["card_in_possession"],
+                "pin_compromised": answer["pin_compromised"], "customer_words": answer["customer_words"][:200],
+                "replay": replay, **self.context()})
+        except Exception:
+            log.exception("the dispute_answers.recorded event was not logged")
+
     def _record_check(self, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """A check.recorded event for each decision-tool answer the agent got (check_card_dispute,
         check_verification, check_credit_limit_increase): what it said, so a diagnosis counts "the check said ready
@@ -368,13 +397,14 @@ class Enforcer:
         env.tools.glint_denied = set()  # (tool, arguments, rule) of every refusal, for the repeat escalation
         env.tools.glint_requests = None  # the latest record_requests list (None: not recorded yet)
         env.tools.glint_retention = {}  # credit card account -> the recorded answer to the retention offer
+        env.tools.glint_dispute_answers = {}  # debit card -> the recorded answers to the two dispute questions
         env.tools.glint_verdicts = {}  # card -> the increase verdict check_credit_limit_increase gave, not filed yet
         env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
         env.tools.glint_address_asked = set()  # cards whose replacement the address_ask gate refused once
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
-            if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL)
+            if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in GLINT_RECORDS
                     or reply.error or str(reply.content).startswith("Error")):
                 return reply
             items = _open_items(env.tools)
@@ -387,6 +417,7 @@ class Enforcer:
                 self._record_read(env, message, reply)
                 self._record_plan(env, message, reply, state["replay"])
                 self._record_retention(env, message, reply, state["replay"])
+                self._record_dispute_answers(env, message, reply, state["replay"])
                 self._record_requests(env, message, reply, state["replay"])
                 self._record_verdict(env, message, reply)
                 self._record_check(message, reply, state["replay"])

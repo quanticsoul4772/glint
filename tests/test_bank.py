@@ -64,7 +64,8 @@ def test_tool_list_is_the_toolkits_tools_with_their_schemas_and_annotations(serv
     listed = {t.name: t for t in _run(_with_client, server, body)}
     env = bank.build_environment()
     tools = env.tools.get_tools()
-    assert set(listed) == set(tools) | {bank.LOAD, bank.POLICY, bank.PLAN_TOOL, bank.RETENTION_TOOL, bank.REQUESTS_TOOL} and len(tools) == 16
+    assert set(listed) == set(tools) | {bank.LOAD, bank.POLICY, bank.PLAN_TOOL, bank.RETENTION_TOOL, bank.REQUESTS_TOOL,
+                                          bank.DISPUTE_ANSWERS_TOOL} and len(tools) == 16
     for name, tool in tools.items():
         schema = tool.openai_schema["function"]
         assert listed[name].input_schema == schema["parameters"] and listed[name].description == schema["description"]
@@ -257,7 +258,7 @@ def test_selftest_round_trips_over_stdio_with_a_clean_stdout(capsys):
     """--selftest starts the server as a stdio subprocess and talks JSON-RPC to it: any stray stdout breaks it."""
     assert bank.main(["--selftest"]) == 0
     report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
-    assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 21  # 16 τ², plan_disputes, record_retention_answer, record_requests, 2 server
+    assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 22  # 16 τ², 4 Glint records, 2 server
 
 
 def test_selftest_with_the_decision_tools_lists_them(capsys):
