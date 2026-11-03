@@ -97,12 +97,15 @@ def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
     dispute-history read before it when none came earlier (ids `<filing id>-history-unlock`, `<filing id>-history`).
     Before each closure of a credit card account whose closure reason was logged earlier in the conversation, the
     record_retention_answer call (accepted false) an agent following the retention gate makes (id `<close id>-retention`):
-    the conversation closes the account, so the customer declined the offer. Before each debit card dispute filing
-    whose card_in_possession and pin_compromised differ from the latest answers recorded for its card (none yet, at
+    the conversation closes the account, so the customer declined the offer. When the logged reason is annual_fee the
+    call carries fee_waiver_offered true: a conversation that closes after that reason had the customer decline what
+    credit_card_account_logistics_003 step 4 offers (the waiver when due), which record_retention_answer requires.
+    Before each debit card dispute filing whose card_in_possession and pin_compromised differ from the latest answers recorded for its card (none yet, at
     the first), the record_dispute_answers call carrying the filing's own answers (id `<filing id>-answers`)."""
     plans = plan_arguments([f for c in calls if (f := filing(c))])
     requests = request_arguments(calls)
     out, planned, read, logged, answered, recorded = [], set(), False, set(), set(), False
+    fee_reason = set()  # accounts whose logged closure reason is annual_fee
     answers: dict[str, tuple] = {}
     for c in calls:
         if (debit := _hidden(c, DEBIT_DISPUTE)) is not None:
@@ -117,13 +120,16 @@ def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
             out.append(ToolCall(id=f"{c.id}-requests", name=REQUESTS_TOOL, arguments=requests, requestor="assistant"))
         if (reason := _hidden(c, CLOSURE_REASON)) is not None:
             logged.add(reason.get("credit_card_account_id"))
+            if reason.get("closure_reason") == "annual_fee":
+                fee_reason.add(reason.get("credit_card_account_id"))
         close = _hidden(c, CLOSE_CARD)
         if close is not None and close.get("credit_card_account_id") in logged - answered:
             card = close.get("credit_card_account_id")
             answered.add(card)
             out.append(ToolCall(id=f"{c.id}-retention", name=RETENTION_TOOL, requestor="assistant", arguments={
                 "credit_card_account_id": card, "user_id": close.get("user_id"), "offer": "retention offer by card tier",
-                "accepted": False, "customer_words": "(replay: the conversation closes the account)"}))
+                "accepted": False, "customer_words": "(replay: the conversation closes the account)",
+                "fee_waiver_offered": card in fee_reason}))
         f = filing(c)
         user = str(f.get("user_id", "")) if f else None
         if f is not None and user not in planned:
