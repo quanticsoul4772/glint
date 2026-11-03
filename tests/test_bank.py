@@ -46,7 +46,17 @@ def _verification(task_id: str = "task_054") -> dict:
     return next(a.arguments for a in bank.tasks()[task_id].evaluation_criteria.actions if a.name == "log_verification")
 
 
+def _lookups(task_id: str = "task_054") -> list[tuple[str, dict]]:
+    """The reads that show the customer's user id and cards before a write names them (the identifier-provenance deny,
+    N10)."""
+    v = _verification(task_id)
+    return [("get_user_information_by_name", {"customer_name": v["name"]}),
+            ("get_credit_card_accounts_by_user", {"user_id": v["user_id"]})]
+
+
 def _verify(server, sid=None):
+    for name, args in _lookups():
+        server.call(sid, name, args)
     reply = server.call(sid, "log_verification", _verification())
     assert not reply.is_error, reply.content[0].text
 
@@ -108,6 +118,8 @@ def test_a_denied_write_is_an_error_result_with_the_gate_text_and_leaves_the_dat
         await client.call_tool("unlock_discoverable_agent_tool", {"agent_tool_name": rules.SUBMIT})
         unverified = await client.call_tool("call_discoverable_agent_tool", _hidden_args(
             rules.SUBMIT, requested_increase_amount=2500, **SOFIA))
+        for name, args in _lookups():
+            await client.call_tool(name, args)
         assert not (await client.call_tool("log_verification", _verification())).is_error
         before = server.session().env.get_db_hash()
         denied = await client.call_tool("call_discoverable_agent_tool", _hidden_args(

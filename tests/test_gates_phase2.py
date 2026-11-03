@@ -14,7 +14,7 @@ import splits
 from glint import paths
 from glint.gates import Enforcer, EventLog, Gate, GateRegistry, allow, rules
 from glint.gates import procedure as proc
-from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_lookups, with_plans
+from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, lookups, with_address_asks, with_lookups, with_plans
 
 logger.remove()
 BANKING = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
@@ -107,6 +107,19 @@ def _verify(env, user_id: str) -> None:
                                               "date_of_birth")}))
 
 
+def _look_up(env, send=None, **ids) -> None:
+    """The reads that show these identifiers, as an agent makes them before a write naming them (the identifier-
+    provenance deny, N10); through `send(call)` when the caller keeps a history."""
+    for read in lookups([ToolCall(id="ids", name="ids", arguments=ids, requestor="assistant")], env.tools.db):
+        (send or env.get_response)(read)
+
+
+def _gold_with_lookups(env, actions) -> list[ToolCall]:
+    """Gold actions as tool calls, each preceded by the reads that show its identifiers (glint.gates.replayplan)."""
+    return with_lookups([ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant")
+                         for k, a in enumerate(actions)], env.tools.db)
+
+
 def _lookups(env, user_id: str, account_id: str) -> None:
     _hidden(env, "get_all_user_accounts_by_user_id_3847", user_id=user_id)
     _hidden(env, "get_debit_cards_by_account_id_7823", account_id=account_id)
@@ -118,6 +131,8 @@ def _lookups(env, user_id: str, account_id: str) -> None:
 def test_freeze_only_an_active_card():
     env, task, _ = _bank("task_087")
     _play(env, task, "unfreeze_debit_card_3893")
+    for card in ("dbc_mt35a7c9d2_blue", "dbc_mt35a7c9d2_evergreen"):  # the card lists show them
+        _look_up(env, card_id=card)
     assert _denied(_hidden(env, "freeze_debit_card_3892", card_id="dbc_mt35a7c9d2_blue"), "only an ACTIVE card")
     assert _ran(_hidden(env, "freeze_debit_card_3892", card_id="dbc_mt35a7c9d2_evergreen"))
     assert _card(env, "dbc_mt35a7c9d2_evergreen")["status"] == "FROZEN"
@@ -334,13 +349,15 @@ def test_a_close_needs_the_transactions_lookup_on_the_gates_own_record():
     _verify(env, "a7c2f85d91")
     _request_any(env, "a7c2f85d91")
     close = {"card_id": "dbc_82b5d1a6f3", "reason": "fraud_suspected"}
+    _look_up(env, card_id="dbc_82b5d1a6f3")  # the card list shows the card (not the transactions lookup)
+    cards = {"get_debit_cards_by_account_id_7823"}
     assert _denied(_hidden(env, "close_debit_card_4721", **close), "get_bank_account_transactions_9173")
-    assert env.tools.glint_reads == set()
+    assert env.tools.glint_reads == cards
     assert _call(env, "call_discoverable_agent_tool", agent_tool_name="get_bank_account_transactions_9173",
                  arguments=json.dumps({"account_id": "chk_e5a31c7d82"})).error is False
-    assert env.tools.glint_reads == set()  # not unlocked: the call failed and is not a lookup
+    assert env.tools.glint_reads == cards  # not unlocked: the call failed and is not a lookup
     _hidden(env, "get_bank_account_transactions_9173", account_id="chk_e5a31c7d82")
-    assert env.tools.glint_reads == {"get_bank_account_transactions_9173"}
+    assert env.tools.glint_reads == cards | {"get_bank_account_transactions_9173"}
     assert _ran(_hidden(env, "close_debit_card_4721", **close))
 
 
@@ -358,6 +375,7 @@ def test_lookup_gate_decisions_replay_unchanged_in_taus_strict_replay():
         return reply
 
     user = env.tools.db.users.data["a7c2f85d91"]
+    _look_up(env, lambda c: send(c.name, **c.arguments), user_id="a7c2f85d91", card_id="dbc_82b5d1a6f3")
     send("log_verification", time_verified="2025-11-14 03:40:00 EST",
          **{k: user[k] for k in ("name", "user_id", "address", "email", "phone_number", "date_of_birth")})
     send("record_requests", user_id="a7c2f85d91", requests=ANY_REQUEST)
@@ -404,6 +422,7 @@ def test_other_changes_wait_for_the_submitted_increase():
     _request_any(env, deny_args["user_id"])
     pay = json.loads(next(a.arguments["arguments"] for a in task.evaluation_criteria.actions
                           if _name(a) == "pay_credit_card_from_checking_9182"))
+    _look_up(env, **pay)
     reply = _hidden(env, "pay_credit_card_from_checking_9182", **pay)
     assert _denied(reply, "approve or deny") and _rule(events) == "procedure.increase_undecided"
     assert "blocked until the increase is approved or denied" in reply.content
@@ -454,14 +473,15 @@ def test_increase_record_and_its_decisions_replay_unchanged_in_taus_strict_repla
 
     gold = task.evaluation_criteria.actions
     upto = next(k for k, a in enumerate(gold) if _name(a) == "pay_credit_card_from_checking_9182")
-    for k, a in enumerate(gold[:upto]):  # verification, submit, the lookups, deny, accounts read
-        assert _ran(send(ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant")))
+    for call in _gold_with_lookups(env, gold[:upto]):  # verification, submit, the lookups, deny, accounts read
+        assert _ran(send(call))
     submit = json.loads(next(a.arguments["arguments"] for a in gold if _name(a) == rules.SUBMIT))
     send(ToolCall(id="s2", name="call_discoverable_agent_tool", requestor="assistant", arguments={
         "agent_tool_name": rules.SUBMIT, "arguments": json.dumps(submit | {"requested_increase_amount": 500})}))
     pay = gold[upto].arguments
     send(ToolCall(id="r", name="record_requests", requestor="assistant",
                   arguments={"user_id": submit["user_id"], "requests": ANY_REQUEST}))
+    _look_up(env, send, **json.loads(pay["arguments"]))
     assert _denied(send(ToolCall(id="p", name=gold[upto].name, arguments=pay, requestor="assistant")),
                    "approve or deny")
     replay, _, _ = _bank("task_051", enforcer)
@@ -494,8 +514,8 @@ def test_an_increase_verdict_stays_open_until_its_decision_and_replays_unchanged
 
     gold = task.evaluation_criteria.actions
     at = next(k for k, a in enumerate(gold) if _name(a) == rules.SUBMIT)
-    for k, a in enumerate(gold[:at]):
-        assert _ran(send(a.name, a.arguments, k))
+    for k, c in enumerate(_gold_with_lookups(env, gold[:at])):
+        assert _ran(send(c.name, c.arguments, k))
     submit = json.loads(gold[at].arguments["arguments"])
     card = submit["credit_card_account_id"]
     check = send("check_credit_limit_increase", {k: submit[k] for k in ("user_id", "credit_card_account_id",
@@ -647,8 +667,8 @@ def test_the_expedite_ask_and_its_repeat_replay_unchanged_in_taus_strict_replay(
 
     gold = task.evaluation_criteria.actions
     upto = next(k for k, a in enumerate(gold) if _name(a) == rules.REPLACE)
-    for k, a in enumerate(gold[:upto]):
-        send(ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant"))
+    for call in _gold_with_lookups(env, gold[:upto + 1])[:-1]:
+        send(call)
     order = json.loads(gold[upto].arguments["arguments"]) | {"expedited_shipping": False}
     wrapped = {"agent_tool_name": rules.REPLACE, "arguments": json.dumps(order)}
     assert _denied(send(ToolCall(id="o0", name="call_discoverable_agent_tool", arguments=wrapped,
