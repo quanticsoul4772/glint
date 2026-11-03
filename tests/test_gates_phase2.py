@@ -14,7 +14,7 @@ import splits
 from glint import paths
 from glint.gates import Enforcer, EventLog, Gate, GateRegistry, allow, rules
 from glint.gates import procedure as proc
-from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_plans
+from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, with_address_asks, with_lookups, with_plans
 
 logger.remove()
 BANKING = {t["id"]: t for t in json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" /
@@ -47,7 +47,8 @@ def _play(env, task, tool: str, n: int = 0) -> dict:
     gold = [ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
             for k, a in enumerate(task.evaluation_criteria.actions)]
     users = env.tools.db.users.data
-    for action in with_address_asks(with_plans(gold), lambda u: (users.get(u) or {}).get("address")):
+    for action in with_lookups(with_address_asks(with_plans(gold), lambda u: (users.get(u) or {}).get("address")),
+                               env.tools.db):
         if action.id.endswith(ADDRESS_ASK_SUFFIX):
             if _name(action) == tool and seen == n:  # the caller sends this order itself
                 args = action.arguments
@@ -100,6 +101,7 @@ def _request_any(env, user_id: str) -> None:
 
 def _verify(env, user_id: str) -> None:
     user = env.tools.db.users.data[user_id]
+    _call(env, "get_user_information_by_name", customer_name=user["name"])  # shows the user id (provenance, N10)
     assert _ran(_call(env, "log_verification", time_verified="2025-11-14 03:40:00 EST",
                       **{k: user[k] for k in ("name", "user_id", "address", "email", "phone_number",
                                               "date_of_birth")}))

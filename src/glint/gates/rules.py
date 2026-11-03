@@ -492,11 +492,15 @@ def _register_banking(reg: GateRegistry) -> None:
     reg.register(Gate("procedure_give_card_digits_gate", ("give_discoverable_user_tool",), "credit_cards_(general)"
                       "_014: the customer looks up the card's digits only when its account record does not show "
                       "them.", procedure.give_card_digits, toolkit=True))
-    # a deny-only convention with no policy clause (fix research 2026-11-02, N2; glint.gates.aids), registered last so
-    # every policy gate's refusal comes first. Named procedure_* so an allow counts as no rule check
-    for tool in sorted(set(REQUIRED_GATES["banking_knowledge"]) - set(aids.DUPLICATE_EXEMPT)):
-        reg.register(Gate(f"procedure_duplicate_{tool}", (tool,), "Glint convention, no clause: the same write with "
-                          "identical arguments runs once per conversation.", aids.duplicate(tool), toolkit=True))
+    # deny-only conventions with no policy clause (fix research 2026-11-02, N2 and N10; glint.gates.aids), registered
+    # last so every policy gate's refusal comes first. Named procedure_* so an allow counts as no rule check
+    for tool in sorted(REQUIRED_GATES["banking_knowledge"]):
+        if tool not in aids.DUPLICATE_EXEMPT:
+            reg.register(Gate(f"procedure_duplicate_{tool}", (tool,), "Glint convention, no clause: the same write "
+                              "with identical arguments runs once per conversation.", aids.duplicate(tool),
+                              toolkit=True))
+        reg.register(Gate(f"procedure_provenance_{tool}", (tool,), "Glint convention: every identifier argument "
+                          "was shown by an earlier tool result.", aids.provenance(tool), toolkit=True))
 
 
 def build_registry(domain: str) -> GateRegistry:

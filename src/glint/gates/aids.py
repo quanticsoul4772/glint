@@ -1,4 +1,4 @@
-"""An agent aid and a deny-only convention on banking writes (fix research 2026-11-02, row 14 and N2).
+"""Agent aids and two deny-only conventions on banking writes (fix research 2026-11-02, rows 14, N2 and N10).
 
 - `credit_note` (policy, bank_accounts_(general)_017): the one-credit-per-checking-account fact, shown at the account
   reads (get_all_user_accounts_by_user_id_3847, get_bank_account_transactions_9173) with which of the customer's
@@ -6,9 +6,12 @@
 - `duplicate` (Glint convention, no clause): a write is refused when the same tool with identical arguments already
   ran in this conversation, on the enforcer's record of the writes that ran (`toolkit.glint_ran`). Transfers and the
   credit limit increase submit are exempt: τ²'s train gold repeats them (032, 034, 081 transfers; 051 submit).
+- `provenance` (Glint convention): a write is refused when one of its identifier arguments (an argument named
+  `*_id`) appeared in no earlier tool result of this conversation (`toolkit.glint_seen`). Only `*_id` arguments are
+  identifiers here: values the customer says aloud, such as card last-4 digits, are not checked.
 
-The deny only refuses; it never lets a refused write run. Its record is rebuilt in τ²'s strict replay
-(glint.gates.enforce): the writes that ran replay.
+Both denies only refuse; neither lets a refused write run. Their records are rebuilt in τ²'s strict replay
+(glint.gates.enforce): writes that ran replay, and the earlier results are taken from the replayed message history.
 """
 from __future__ import annotations
 
@@ -71,3 +74,52 @@ def duplicate(tool: str):
         return allow("glint.duplicate_write", DUPLICATE_SOURCE)
     return gate
 
+
+# ---- identifier provenance (N10) ----------------------------------------------------------------------------------
+
+PROVENANCE_SOURCE = "Glint convention: every identifier a write names was shown by an earlier tool result"
+
+
+def identifiers(args: dict) -> dict[str, str]:
+    """The write's identifier arguments: every non-empty text argument whose name ends in `_id`."""
+    return {k: v for k, v in sorted(args.items()) if k.endswith("_id") and isinstance(v, str) and v.strip()}
+
+
+def provenance(tool: str):
+    """A gate for `tool`: refused when one of its identifier arguments appeared in no earlier tool result."""
+    def gate(toolkit, a: dict) -> GateResult:
+        seen = getattr(toolkit, "glint_seen", None)
+        if seen is None:  # no record kept (an environment the enforcer did not attach): nothing to judge on
+            return allow("glint.identifier_provenance.unrecorded", PROVENANCE_SOURCE)
+        text = "\n".join(seen)
+        unseen = [f"{k} {v!r}" for k, v in identifiers(a).items() if v.strip() not in text]
+        if unseen:
+            return deny("glint.identifier_provenance", PROVENANCE_SOURCE, "an identifier in this write was not shown "
+                        "by any earlier tool result in this conversation", "Look the record up first with the read "
+                        "tool that lists it (the customer's accounts, cards or transactions), then send the write "
+                        "with the identifier exactly as that result shows it.", {"tool": tool, "unseen": unseen},
+                        consequence="Nothing changed. A write on an identifier no lookup returned may name a "
+                        "record that does not exist or is not this customer's.",
+                        facts=[f"not in any earlier tool result: {', '.join(unseen)}"])
+        return allow("glint.identifier_provenance", PROVENANCE_SOURCE)
+    return gate
+
+
+def seen_before(history) -> tuple[dict[str, tuple[str, ...]], tuple[str, ...]]:
+    """From a message history: each tool message id -> the earlier assistant tool results (not errors) before it, and
+    all of them. The enforcer's live record keeps the same texts in the same order, so a replay judges each write on
+    what the live check saw."""
+    before, texts = {}, []
+    for m in history or []:
+        if getattr(m, "role", None) != "tool":
+            continue
+        before[str(m.id)] = tuple(texts)
+        if counts_as_seen(m):
+            texts.append(str(m.content))
+    return before, tuple(texts)
+
+
+def counts_as_seen(reply) -> bool:
+    """A tool result counted as shown to the agent: a reply to the assistant that is not an error."""
+    return (getattr(reply, "requestor", "assistant") == "assistant" and not reply.error
+            and not str(reply.content).startswith("Error"))
