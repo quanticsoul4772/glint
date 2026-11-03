@@ -10,7 +10,8 @@ agent says or seems to have done them.
 - Order: a credit card dispute waits while a credit limit increase is submitted and not decided
   (credit_card_account_logistics_007: a pending dispute fails the increase).
 - transfer_to_human_agents: the reason code follows bank_accounts_(general)_042 where the database shows the
-  situation, and a submitted increase is decided before the user is handed off.
+  situation, and a submitted increase is decided before the user is handed off. A transfer with no reason code, or
+  one outside doc 042's list, runs and is flagged (TRANSFER_UNCODED), and the agent's reply names doc 042's codes.
 - Dispute plan: a credit card dispute follows the user's current plan_disputes plan (its order, reason, merchant
   answer and provisional credit flag), on the enforcer's own record of the plans made in this conversation
   (`toolkit.glint_plans`, kept by glint.gates.enforce). Provisional credit needs at most 2 disputes in the past 12
@@ -256,6 +257,23 @@ def increase_undecided(toolkit, a: dict) -> GateResult:
 
 DISPOSITION = ("customer_frustrated_demands_human", "supervisor_request_service_complaint",
                "customer_requests_human_no_specific_reason", "request_completed_customer_wants_human_followup")
+# bank_accounts_(general)_042 ("Internal: Human Agent Transfer Reason Codes"), every code of its four tiers, in order
+TRANSFER_REASONS = (
+    # tier 1: specific functional/operational reasons
+    "fraud_or_security_concern", "account_closure_request", "deceased_account_holder", "legal_or_regulatory_matter",
+    "account_ownership_dispute", "complex_billing_dispute", "abusive_customer_behavior", "third_party_inquiry",
+    "technical_system_error", "customer_demands_after_unavailable_offer_refusal",
+    # tier 2: knowledge/capability gap reasons
+    "unconfirmed_external_communication", "kb_search_unsuccessful_customer_requests_transfer",
+    "specialized_department_required", "accessibility_or_special_needs",
+    # tier 3: customer disposition reasons
+    *DISPOSITION,
+    # tier 4: catch-all
+    "other")
+# rule_id of a transfer allowed and flagged with no reason code, or one outside doc 042's list. A reminder, not a
+# refusal: 7 of the 11 τ² train-gold transfers carry no reason (005, 032-035, 049, 081), so a refusal would refuse
+# gold (research note fix-research-2026-11-02, decision-table row 3).
+TRANSFER_UNCODED = "procedure.transfer.uncoded"
 FRAUD_DISPUTE = ("unauthorized_fraudulent_charge",)
 FRAUD_DEBIT = ("card_present_fraud", "card_not_present_fraud")
 FRAUD_CLOSURE = ("stolen", "fraud_suspected")
@@ -297,6 +315,14 @@ def transfer(toolkit, a: dict) -> GateResult:
                     "general reason reaches the wrong queue.",
                     facts=[f"reason given: '{reason}' (a tier-3 disposition code)",
                            *[f"handled in this conversation: {f}" for f in fraud]])
+    given = a.get("reason")
+    if given not in TRANSFER_REASONS:
+        found = "no reason code" if given in (None, "") else f"reason {given!r}, not a code in that list"
+        return allow(TRANSFER_UNCODED, "bank_accounts_(general)_042 (transfer reason codes); allowed and flagged, "
+                     "a reminder, not a refusal", {"reason": given, "fraud": fraud},
+                     reason=f"the transfer carries {found}",
+                     note=f"[reminder] This transfer carries {found}. bank_accounts_(general)_042 asks for the most "
+                     "accurate reason code, from the highest tier that applies: " + ", ".join(TRANSFER_REASONS) + ".")
     return allow("procedure.transfer", source, {"reason": reason, "fraud": fraud})
 
 
