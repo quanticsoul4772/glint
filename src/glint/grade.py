@@ -3,15 +3,19 @@
 
 Measurement only: it never runs inside a conversation, never decides a write and never reads τ²'s gold (the expected
 actions), so it is a start on a grader independent of τ²'s answer key (memo M7). It reads only the run's own tool calls
-and replies:
+and replies, and the task's initial database:
 - **requested**: the customer's requests as the agent recorded them with record_requests (the replies that say
   `recorded`, accumulated as glint.gates.enforce does). Only the gated tools arm has the tool; a run without a record
   is graded `no_record`, and every write it made on a request tool is `unrecorded`, not judged.
 - **done**: the judged writes that ran (no gate refusal, no tool error), hidden banking writes unwrapped: the
   request tools, the credit card filing and the retention-offer writes (JUDGED).
+- **covered**: a write on a request tool is covered by the request gate's own test (glint.gates.banking._covers),
+  REQUEST_ALSO_COVERS included: a close_debit_card request covers the replacement order on the closed card's account.
 - **required**: follow-ups the run's own records make due, each with its source:
   - a recorded close_credit_card request needs its closure reason logged (credit_card_account_logistics_003 step 3)
-    and, unless the customer accepted the retention offer, the closure (step 6);
+    and, unless the customer accepted the retention offer, the closure (step 6). No reason log is due when one is
+    already on record within the past year (step 2): the run's log was refused as
+    banking.closure_reason.already_on_record, or the task's initial database holds a reason from the past year;
   - an accepted retention offer needs the offer applied to that card (step 5 names the offer, not the tool; which
     writes count is a Glint convention: RETENTION_APPLY);
   - every transaction in the latest dispute plan (plan_disputes) for a user needs its credit card filing (Glint
@@ -26,9 +30,12 @@ import json
 
 from glint.assist import as_flag
 from glint.assist.banking import FILING_TOOL, PLAN_TOOL, REQUEST_ACTIONS, REQUEST_TOOLS, REQUESTS_TOOL, RETENTION_TOOL
+from glint.gates.bankdb import within_year
+from glint.gates.banking import _covers
 from glint.gates.summary import norm, run_calls
 
 CLOSE_CARD, LOG_REASON = "close_credit_card_account_7834", "log_credit_card_closure_reason_4521"
+ALREADY_ON_RECORD = "banking.closure_reason.already_on_record"  # glint.gates.banking.log_closure_reason, step 2
 # writes that apply an accepted retention offer to the card (Glint convention: logistics_003 step 5 offers bonus points
 # or a statement credit and names no tool; the statement credit tool and the account flag are the writes that can)
 RETENTION_APPLY = ("apply_statement_credit_8472", "apply_credit_card_account_flag_6147")
@@ -76,12 +83,25 @@ def _on(write: dict, tools: tuple[str, ...], arg: str, target: str) -> bool:
     return write["tool"] in tools and (not target or norm(write["args"].get(arg)) == norm(target))
 
 
-def covered(write: dict, requests: list[dict]) -> bool:
-    """A request covers the write: same action, and the request names no target or the write's (the request gate's
-    test, glint.gates.banking.requested)."""
-    action, arg = REQUEST_TOOLS[write["tool"]]
-    return any(r["action"] == action and (not r["target_id"] or norm(r["target_id"]) == norm(write["args"].get(arg)))
-               for r in requests)
+def covered(write: dict, requests: list[dict], db) -> bool:
+    """A request covers the write: the request gate's own test (glint.gates.banking._covers, as `requested` calls it):
+    same action, and the request names no target or the write's; or the action REQUEST_ALSO_COVERS names (a
+    close_debit_card request covers order_debit_card_5739 on the closed card's checking account, read from `db`)."""
+    tool = write["tool"]
+    action, arg = REQUEST_TOOLS[tool]
+    target = str(write["args"].get(arg) or "")
+    return any(_covers(db, tool, r, action, target) for r in requests)
+
+
+def reason_on_record(calls: list[dict], db, card: str) -> bool:
+    """credit_card_account_logistics_003 step 2: a closure reason already on record within the past year skips the
+    reason log. True when the run's closure-reason log for `card` (any card when the request names none) was refused
+    as banking.closure_reason.already_on_record, or the task's initial database holds a reason for it logged within
+    the past year."""
+    refused = any(c["tool"] == LOG_REASON and c["deny"] and c["deny"]["rule_id"] == ALREADY_ON_RECORD
+                  and (not card or norm((c["args"] or {}).get("credit_card_account_id")) == norm(card)) for c in calls)
+    return refused or any((not card or r.get("credit_card_account_id") == card) and within_year(r.get("logged_at"))
+                          for r in db.credit_card_closure_reasons.data.values())
 
 
 def retention_answers(calls: list[dict]) -> dict[str, dict]:
@@ -107,8 +127,10 @@ def planned_disputes(calls: list[dict]) -> dict[str, list[str]]:
     return out
 
 
-def grade(sim: dict) -> dict:
-    """One run's requested-vs-done findings (module docstring)."""
+def grade(sim: dict, db) -> dict:
+    """One run's requested-vs-done findings (module docstring). `db` is the task's initial database (τ²'s environment
+    for the task, set to its initial state): the request coverage reads which checking account a debit card belongs
+    to, and the closure-reason requirement reads the reasons already on record."""
     calls = run_calls(sim)
     requests, done = requests_of(calls), done_writes(calls)
     answers = retention_answers(calls)
@@ -119,13 +141,15 @@ def grade(sim: dict) -> dict:
         if w["tool"] in REQUEST_TOOLS:
             if requests is None:
                 out["unrecorded"].append(w)
-            elif not covered(w, requests):
+            elif not covered(w, requests, db):
                 out["done_not_requested"].append(w)
     for r in requests or []:
         tools, arg = REQUEST_ACTIONS[r["action"]]
         if r["action"] == "close_credit_card":
             accepted = (answers.get(r["target_id"]) or {}).get("accepted")
             tools = (LOG_REASON,) if accepted else tools
+            if reason_on_record(calls, db, r["target_id"]):  # step 2: no new reason log is due
+                tools = tuple(t for t in tools if t != LOG_REASON)
             for tool in tools:
                 if not any(_on(w, (tool,), arg, r["target_id"]) for w in done):
                     out["requested_not_done"].append(r | {"tool": tool})

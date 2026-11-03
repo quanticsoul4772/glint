@@ -20,7 +20,7 @@ database's, so no gate here requires a freeze before a close: τ²'s train tasks
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from glint.assist import as_flag
 from glint.assist.banking import DISPUTE_ANSWERS_TOOL, TODAY
@@ -270,12 +270,17 @@ OPEN_DISPUTE_MAX = {"entry": 2, "mid": 3, "premium": 4, "elite": 5}  # _031 pre-
 # Glint convention: a dispute is open until it reaches a final status (τ²'s tool files every dispute as OPEN, and the
 # training data holds only OPEN debit disputes)
 FINAL_DISPUTE_STATUSES = ("RESOLVED", "CLOSED", "APPROVED", "DENIED", "REJECTED", "WITHDRAWN", "CANCELLED")
+# Glint reading: unauthorized_transaction is counted with the fraud categories, so dispute_provisional_credit does not
+# apply _032's NOT REQUIRED case 2 ("Customer has not contacted merchant first (for non-fraud disputes)") to it. _031
+# argument 5 describes it as not fraud: "(use only when fraud is NOT suspected)" and "Only use
+# 'unauthorized_transaction' when fraud is NOT suspected (e.g., family member used card without permission, ...)",
+# and argument 12 asks contacted_merchant "Required for non-fraud disputes". No clause settles which reading holds.
 FRAUD_CATEGORIES = ("unauthorized_transaction", "card_present_fraud", "card_not_present_fraud")
 # _032: the categories for which provisional credit is REQUIRED when every other condition holds
 CREDIT_REQUIRED_CATEGORIES = (*FRAUD_CATEGORIES, "atm_cash_discrepancy", "duplicate_charge")
 LOST_OR_STOLEN = ("lost", "stolen")
 DUPLICATE_TIE_BREAK = ("same date with no time: the twin stored later is taken as the earlier one (fitted to τ² gold, "
-                       "training tasks 084 and 085; τ²'s get_bank_account_transactions_9173 lists same-date records in "
+                       "training tasks 084 and 085 and test task 083; τ²'s get_bank_account_transactions_9173 lists same-date records in "
                        "stored order under its most-recent-first contract)")
 QUESTIONS = ("\"Do you still have your physical debit card in your possession?\" and \"Do you believe your PIN may "
              "have been compromised?\" (yes_shared, yes_observed, no or unknown)")
@@ -289,6 +294,12 @@ def _when(value) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+def _day(value) -> date | None:
+    """A transaction's calendar date (_when without the time); None when it does not parse."""
+    when = _when(value)
+    return when.date() if when else None
 
 
 def _filed_with(a: dict, **changes) -> str:
@@ -327,8 +338,10 @@ def dispute_open_limit(db, a: dict) -> GateResult:
 
 def dispute_earliest_duplicate(db, a: dict) -> GateResult:
     """_031: "Dispute the earliest (first) transaction when multiple duplicates exist." Duplicates are the account's
-    transactions with the same description and amount; a twin already disputed is not offered instead. On the same
-    date the tie-break is fitted to τ² gold (DUPLICATE_TIE_BREAK)."""
+    transactions on the disputed transaction's date with the same description and amount (the date window is a Glint
+    convention, back-on-track plan 2026-11-03 defect 3: a repeat purchase on another day is not a duplicate charge);
+    a twin already disputed is not offered instead. On the same date the tie-break is fitted to τ² gold
+    (DUPLICATE_TIE_BREAK)."""
     if a.get("dispute_category") != "duplicate_charge":
         return allow("debit.dispute.duplicate.not_duplicate", DISPUTE_SOURCE, {"category": a.get("dispute_category")})
     history = db.bank_account_transaction_history.data
@@ -337,9 +350,11 @@ def dispute_earliest_duplicate(db, a: dict) -> GateResult:
         return allow("debit.dispute.duplicate.unknown_transaction", DISPUTE_SOURCE,
                      {"transaction_id": a.get("transaction_id")}, reason="no such transaction")
     disputed = {d.get("transaction_id") for d in db.debit_card_disputes.data.values()}
+    day = _day(tx.get("date"))
     twins = [(i, k, t) for i, (k, t) in enumerate(history.items())
              if t.get("account_id") == tx.get("account_id") and t.get("description") == tx.get("description")
-             and money(t.get("amount")) == money(tx.get("amount")) and (k == a["transaction_id"] or k not in disputed)]
+             and money(t.get("amount")) == money(tx.get("amount")) and _day(t.get("date")) == day
+             and (k == a["transaction_id"] or k not in disputed)]
     if len(twins) < 2 or any(_when(t.get("date")) is None for _, _, t in twins):
         return allow("debit.dispute.duplicate", DISPUTE_SOURCE, {"twins": [k for _, k, _ in twins]})
     _, first, row = min(twins, key=lambda x: (_when(x[2].get("date")), -x[0]))
@@ -395,6 +410,8 @@ def dispute_provisional_credit(db, a: dict) -> GateResult:
         (age is not None and age <= 60, (f"the transaction is {age} days old, so reported within 60 days of its "
          "statement")),
         (as_flag(a.get("written_statement_provided")), "written_statement_provided true"),
+        # Glint reading: condition 4 checks only status OPEN. _032 condition 4 reads "The checking account is in OPEN
+        # status with no holds or restrictions"; the holds-or-restrictions part is not checked here.
         (account.get("status") == "OPEN", f"account {a.get('account_id')} is OPEN"),
         (category in FRAUD_CATEGORIES or as_flag(a.get("contacted_merchant")),
          "a fraud category, or the merchant was contacted (NOT REQUIRED case 2 does not apply)"),
@@ -415,19 +432,22 @@ def dispute_provisional_credit(db, a: dict) -> GateResult:
 def dispute_liability(db, a: dict) -> GateResult:
     """_031's liability tiers are $50, $500 and unlimited (the tool's -1, tools.py:978); the smallest transaction is
     $1.00, so a cap of 0 is none of them. Which of 50 and 500 applies is keyed on a statement date the database does
-    not hold, so the refusal names the tiers, not a value."""
+    not hold, so the refusal names the tiers, not a value. The cap is the tier's, or the disputed amount when that is
+    smaller (fitted to τ² gold: training task_084 files 412.88, the disputed amount, under the $500 tier)."""
     value = a.get("customer_max_liability_amount")
     if value is None:
         return allow("debit.dispute.liability.missing", DISPUTE_SOURCE, reason="τ²'s tool rejects a missing cap itself")
     cap = money(value)
     if cap == 0:
         return deny("debit.dispute.liability_zero", DISPUTE_SOURCE + " liability tiers", "a liability cap of 0 is not "
-                    "one of the policy's tiers", "File it with customer_max_liability_amount set by when the customer "
-                    "reported it: 50 within 2 business days of the statement, 500 within 60 days, -1 (unlimited) "
-                    "after 60 days.", {"customer_max_liability_amount": cap},
+                    "one of the policy's tiers", "File it with customer_max_liability_amount set to the tier cap by "
+                    "when the customer reported it (50 within 2 business days of the statement, 500 within 60 days, "
+                    "-1 (unlimited) after 60 days), or the disputed amount when smaller.",
+                    {"customer_max_liability_amount": cap},
                     consequence="The cap tells the customer what they could lose; the rest of the filing stands.",
                     facts=[f"customer_max_liability_amount given: {value!r}",
-                           "_031 tiers: $50, $500, unlimited (the tool's -1)"])
+                           ("_031 tiers: $50, $500, unlimited (the tool's -1); the disputed amount when smaller "
+                            "(τ² training gold task_084)")])
     return allow("debit.dispute.liability", DISPUTE_SOURCE, {"customer_max_liability_amount": cap})
 
 

@@ -236,11 +236,48 @@ def test_the_duplicate_deny_is_first_where_no_policy_rule_refuses():
     assert again.error and _rule(events) == "glint.duplicate_write" and "already ran" in again.content
 
 
+def test_a_refreeze_after_an_unfreeze_runs_and_only_the_last_write_on_the_record_repeats_refused():
+    """Defect 5 (2026-11-03): the record of writes that ran only grew, so freeze, unfreeze, freeze was refused. Only
+    a call equal to the last write that ran on the same target is refused."""
+    toolkit = SimpleNamespace(glint_ran=[])
+    freeze, unfreeze = aids.duplicate("freeze_debit_card_3892"), aids.duplicate("unfreeze_debit_card_3893")
+    card, other = {"card_id": "dbc_1"}, {"card_id": "dbc_2"}
+
+    def ran(tool: str, args: dict) -> None:
+        aids._record_ran(SimpleNamespace(tools=toolkit, write=(tool, args)), ToolMessage(id="r", role="tool",
+                                                                                         content="ok"))
+
+    assert freeze(toolkit, card).allowed
+    ran("freeze_debit_card_3892", card)
+    held = freeze(toolkit, card)
+    assert not held.allowed and held.rule_id == "glint.duplicate_write" and "last write" in held.reason
+    ran("freeze_debit_card_3892", other)  # a write on another card does not count
+    assert not freeze(toolkit, card).allowed and unfreeze(toolkit, card).allowed
+    ran("unfreeze_debit_card_3893", card)
+    assert freeze(toolkit, card).allowed and not unfreeze(toolkit, card).allowed
+    ran("freeze_debit_card_3892", card)
+    assert not freeze(toolkit, card).allowed
+    aids._record_ran(SimpleNamespace(tools=toolkit, write=("unfreeze_debit_card_3893", card)),
+                     ToolMessage(id="e", role="tool", content="Error: no"))  # a write that failed is not recorded
+    assert not freeze(toolkit, card).allowed
+
+
+def test_the_initial_transfer_gold_repeats_is_exempt_from_the_duplicate_deny():
+    """Defect 10 (2026-11-03): τ²'s train gold repeats initial_transfer_to_human_agent_0218 (task 032)."""
+    assert "initial_transfer_to_human_agent_0218" in aids.DUPLICATE_EXEMPT
+    actions = Task.model_validate(TASKS["task_032"]).evaluation_criteria.actions
+    gold = [a.arguments.get("agent_tool_name") for a in actions if a.name == WRAPPER]
+    assert gold.count("initial_transfer_to_human_agent_0218") >= 2
+    assert "initial_transfer_to_human_agent_0218" in aids.__doc__ and "request_human_agent_transfer" in aids.__doc__
+
+
 def test_transfers_and_the_increase_submit_have_no_duplicate_gate():
     registry_ = rules.build_registry("banking_knowledge")
     names = {g.name for g in registry_.gates()}
     for tool in aids.DUPLICATE_EXEMPT:
-        assert f"procedure_duplicate_{tool}" not in names and f"procedure_provenance_{tool}" in names
+        assert f"procedure_duplicate_{tool}" not in names
+    for tool in ("transfer_to_human_agents", "submit_credit_limit_increase_request_7392"):  # gated by other rules
+        assert f"procedure_provenance_{tool}" in names
     assert "procedure_duplicate_change_user_email" in names
     # an allow by these gates is not a rule check
     from glint.gates.enforce import attestation_classes
@@ -300,7 +337,7 @@ def test_provenance_and_duplicate_decisions_replay_unchanged_in_taus_strict_repl
     credit = _play(env, task, aids.CREDIT_TOOL, send=send)  # gold with its lookups: the verification now runs
     assert "was NOT executed" not in send(credit).content
     replay, _, _ = _bank("task_072", enforcer, history)
-    assert replay.tools.glint_ran == env.tools.glint_ran != set()
+    assert replay.tools.glint_ran == env.tools.glint_ran != []
     assert replay.tools.glint_seen == env.tools.glint_seen
 
 

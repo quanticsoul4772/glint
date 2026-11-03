@@ -317,7 +317,9 @@ def transfer(toolkit, a: dict) -> GateResult:
                            *[f"handled in this conversation: {f}" for f in fraud]])
     given = a.get("reason")
     if given not in TRANSFER_REASONS:
-        found = "no reason code" if given in (None, "") else f"reason {given!r}, not a code in that list"
+        # with no reason given, τ²'s transfer_to_human_agents defaults to "other" (tools.py: reason = "other")
+        found = ("the default 'other' (no reason given)" if given in (None, "")
+                 else f"reason {given!r}, not a code in that list")
         return allow(TRANSFER_UNCODED, "bank_accounts_(general)_042 (transfer reason codes); allowed and flagged, "
                      "a reminder, not a refusal", {"reason": given, "fraud": fraud},
                      reason=f"the transfer carries {found}",

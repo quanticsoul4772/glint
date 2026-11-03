@@ -728,7 +728,8 @@ def test_a_transfer_without_a_doc_042_code_runs_flagged_with_a_reminder():
     gold = _play(env, task, "transfer_to_human_agents")
     assert "reason" not in gold
     reply = env.get_response(ToolCall(id="t", name="transfer_to_human_agents", arguments=gold, requestor="assistant"))
-    assert _ran(reply) and "[reminder] This transfer carries no reason code" in reply.content
+    # τ²'s tool files a transfer with no reason as "other", so the reminder names that default (defect 7, 2026-11-03)
+    assert _ran(reply) and "[reminder] This transfer carries the default 'other' (no reason given)" in reply.content
     assert all(code in reply.content for code in proc.TRANSFER_REASONS)
     def transfer_fired() -> dict:  # the identifier-provenance gate also fires on a transfer
         return [e["payload"] for e in events.events("gate.fired")
@@ -1148,10 +1149,19 @@ def test_a_duplicate_charge_is_disputed_on_the_earliest_twin():
     held = debit.dispute_earliest_duplicate(db, other)
     assert not held.allowed and held.rule_id == "debit.dispute.duplicate.earliest"
     assert "transaction_id btxn_e8c3b09d2c45, transaction_date 11/06/2025" in held.fix
-    assert "fitted to τ² gold" in held.facts[1]
-    db.bank_account_transaction_history.data["btxn_d7f2a98c1b34"]["date"] = "11/05/2025"  # an earlier date wins
+    assert "fitted to τ² gold" in held.facts[1] and "test task 083" in held.facts[1]  # defect 8: 083 is cited
+    history = db.bank_account_transaction_history.data
+    history["btxn_d7f2a98c1b34"]["date"] = "11/06/2025 09:00:00"  # an earlier time on the same date wins
+    history["btxn_e8c3b09d2c45"]["date"] = "11/06/2025 10:00:00"
     held = debit.dispute_earliest_duplicate(db, gold)
     assert not held.allowed and "btxn_d7f2a98c1b34" in held.fix and "fitted" not in held.facts[1]
+    # defect 3 (2026-11-03): twins are counted only on the disputed transaction's date, so the same charge on an
+    # earlier day is not a duplicate of this one
+    history["btxn_d7f2a98c1b34"]["date"] = "11/05/2025"
+    allowed = debit.dispute_earliest_duplicate(db, gold)
+    assert allowed.allowed and allowed.details["twins"] == ["btxn_e8c3b09d2c45"]
+    assert debit.dispute_earliest_duplicate(db, other).allowed  # nor is this one of the earlier day's charge
+    history["btxn_d7f2a98c1b34"]["date"] = "11/06/2025 09:00:00"
     db.debit_card_disputes.data["dsp_x"] = {"transaction_id": "btxn_d7f2a98c1b34", "status": "OPEN"}
     assert debit.dispute_earliest_duplicate(db, gold).allowed  # the earlier twin is disputed already
     assert debit.dispute_earliest_duplicate(db, gold | {"dispute_category": "incorrect_amount"}).allowed
@@ -1193,11 +1203,29 @@ def test_provisional_credit_where_every_required_condition_holds():
     assert debit.dispute_provisional_credit(db, gold | {"provisional_credit_eligible": False}).allowed
 
 
+def test_the_two_provisional_credit_readings_are_tagged_as_glint_readings():
+    """Defect 9 (2026-11-03): unauthorized_transaction counted as fraud for the merchant-contact case, and condition 4
+    checking only OPEN, are tagged in the code as Glint readings with the doc 031/032 text they read."""
+    import inspect
+
+    from glint.gates import debit
+    source = inspect.getsource(debit)
+    assert source.count("# Glint reading:") == 2
+    assert "Only use\n# 'unauthorized_transaction' when fraud is NOT suspected" in source
+    assert "for non-fraud disputes" in source and "OPEN\n        # status with no holds or restrictions" in source
+    doc = json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "documents" /
+                      "doc_bank_accounts_bank_accounts_(general)_032.json").read_text(encoding="utf-8"))["content"]
+    assert "OPEN status with no holds or restrictions" in doc
+    assert "unauthorized_transaction" in debit.FRAUD_CATEGORIES  # the reading itself is unchanged
+
+
 def test_a_liability_cap_of_zero_is_refused():
     from glint.gates import debit
     for value in (0, 0.0, "0", "$0.00"):
         held = debit.dispute_liability(None, {"customer_max_liability_amount": value})
         assert not held.allowed and held.rule_id == "debit.dispute.liability_zero" and "-1 (unlimited)" in held.fix
+        # defect 2 (2026-11-03): training gold task_084 files the disputed amount (412.88), under the $500 tier
+        assert "the tier cap" in held.fix and "or the disputed amount when smaller" in held.fix
     for value in (-1, 50, "500", 412.88, None):
         assert debit.dispute_liability(None, {"customer_max_liability_amount": value}).allowed
 

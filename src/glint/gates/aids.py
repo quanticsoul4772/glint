@@ -3,9 +3,12 @@
 - `credit_note` (policy, bank_accounts_(general)_017): the one-credit-per-checking-account fact, shown at the account
   reads (get_all_user_accounts_by_user_id_3847, get_bank_account_transactions_9173) with which of the customer's
   checking accounts were credited today. A function of the database, so the reply replays unchanged.
-- `duplicate` (Glint convention, no clause): a write is refused when the same tool with identical arguments already
-  ran in this conversation, on the enforcer's record of the writes that ran (`toolkit.glint_ran`). Transfers and the
-  credit limit increase submit are exempt: τ²'s train gold repeats them (032, 034, 081 transfers; 051 submit).
+- `duplicate` (Glint convention, no clause): a write is refused when the last write that ran on the same target (the
+  same `*_id` arguments) in this conversation is this exact call (same tool, identical arguments), on the enforcer's
+  record of the writes that ran, in order (`toolkit.glint_ran`); freeze, unfreeze, freeze runs. Exempt: the initial
+  transfer initial_transfer_to_human_agent_0218 and the credit limit increase submit, which τ²'s train gold repeats
+  (032 the initial transfer; 051 the submit), and transfer_to_human_agents. Gold also repeats the user tool
+  request_human_agent_transfer (034, 081), a user tool, which no agent gate sees.
 - `provenance` (Glint convention): a write is refused when one of its identifier arguments (an argument named
   `*_id`) appeared in no earlier tool result of this conversation (`toolkit.glint_seen`). Only `*_id` arguments are
   identifiers here: values the customer says aloud, such as card last-4 digits, are not checked.
@@ -54,7 +57,10 @@ def credit_note(db, tool: str, args: dict) -> str | None:
 
 # ---- duplicate writes (N2) ----------------------------------------------------------------------------------------
 
-DUPLICATE_EXEMPT = ("transfer_to_human_agents", "submit_credit_limit_increase_request_7392")
+# τ²'s train gold repeats initial_transfer_to_human_agent_0218 (task 032) and the submit (051); transfer_to_human_agents
+# has been exempt since N2. The user tool request_human_agent_transfer (repeated in 034 and 081) is not an agent write.
+DUPLICATE_EXEMPT = ("transfer_to_human_agents", "initial_transfer_to_human_agent_0218",
+                    "submit_credit_limit_increase_request_7392")
 DUPLICATE_SOURCE = "Glint convention, no clause: a write that already ran is not sent again"
 
 
@@ -63,15 +69,25 @@ def write_key(tool: str, args: dict | None) -> tuple[str, str]:
     return tool, json.dumps(args or {}, sort_keys=True, default=str)
 
 
+def target_key(args: dict | None) -> str:
+    """A write's target for the duplicate check: its identifier arguments (identifiers), key order ignored."""
+    return json.dumps(identifiers(args or {}), sort_keys=True)
+
+
 def duplicate(tool: str):
-    """A gate for `tool`: refused when the same call (tool and identical arguments) already ran in this conversation."""
+    """A gate for `tool`: refused when the last write that ran on the same target in this conversation is this exact
+    call (tool and identical arguments). A different write on the target since (an unfreeze between two freezes)
+    lets it run again."""
     def gate(toolkit, a: dict) -> GateResult:
-        if write_key(tool, a) in getattr(toolkit, "glint_ran", set()):
-            return deny("glint.duplicate_write", DUPLICATE_SOURCE, "this exact write, with the same arguments, "
-                        "already ran in this conversation", "Do not send it again. Tell the customer it is already "
-                        "done; if they want a second, different change, send that change's own arguments.",
-                        {"tool": tool}, consequence="Nothing changed: the earlier identical write already took "
-                        "effect.", facts=[f"{tool} with these arguments ran earlier in this conversation"])
+        target = target_key(a)
+        last = next((key for t, key in reversed(getattr(toolkit, "glint_ran", [])) if t == target), None)
+        if last == write_key(tool, a):
+            return deny("glint.duplicate_write", DUPLICATE_SOURCE, "this exact write, with the same arguments, is "
+                        "the last write that ran on this record in this conversation", "Do not send it again. Tell "
+                        "the customer it is already done; if they want a second, different change, send that "
+                        "change's own arguments.", {"tool": tool}, consequence="Nothing changed: the earlier "
+                        "identical write already took effect.",
+                        facts=[f"{tool} with these arguments is the last write that ran on this record"])
         return allow("glint.duplicate_write", DUPLICATE_SOURCE)
     return gate
 
@@ -130,7 +146,7 @@ def counts_as_seen(reply) -> bool:
 
 @extend.hook("attach", order=30)
 def _init_records(enforcer, env) -> None:
-    env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
+    env.tools.glint_ran = []  # (target, (tool, arguments)) of every write that ran, in order, for the duplicate deny
     env.tools.glint_seen = []  # every assistant tool result that is not an error, for identifier provenance (N10)
     env.glint_seen_before = {}  # in τ²'s replay: tool message id -> the results before it (seen_before)
 
@@ -146,7 +162,7 @@ def _replayed_seen(call: extend.Call) -> None:
 @extend.hook("after_write", order=30)
 def _record_ran(call: extend.Call, reply) -> None:
     if extend.ran(reply):
-        call.tools.glint_ran.add(write_key(*call.write))
+        call.tools.glint_ran.append((target_key(call.write[1]), write_key(*call.write)))
 
 
 @extend.hook("reply", order=20)

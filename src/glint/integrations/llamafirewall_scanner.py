@@ -19,8 +19,9 @@ is a BLOCK (fail closed, as Enforcer.check refuses unparsed hidden-tool argument
 
 The environment must be gated by the same Enforcer (`enforcer.attach(env)`): the gates read the records the wrapper
 keeps on `env.tools` (verified users, lookups, plans). The scanner only reads; it records nothing, so a hold repeats
-until the call runs through the environment, and every scan logs its gate.fired events like a live check. A call the
-scanner allows is checked again when it runs through the environment's wrapper.
+until the call runs through the environment. A scan logs no gate.fired and no write.attested event
+(`Enforcer.check(record=False)`): a call the scanner allows is checked again when it runs through the environment's
+wrapper, which logs its decisions and attests it once.
 
 llamafirewall is an optional dependency (`pip install glint[llamafirewall]`): it is imported only inside
 `make_scanner`. The mapping is plain functions so it is tested without it.
@@ -78,7 +79,9 @@ def judge_call(enforcer, env, call: ToolCall) -> Verdict:
     write = enforcer.write_call(env, call)
     if write is None:
         return Verdict(ALLOW, f"{call.name} is not a gated write", 0.0)
-    return to_verdict(enforcer.check(*write, env.tools.db, toolkit=env.tools), enforcer.wording)
+    # record=False: no gate.fired and no write.attested; the call is logged and attested once, when it runs through
+    # the environment's wrapper (defect 6, 2026-11-03)
+    return to_verdict(enforcer.check(*write, env.tools.db, toolkit=env.tools, record=False), enforcer.wording)
 
 
 def judge_tool_calls(enforcer, env, tool_calls: Iterable[dict] | None) -> Verdict:
