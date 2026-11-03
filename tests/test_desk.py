@@ -64,7 +64,8 @@ def test_every_task_tuned_for_the_gates_is_labeled_tuned():
     import by_task
     import export_scenarios
 
-    for s in client.get("/api/scenarios").json():
+    for listed in client.get("/api/scenarios").json():
+        s = client.get(f"/api/scenarios/{listed['id']}").json()
         if s["task_id"] in by_task.TUNED:
             assert s["tuned"] is True, s["id"]
     for task_id, _folder, tuned in export_scenarios.SOURCES:
