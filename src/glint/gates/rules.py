@@ -421,11 +421,10 @@ def _register_banking(reg: GateRegistry) -> None:
         reg.register(Gate(f"debit_{tool}_gate", (tool,), "Knowledge base bank_accounts_(general)_024: the activation "
                           "variant follows the card's issue_reason; the card is PENDING and unexpired.",
                           debit.activate(tool)))
-    # debit card disputes: the limit first (no corrected call can pass it), then the record, then the values
+    # debit card disputes: the limit first (no corrected call can pass it), then the values. The customer's answers
+    # recorded with record_dispute_answers are a reminder in the open items (debit.answer_items), not a gate
     dispute_gates = (("open_limit", debit.dispute_open_limit, ("_031 requirement 4: no more open disputes per account "
                       "than the checking tier allows."), False),
-                     ("answers", debit.dispute_answers, ("_031 arguments 10-11: card_in_possession and pin_compromised "
-                      "as the customer answered, recorded with record_dispute_answers."), True),
                      ("earliest_duplicate", debit.dispute_earliest_duplicate, ("_031: the earliest of duplicate "
                       "charges is disputed (same-day tie-break fitted to τ² gold)."), False),
                      ("card_in_possession", debit.dispute_card_in_possession, ("_031 argument 10 (policy inference): a "

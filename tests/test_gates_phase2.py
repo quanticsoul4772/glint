@@ -1055,7 +1055,8 @@ DEBIT_DISPUTE = "file_debit_card_transaction_dispute_6281"
 def test_the_debit_dispute_has_rules_now():
     assert DEBIT_DISPUTE not in rules.NO_RULE_REASONS and DEBIT_DISPUTE in rules.REQUIRED_GATES["banking_knowledge"]
     names = {g.name for g in rules.build_registry("banking_knowledge").for_tool(DEBIT_DISPUTE)}
-    assert {"debit_dispute_open_limit_gate", "debit_dispute_answers_gate", "debit_dispute_liability_gate"} <= names
+    assert {"debit_dispute_open_limit_gate", "debit_dispute_liability_gate"} <= names
+    assert "debit_dispute_answers_gate" not in names  # the recorded answers are open items (debit.answer_items)
     assert not any(n.startswith("no_rule_") for n in names)
 
 
@@ -1146,22 +1147,30 @@ def test_a_liability_cap_of_zero_is_refused():
         assert debit.dispute_liability(None, {"customer_max_liability_amount": value}).allowed
 
 
-def test_the_filing_follows_the_recorded_answers():
-    from glint.gates import debit
+def test_the_recorded_answers_are_a_reminder_not_a_refusal():
+    """Decided by parallax at the owner's request on PR 32: a missing or differing record_dispute_answers record is
+    an open item; the filing itself is allowed."""
     env, task, events = _bank("task_084")
-    gold = _play(env, task, DEBIT_DISPUTE, 0)  # the replay plan recorded gold's answers before the filing
-    recorded = [e["payload"] for e in events.events("dispute_answers.recorded")]
-    assert [(r["card_id"], r["card_in_possession"], r["pin_compromised"]) for r in recorded] == [
-        (gold["card_id"], True, "no")]
-    reply = _hidden(env, DEBIT_DISPUTE, **(gold | {"pin_compromised": "unknown"}))
-    assert _denied(reply, "card_in_possession true, pin_compromised no") and _rule(events) == (
-        "debit.dispute.answers.mismatch")
-    assert _ran(_hidden(env, DEBIT_DISPUTE, **gold))
-    # no record for the card: refused until the answers are recorded
-    assert not debit.dispute_answers(type("T", (), {"db": env.tools.db})(), gold).allowed
-    assert debit.dispute_answers(type("T", (), {"db": env.tools.db})(), gold | {"card_id": "nope"}).allowed
-    # the record tool checks the card's owner and the answers, and reads "False" as false
+    gold = _play(env, task, DEBIT_DISPUTE, 0)  # the replay records gold's requests, not its answers
+    second = "btxn_f9d4c10e3d56"  # gold's next filing, on the same card
+    other = "btxn_c2g7f43h6g89"  # gold's third filing, on another account's card
+    footer = _call(env, "get_current_time").content
+    assert all(f"[open] debit dispute {tx} not filed yet: ask the customer" in footer
+               for tx in (gold["transaction_id"], second, other))
+    filed = _hidden(env, DEBIT_DISPUTE, **gold)  # no record: allowed, and flagged
+    assert _ran(filed) and "and no answers are recorded for the card" in filed.content
+    assert f"debit dispute {gold['transaction_id']} not filed" not in filed.content
     record = {"card_id": gold["card_id"], "user_id": gold["user_id"], "customer_words": "I have it; PIN is safe"}
+    _call(env, "record_dispute_answers", **record, card_in_possession=True, pin_compromised="no")
+    footer = _call(env, "get_current_time").content
+    assert "no answers are recorded" not in footer and "differs" not in footer
+    assert f"debit dispute {second} not filed" not in footer and f"debit dispute {other} not filed yet" in footer
+    _call(env, "record_dispute_answers", **record, card_in_possession=True, pin_compromised="unknown")
+    footer = _call(env, "get_current_time").content
+    assert "which differs from the customer's recorded answers" in footer and "'pin_compromised': 'unknown'" in footer
+    assert [e["payload"]["pin_compromised"] for e in events.events("dispute_answers.recorded")] == ["no", "unknown"]
+    assert not any(e["payload"]["rule_id"].startswith("debit.dispute.answers") for e in events.events("gate.fired"))
+    # the record tool checks the card's owner and the answers, and reads "False" as false
     assert "no debit card" in _call(env, "record_dispute_answers", **(record | {"user_id": "x"}), card_in_possession=True,
                                     pin_compromised="no").content
     assert "give card_in_possession" in _call(env, "record_dispute_answers", **record, card_in_possession=True,
@@ -1172,15 +1181,12 @@ def test_the_filing_follows_the_recorded_answers():
                                  pin_compromised="no").content
 
 
-def test_the_replay_records_the_answers_only_when_they_change():
-    def debit_filing(k: int, card: str, pin: str) -> ToolCall:
-        return ToolCall(id=f"g{k}", name="call_discoverable_agent_tool", requestor="assistant", arguments={
-            "agent_tool_name": DEBIT_DISPUTE, "arguments": json.dumps({
-                "card_id": card, "user_id": "u", "transaction_id": f"t{k}", "card_in_possession": True,
-                "pin_compromised": pin})})
-    calls = with_plans([debit_filing(0, "c1", "no"), debit_filing(1, "c1", "no"), debit_filing(2, "c1", "unknown"),
-                        debit_filing(3, "c2", "unknown")])
-    answers = [c for c in calls if c.name == "record_dispute_answers"]
-    assert [c.id for c in answers] == ["g0-answers", "g2-answers", "g3-answers"]
-    assert answers[1].arguments | {"customer_words": ""} == {"card_id": "c1", "user_id": "u", "card_in_possession": True,
-                                                             "pin_compromised": "unknown", "customer_words": ""}
+def test_a_requested_dispute_with_no_target_is_reminded_until_any_answers_are_recorded():
+    from glint.gates import debit
+    env, _, _ = _bank("task_084")
+    env.tools.glint_requests = [{"action": "dispute_debit_transaction", "target_id": ""},
+                                {"action": "close_debit_card", "target_id": "dbc_82b5d1a6f3"}]
+    items = debit.answer_items(env.tools)
+    assert len(items) == 1 and items[0].startswith("[open] debit dispute (requested) not filed yet")
+    env.tools.glint_dispute_answers = {"dbc_82b5d1a6f3": {"card_in_possession": True, "pin_compromised": "no"}}
+    assert debit.answer_items(env.tools) == []
