@@ -26,7 +26,7 @@ from glint.modelcall import ModelOff, resolve
 
 DOMAIN = "banking_knowledge"
 BANKING = paths.tau2_data() / "tau2" / "domains" / DOMAIN
-CLAUSES = Path(__file__).resolve().parents[1] / "data-public" / "clauses" / "reconciled.json"
+CLAUSES = declare.CLAUSE_DIR / "reconciled.json"
 OPTIONS = ("--model", "--facts", "--labels", "--docs", "--clauses", "--only", "--out", "--tasks")
 
 

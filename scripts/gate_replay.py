@@ -5,8 +5,9 @@ environment is set to the task's initial state and gated with glint.gates; each 
 (`evaluation_criteria.actions`) is sent through `get_response` the way an agent's call would be. An ungated twin of
 the environment takes the same calls in step: a denied gold write that τ²'s own tool also rejects on the twin (gold
 data with an action the environment refuses, such as an exchange on a pending order) changes nothing either way and
-is counted as `also_rejected`, not as a false refusal; a denied gold write of PLACEHOLDER_GOLD is listed apart. The
-target is 0 false refusals. Gold never calls Glint's plan_disputes, which the banking plan gate requires before a
+is counted as `also_rejected`, not as a false refusal; a denied gold write of PLACEHOLDER_GOLD is listed apart, and so
+is a refusal the owner decided to keep (KNOWN_DECIDED: task_091's entry wait), printed as "KNOWN (decided)". The
+target is 0 false refusals; the exit code is 1 when there is any. Gold never calls Glint's plan_disputes, which the banking plan gate requires before a
 credit card dispute: the replay inserts the call an agent following the gate's Fix makes (glint.gates.replayplan:
 the task's own gold filings, in gold's order) before the first filing, so the gate judges gold's order and flags. Deterministic; no model, no network. The gate log is in memory unless --log PATH is given.
 
@@ -37,6 +38,15 @@ BANKING_SPLIT = splits.BANKING
 # verification whose every field is the placeholder '9K2X7M4P1N8Q3R5T6A' (no such user) and then changes the email of
 # a user who was never verified (the user simulator is told to fail verification)
 PLACEHOLDER_GOLD = {("banking_knowledge", "task_005"): "placeholder verification; email change of an unverified user"}
+# Refusals of gold the owner decided to keep, each listed with its rule, its reason and where the decision is recorded.
+# They print as "KNOWN (decided)" and do not count as false refusals; any refusal not listed here still fails the
+# replay. Keyed by (domain, task, tool, rule): a different write or rule on the same task is still a false refusal.
+KNOWN_DECIDED = {
+    ("banking_knowledge", "task_091", "order_debit_card_5739", "debit.order.entry_wait"): (
+        "entry-tier replacement right after a fraud_suspected closure: doc 029 sets a 48-hour wait, doc 031 maps fraud "
+        "disputes to close_and_reissue with none (029 vs 031). The owner's decision of 2026-11-03 (every fix on by "
+        "default, PR #44) keeps the wait; glint.gates.debit.ENTRY_WAIT_FRAUD, off switch entry_wait_fraud=\"flag\""),
+}
 
 
 def tasks_of(domain: str) -> list:
@@ -64,7 +74,7 @@ def replay(domain: str, tasks: list, events: EventLog, request_gate: bool = True
     """Replay each task's gold actions; returns counts and the false refusals."""
     current = {"task_id": None}
     enforcer = Enforcer(domain, events, context=lambda: dict(current), request_gate=request_gate)
-    refusals, also_rejected, placeholder, writes, allowed, rules = [], [], [], 0, 0, Counter()
+    refusals, also_rejected, placeholder, known, writes, allowed, rules = [], [], [], [], 0, 0, Counter()
     for task in tasks:
         current["task_id"] = task.id
         env, twin = enforcer.attach(_env(domain, task)), _env(domain, task)
@@ -102,6 +112,8 @@ def replay(domain: str, tasks: list, events: EventLog, request_gate: bool = True
                     also_rejected.append(row | {"environment": str(ungated.content)})
                 elif (domain, task.id) in PLACEHOLDER_GOLD:
                     placeholder.append(row | {"why": PLACEHOLDER_GOLD[(domain, task.id)]})
+                elif (key := (domain, task.id, write[0], d["rule_id"])) in KNOWN_DECIDED:
+                    known.append(row | {"why": KNOWN_DECIDED[key]})
                 else:
                     refusals.append(row)
             else:
@@ -110,7 +122,7 @@ def replay(domain: str, tasks: list, events: EventLog, request_gate: bool = True
                     logger.warning(f"{domain} {task.id} gold {write[0]} was allowed but errored: {reply.content}")
     return {"domain": domain, "tasks": len(tasks), "gold_writes": writes, "allowed": allowed,
             "false_refusals": refusals, "also_rejected": also_rejected, "placeholder_gold": placeholder,
-            "rules": dict(rules)}
+            "known_decided": known, "rules": dict(rules)}
 
 
 def main(argv: list[str]) -> int:
@@ -125,18 +137,22 @@ def main(argv: list[str]) -> int:
     total = sum(len(r["false_refusals"]) for r in reports)
     for r in reports:
         print(f"{r['domain']}: {r['tasks']} tasks, {r['gold_writes']} gold writes, {r['allowed']} allowed, "
-              f"{len(r['false_refusals'])} false refusals, {len(r['also_rejected'])} denies of gold writes τ²'s tool "
-              "also rejects")
+              f"{len(r['false_refusals'])} false refusals, {len(r['known_decided'])} known (decided) refusals, "
+              f"{len(r['placeholder_gold'])} denies of placeholder gold, {len(r['also_rejected'])} denies of gold "
+              "writes τ²'s tool also rejects")
         for rule, n in sorted(r["rules"].items()):
             print(f"  {rule}: {n}")
         for f in r["false_refusals"]:
             print(f"  FALSE REFUSAL {f['task_id']} {f['tool']} [{f['gate']} {f['rule_id']}]: {f['reason']}")
+        for f in r["known_decided"]:
+            print(f"  KNOWN (decided) {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['why']}")
         for f in r["placeholder_gold"]:
             print(f"  placeholder gold {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['why']}")
         for f in r["also_rejected"]:
             print(f"  also rejected by τ² {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['reason']} | "
                   f"{f['environment']}")
-    print(f"TOTAL false refusals on gold: {total}")
+    known = sum(len(r["known_decided"]) for r in reports)
+    print(f"TOTAL false refusals on gold: {total}; known (decided) refusals, not counted: {known}")
     if "--json" in argv:
         with open(argv[argv.index("--json") + 1], "w", encoding="utf-8") as fh:
             json.dump(reports, fh, indent=1)

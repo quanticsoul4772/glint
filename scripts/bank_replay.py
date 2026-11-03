@@ -4,7 +4,8 @@
   client, then every gold action: the assistant's through `call_tool` (the server's handler, so the session's gates),
   the user's straight into the session environment as `requestor="user"` (the server never takes customer calls). An
   ungated twin environment takes the same calls in step. A deny of a gold write the twin's τ² tool runs is a false
-  refusal (target 0); a deny the twin's tool also rejects is counted apart. At the end the session's agent and user
+  refusal (target 0); a deny the twin's tool also rejects is counted apart, and so is a refusal the owner decided to
+  keep (gate_replay.KNOWN_DECIDED, printed "KNOWN (decided)"; its task's database differs from the twin's). At the end the session's agent and user
   database hashes must equal the twin's. Gold never calls plan_disputes, which the plan gate requires before a credit
   card dispute: the call an agent following the gate's Fix makes (glint.gates.replayplan, gold's own filings) goes
   through `call_tool` before the first filing; the twin has no such tool and skips it.
@@ -102,6 +103,7 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None, requ
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         bank = BankServer(home=home or Path(tmp), sid="gold-replay", request_gate=request_gate)
         refusals, also_rejected, placeholder, placeholder_hashes, mismatches, errors = [], [], [], [], [], []
+        known, known_hashes = [], []
         writes = allowed = 0
         ids = task_ids or train_task_ids()
         async with Client(bank.mcp_server()) as client:
@@ -144,6 +146,8 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None, requ
                             also_rejected.append(row)
                         elif (DOMAIN, task_id) in gate_replay.PLACEHOLDER_GOLD:
                             placeholder.append(row | {"why": gate_replay.PLACEHOLDER_GOLD[(DOMAIN, task_id)]})
+                        elif (key := (DOMAIN, task_id, write[0], row["rule_id"])) in gate_replay.KNOWN_DECIDED:
+                            known.append(row | {"why": gate_replay.KNOWN_DECIDED[key]})
                         else:
                             refusals.append(row)
                     else:
@@ -157,12 +161,15 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None, requ
                     row = {"task_id": task_id, "server": got, "twin": want}
                     if any(p["task_id"] == task_id for p in placeholder):  # its gold writes were denied: expected
                         placeholder_hashes.append(row)
+                    elif any(k["task_id"] == task_id for k in known):  # a decided refusal: its write did not run
+                        known_hashes.append(row)
                     else:
                         mismatches.append(row)
         session.events.verify()
         session.events.close()
     return {"tasks": len(ids), "gold_writes": writes, "allowed": allowed, "false_refusals": refusals,
-            "also_rejected": also_rejected, "placeholder_gold": placeholder,
+            "also_rejected": also_rejected, "placeholder_gold": placeholder, "known_decided": known,
+            "known_hash_differs": [r["task_id"] for r in known_hashes],
             "placeholder_hash_differs": [r["task_id"] for r in placeholder_hashes], "hash_mismatches": mismatches,
             "result_mismatches": errors}
 
@@ -277,7 +284,8 @@ def main(argv: list[str]) -> int:
         print("request gate OFF (research row 6)")
     g = anyio.run(gold, None, None, request_gate)
     print(f"gold: {g['tasks']} tasks, {g['gold_writes']} gold writes through MCP, {g['allowed']} allowed, "
-          f"{len(g['false_refusals'])} false refusals, {len(g['also_rejected'])} denies τ²'s tool also rejects, "
+          f"{len(g['false_refusals'])} false refusals, {len(g['known_decided'])} known (decided) refusals, "
+          f"{len(g['also_rejected'])} denies τ²'s tool also rejects, "
           f"{len(g['placeholder_gold'])} denies of placeholder gold, "
           f"{len(g['hash_mismatches'])} database hash mismatches with the ungated twin, "
           f"{len(g['result_mismatches'])} result mismatches")
@@ -285,6 +293,11 @@ def main(argv: list[str]) -> int:
         print(f"  placeholder gold {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['why']}")
     if g["placeholder_hash_differs"]:
         print(f"  database differs from the twin only where placeholder gold was denied: {g['placeholder_hash_differs']}")
+    for f in g["known_decided"]:
+        print(f"  KNOWN (decided) {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['why']}")
+    if g["known_hash_differs"]:
+        print(f"  database differs from the twin where a known (decided) refusal stopped a write: "
+              f"{g['known_hash_differs']}")
     for f in g["false_refusals"]:
         print(f"  FALSE REFUSAL {f['task_id']} {f['tool']} [{f['rule_id']}]: {f['reason']}")
     for m in g["hash_mismatches"]:

@@ -30,7 +30,7 @@ from glint.gates.rules import parse_hidden_arguments
 log = logging.getLogger("glint.gates")
 WRAPPER = declare.WRAPPER
 REMINDERS = ("declare",)  # the reminders (Enforcer(reminders=...)); each only adds [open] lines, never refuses
-CLAUSES = Path(__file__).resolve().parents[3] / "data-public" / "clauses" / "reconciled.json"
+CLAUSES = declare.CLAUSE_DIR / "reconciled.json"  # package data: an installed Glint has it too
 # appendix #69 (reader 3 K5; B2 §1): a step-limit warning listing the open items. Glint convention: the gates see tool
 # calls only, never τ²'s step count, so the trigger counts the calls τ²'s evaluator replays (a lower bound on steps)
 STEP_WARN_NOTE = ("[open] this conversation is near its step limit: finish the open items above (or tell the customer "

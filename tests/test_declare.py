@@ -230,7 +230,7 @@ def test_reconcile_script_and_gold_violations_file(tmp_path, monkeypatch, capsys
 
 
 def test_the_shipped_clause_lists_load_and_reconcile():
-    d = declare_grade.ROOT / "data-public" / "clauses"
+    d = declare.CLAUSE_DIR
     a, b = declare.load(d / "pass_a.json"), declare.load(d / "pass_b.json")
     rec = json.loads((d / "reconciled.json").read_text(encoding="utf-8"))
     assert rec["counts"]["pass_a"] == len(a) and rec["counts"]["pass_b"] == len(b)

@@ -374,12 +374,14 @@ def test_gold_replay_through_mcp_has_no_false_refusal_and_matches_the_ungated_tw
     report = _run(bank_replay.gold)
     untouched = set(json.loads(gate_replay.BANKING_SPLIT.read_text(encoding="utf-8"))["test_untouched"])
     assert report["tasks"] == 77 and len(untouched) == 20 and not untouched & set(bank_replay.train_task_ids())
-    # exactly one expected refusal and one hash mismatch, both task_091: its entry-tier replacement after a
-    # fraud_suspected closure is refused by debit.order.entry_wait, so its database differs from the ungated twin.
-    # Owner's decision (2026-11-03): every fix on by default; the 48-hour wait follows doc 029, which conflicts with
-    # doc 031 (029 vs 031). Any other refusal or mismatch still fails this test.
-    assert [(f["task_id"], f["tool"], f["rule_id"]) for f in report["false_refusals"]] == [
+    # no false refusal and no hash mismatch. task_091's entry-tier replacement after a fraud_suspected closure is
+    # refused by debit.order.entry_wait and listed as known (decided), so only its database differs from the ungated
+    # twin. Owner's decision (2026-11-03): every fix on by default; the 48-hour wait follows doc 029, which conflicts
+    # with doc 031 (029 vs 031). Any other refusal or mismatch still fails this test.
+    assert report["false_refusals"] == []
+    assert [(f["task_id"], f["tool"], f["rule_id"]) for f in report["known_decided"]] == [
         ("task_091", "order_debit_card_5739", "debit.order.entry_wait")]
+    assert report["known_hash_differs"] == ["task_091"]
     assert report["also_rejected"] == []
     # task_005's gold logs a placeholder verification and then changes an unverified user's email (gate_replay lists
     # it apart): its two gold writes are denied, so only its database differs from the twin's
@@ -387,7 +389,7 @@ def test_gold_replay_through_mcp_has_no_false_refusal_and_matches_the_ungated_tw
         ("task_005", "banking.verification.user"), ("task_005", "procedure.verified")]
     assert report["gold_writes"] == report["allowed"] + 3 > 250  # task_005's two writes and task_091's order
     assert report["placeholder_hash_differs"] == ["task_005"]
-    assert [m["task_id"] for m in report["hash_mismatches"]] == ["task_091"] and report["result_mismatches"] == []
+    assert report["hash_mismatches"] == [] and report["result_mismatches"] == []
 
 
 def test_replay_environments_record_the_hidden_reads_gold_makes_as_taus_runner_does():
@@ -464,16 +466,42 @@ def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_pat
     assert "0 false refusals" in text and "banking.cli.submit.reduce_amount" in text
     assert json.loads(out.read_text(encoding="utf-8"))["gold"]["tasks"] == 2
 
-    async def refusing_gold(task_ids=None, home=None, request_gate=True):
+    known = [{"task_id": "task_091", "tool": "order_debit_card_5739", "rule_id": "debit.order.entry_wait",
+              "reason": "wait", "why": "decided"}]
+
+    async def known_gold(task_ids=None, home=None, request_gate=True):  # only the decided refusal: exit 0
+        return {"tasks": 1, "gold_writes": 1, "allowed": 0, "also_rejected": [], "hash_mismatches": [],
+                "placeholder_gold": [], "placeholder_hash_differs": [], "result_mismatches": [],
+                "known_decided": known, "known_hash_differs": ["task_091"], "false_refusals": []}
+
+    monkeypatch.setattr(bank_replay, "gold", known_gold)
+    assert bank_replay.main(["--recs", str(tmp_path / "runs.json")]) == 0
+    text = capsys.readouterr().out
+    assert "KNOWN (decided) task_091 order_debit_card_5739 [debit.order.entry_wait]: decided" in text
+    assert "0 false refusals, 1 known (decided) refusals" in text and "FALSE REFUSAL" not in text
+
+    async def refusing_gold(task_ids=None, home=None, request_gate=True):  # any other refusal still fails
         return {"tasks": 1, "gold_writes": 1, "allowed": 0, "also_rejected": [], "hash_mismatches": [{"task_id": "t"}],
                 "placeholder_gold": [{"task_id": "p", "tool": "y", "rule_id": "q", "why": "placeholder"}],
-                "placeholder_hash_differs": ["p"],
+                "placeholder_hash_differs": ["p"], "known_decided": known, "known_hash_differs": ["task_091"],
                 "result_mismatches": [{"task_id": "t", "tool": "x", "text": "boom"}],
                 "false_refusals": [{"task_id": "t", "tool": "x", "rule_id": "r", "reason": "why"}]}
 
     monkeypatch.setattr(bank_replay, "gold", refusing_gold)
     assert bank_replay.main(["--recs", str(tmp_path / "runs.json")]) == 1
     assert "FALSE REFUSAL t x [r]" in capsys.readouterr().out
+
+
+def test_a_known_decided_refusal_is_keyed_by_task_tool_and_rule():
+    """bank_replay sorts a deny into known_decided only on the exact (task, tool, rule) gate_replay lists; the same
+    task's other writes or rules would still be false refusals (the full replay above checks the real case)."""
+    import gate_replay
+
+    (key, why), = gate_replay.KNOWN_DECIDED.items()
+    assert key == ("banking_knowledge", "task_091", "order_debit_card_5739", "debit.order.entry_wait")
+    assert "029 vs 031" in why and "2026-11-03" in why and "ENTRY_WAIT_FRAUD" in why
+    assert ("banking_knowledge", "task_091", "order_debit_card_5739", "debit.order.other") not in (
+        gate_replay.KNOWN_DECIDED)
 
 
 # ---- the Muse plugin bundle ---------------------------------------------------------------------------------------

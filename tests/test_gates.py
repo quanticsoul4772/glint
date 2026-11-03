@@ -769,12 +769,16 @@ def test_no_gold_write_is_refused():
     events = EventLog(":memory:")
     reports = [gate_replay.replay(d, gate_replay.tasks_of(d), events) for d in gate_replay.DOMAINS]
     refusals = [f for r in reports for f in r["false_refusals"]]
-    # exactly one expected refusal: task_091's entry-tier replacement after a fraud_suspected closure, refused by
-    # debit.order.entry_wait. Owner's decision (2026-11-03): every fix on by default; the 48-hour wait follows doc
-    # 029, which conflicts with doc 031 (029 vs 031). Any other refusal still fails this test.
-    assert [(f["domain"], f["task_id"], f["tool"], f["rule_id"]) for f in refusals] == [
-        ("banking_knowledge", "task_091", "order_debit_card_5739", "debit.order.entry_wait")], "\n".join(
+    # no false refusal. task_091's entry-tier replacement after a fraud_suspected closure, refused by
+    # debit.order.entry_wait, is the one known (decided) refusal. Owner's decision (2026-11-03): every fix on by
+    # default; the 48-hour wait follows doc 029, which conflicts with doc 031 (029 vs 031). Any other refusal still
+    # fails this test.
+    assert refusals == [], "\n".join(
         f"{f['domain']} {f['task_id']} {f['tool']} {f['rule_id']}: {f['reason']}" for f in refusals)
+    assert [(f["domain"], f["task_id"], f["tool"], f["rule_id"]) for r in reports for f in r["known_decided"]] == [
+        ("banking_knowledge", "task_091", "order_debit_card_5739", "debit.order.entry_wait")]
+    assert set(gate_replay.KNOWN_DECIDED) == {
+        ("banking_knowledge", "task_091", "order_debit_card_5739", "debit.order.entry_wait")}
     # the gold write τ²'s tool rejects anyway (retail 105: gift card balance)
     assert sorted(f["task_id"] for r in reports for f in r["also_rejected"]) == ["105"]
     assert [r["tasks"] for r in reports] == [74, 30, 77]
@@ -802,6 +806,28 @@ def test_gate_replay_main_reports_and_exits_by_the_count(tmp_path, monkeypatch, 
     monkeypatch.setattr(rules, "_retail_gate", lambda action: lambda db, a: deny("x", "s", "no", "fix"))
     assert gate_replay.main([]) == 1
     assert "FALSE REFUSAL" in capsys.readouterr().out
+
+
+def test_gate_replay_lists_a_known_decided_refusal_apart_and_exits_0(monkeypatch, capsys):
+    """A deny on the exact (domain, task, tool, rule) of KNOWN_DECIDED prints as KNOWN (decided) and is not counted;
+    the same deny on any other key is a false refusal and the replay exits 1."""
+    import gate_replay
+
+    retail = [t for t in gate_replay.tasks_of("retail") if t.id == "0"]
+    monkeypatch.setattr(gate_replay, "DOMAINS", ("retail",))
+    monkeypatch.setattr(gate_replay, "tasks_of", lambda d: retail)
+    monkeypatch.setattr(rules, "_retail_gate", lambda action: lambda db, a: deny("retail.x", "s", "no", "fix"))
+    refused = gate_replay.replay("retail", retail, EventLog(":memory:"))["false_refusals"]
+    assert refused and gate_replay.replay("retail", retail, EventLog(":memory:"))["known_decided"] == []
+    keys = sorted({("retail", "0", f["tool"], f["rule_id"]) for f in refused})
+    monkeypatch.setattr(gate_replay, "KNOWN_DECIDED", dict.fromkeys(keys, "decided (test)"))
+    assert gate_replay.main([]) == 0
+    text = capsys.readouterr().out
+    assert f"KNOWN (decided) 0 {keys[0][2]} [{keys[0][3]}]: decided (test)" in text
+    assert f"TOTAL false refusals on gold: 0; known (decided) refusals, not counted: {len(refused)}" in text
+    monkeypatch.setattr(gate_replay, "KNOWN_DECIDED", {k[:3] + ("retail.other",): "another" for k in keys})
+    assert gate_replay.main([]) == 1
+    assert "FALSE REFUSAL 0" in capsys.readouterr().out
 
 
 def test_a_deny_without_its_consequence_or_facts_is_kept_as_a_deny_that_names_what_is_missing():
