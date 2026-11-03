@@ -38,6 +38,10 @@ check_credit_limit_increase is GENERIC with mutates_state=True so the replay reb
 038 trial 3 each made the plan and filed none of its disputes before the customer ended the conversation. The items are a function of what the replay rebuilds, so a write's
 reply, footer included, replays unchanged.
 
+Since 2026-11-03 (fix research 2026-11-02; glint.gates.aids) it also keeps the writes that ran (`glint_ran`, for the
+duplicate-write deny) and the shipping address recorded with record_address_confirmation (`glint_address_confirmed`). An account read's reply carries the one-credit-per-checking-
+account fact (bank_accounts_(general)_017) ahead of the open items.
+
 The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
 {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
 "permissionDecisionReason": GateResult.message()} } to block a call (a PreToolUse deny
@@ -55,6 +59,7 @@ from tau2.environment.toolkit import ToolType
 
 from glint.assist import as_flag
 from glint.assist.banking import (
+    ADDRESS_TOOL,
     CLOSURE_REASON_TOOL,
     DISPUTE_ANSWERS_TOOL,
     ORDER_TOOL,
@@ -71,7 +76,7 @@ from glint.assist.banking import (
     waiver_due,
 )
 from glint.assist.tau2_tools import add_plan_tool
-from glint.gates import debit
+from glint.gates import aids, debit
 from glint.gates.bankdb import increase_request_ids, undecided_increases
 from glint.gates.banking import RETENTION_CREDIT, UNRECORDED, closure_blockers
 from glint.gates.core import CANNOT_DECIDE, WORDINGS, GateResult, assert_required, deny, run_gate
@@ -94,7 +99,7 @@ from glint.gates.rules import (
 log = logging.getLogger("glint.gates")
 WRAPPER = "call_discoverable_agent_tool"
 VERDICT_TOOL = "check_credit_limit_increase"
-GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL)  # replies carry no open items
+GLINT_RECORDS = (PLAN_TOOL, RETENTION_TOOL, REQUESTS_TOOL, DISPUTE_ANSWERS_TOOL, ADDRESS_TOOL)  # replies: no open items
 CHECK_TOOLS = ("check_card_dispute", "check_verification", VERDICT_TOOL)  # decision tools logged as check.recorded
 
 
@@ -406,6 +411,24 @@ class Enforcer:
         except Exception:
             log.exception("the retention_answer.recorded event was not logged")
 
+    def _record_address(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
+        """Keep the shipping address the customer confirmed for a card's replacement (record_address_confirmation; the
+        latest wins), which satisfies the address_ask gate (credit_card_replacements_001)."""
+        if call.requestor != "assistant" or call.name != ADDRESS_TOOL or reply.error:
+            return
+        try:
+            record = json.loads(reply.content)
+        except (TypeError, json.JSONDecodeError):
+            return
+        if not isinstance(record, dict) or not as_flag(record.get("recorded")):
+            return
+        env.tools.glint_address_confirmed[record["credit_card_account_id"]] = record["shipping_address"]
+        try:
+            self.events.emit("address.recorded", {
+                "domain": self.domain, "credit_card_account_id": record["credit_card_account_id"],
+                "address_on_file": record.get("address_on_file"), "replay": replay, **self.context()})
+        except Exception:
+            log.exception("the address.recorded event was not logged")
     def _record_dispute_answers(self, env, call: ToolCall, reply: ToolMessage, replay: bool) -> None:
         """Keep the customer's recorded answers to the two debit dispute questions, per card (the latest wins)."""
         if call.requestor != "assistant" or call.name != DISPUTE_ANSWERS_TOOL or reply.error:
@@ -471,12 +494,19 @@ class Enforcer:
         env.tools.glint_increase_decided = set()  # users with an increase approved or denied in this conversation
         env.tools.glint_expedite_asked = set()  # cards whose replacement the expedite_ask gate refused once
         env.tools.glint_address_asked = set()  # cards whose replacement the address_ask gate refused once
+        env.tools.glint_address_confirmed = {}  # card -> the shipping address recorded with record_address_confirmation
+        env.tools.glint_ran = set()  # (tool, arguments) of every write that ran, for the duplicate-write deny (N2)
 
         def with_open_items(message: ToolCall, reply: ToolMessage) -> ToolMessage:
             if (self.domain != "banking_knowledge" or message.requestor != "assistant" or message.name in GLINT_RECORDS
                     or reply.error or str(reply.content).startswith("Error")):
                 return reply
             items = _open_items(env.tools)
+            if message.name == WRAPPER:  # an account read carries the one-credit-per-account fact (row 14, doc 017)
+                args = message.arguments or {}
+                hidden = parse_hidden_arguments(args.get("arguments", "{}")) or {}
+                note = aids.credit_note(env.tools.db, str(args.get("agent_tool_name", "")), hidden)
+                items = [note, *items] if note else items
             return reply.model_copy(update={"content": f"{reply.content}\n\n" + "\n".join(items)}) if items else reply
 
         def get_response(message: ToolCall) -> ToolMessage:
@@ -488,6 +518,7 @@ class Enforcer:
                 self._record_retention(env, message, reply, state["replay"])
                 self._record_dispute_answers(env, message, reply, state["replay"])
                 self._record_requests(env, message, reply, state["replay"])
+                self._record_address(env, message, reply, state["replay"])
                 self._record_verdict(env, message, reply)
                 self._record_check(message, reply, state["replay"])
                 return with_open_items(message, reply)
@@ -498,6 +529,8 @@ class Enforcer:
                 if result.note:  # an allow's reminder (procedure.TRANSFER_UNCODED): deterministic, so it replays
                     reply = reply.model_copy(update={"content": f"{reply.content}\n\n{result.note}"})
                 self._record_increase(env, *write, reply, before)
+                if not reply.error and not str(reply.content).startswith("Error"):
+                    env.tools.glint_ran.add(aids.write_key(*write))
                 return with_open_items(message, reply)
             asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
             if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
