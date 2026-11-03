@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # The three CI checks (pytest with coverage, the coverage gate, ruff) and the two gold replays (gate_replay: τ²'s gold
 # actions through the gates, 0 false refusals; bank_replay: the same through glint-bank's MCP path, 0 false refusals,
-# 0 database hash mismatches, the recorded wrong writes stopped) for each git ref given, each in a throwaway worktree
-# of its own, so the checkout you work in and the run folder are never touched. Prints one line per ref with each
-# step's exit code; exits 1 when any step of any ref fails.
+# 0 database hash mismatches, the recorded wrong writes stopped; both must exit 0, and the refusals the owner decided
+# to keep, gate_replay.KNOWN_DECIDED, print as "KNOWN (decided)" and are not failures) for each git ref given, each
+# in a throwaway worktree of its own, so the checkout you work in and the run folder are never touched. Prints one
+# line per ref with each step's exit code; exits 1 when any step of any ref fails.
 # Usage: scripts/check.sh REF [REF ...]      (a branch, a tag or a commit)
 # PY and RUFF name the tools; by default the checkout's own .venv (glint-dev's has pytest-cov), else PATH.
 set -uo pipefail
@@ -44,6 +45,7 @@ for ref in "$@"; do
   echo "$ref: pytest exit $p ($(tail -n 1 "$wt/pytest.log")); coverage exit $c ($(tail -n 1 "$wt/cov.log")); ruff exit $r"
   echo "$ref: gate_replay exit $g ($(grep -E "^TOTAL" "$wt/gate_replay.log")); bank_replay exit $b"
   grep -E "^(gold|wrong writes):" "$wt/bank_replay.log" | sed "s/^/  /"
+  grep -hE "^  KNOWN \(decided\)" "$wt/gate_replay.log" "$wt/bank_replay.log" | cut -c1-140
   if [ $p -ne 0 ]; then grep -E "^FAILED" "$wt/pytest.log" | head -n 10; fi
   if [ $r -ne 0 ]; then head -n 20 "$wt/ruff.log"; fi
   if [ $g -ne 0 ]; then grep -E "^  (FALSE|false)|Traceback|Error" "$wt/gate_replay.log" | head -n 10; tail -n 5 "$wt/gate_replay.log"; fi
