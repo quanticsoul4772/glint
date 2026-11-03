@@ -280,6 +280,8 @@ def filing_call(db, user_id: str, plan: dict, transaction_id: str, increase_deci
 PLAN_TOOL = "plan_disputes"
 RETENTION_TOOL = "record_retention_answer"
 REQUESTS_TOOL = "record_requests"
+DISPUTE_ANSWERS_TOOL = "record_dispute_answers"
+PIN_ANSWERS = ("yes_shared", "yes_observed", "no", "unknown")  # bank_accounts_(general)_031 argument 11
 # action -> (the write tools it covers, the argument naming its target)
 REQUEST_ACTIONS = {
     "dispute_debit_transaction": (("file_debit_card_transaction_dispute_6281",), "transaction_id"),
@@ -336,6 +338,24 @@ def record_retention_answer(db, credit_card_account_id: str, user_id: str, offer
             "offer": str(offer), "accepted": accepted, "customer_words": str(customer_words),
             "next": "Keep the account open and apply the offer." if accepted else
             "Proceed with the closure the customer asked for (close_credit_card_account_7834)."}
+
+
+def record_dispute_answers(db, card_id: str, user_id: str, card_in_possession, pin_compromised: str,
+                           customer_words: str) -> dict:
+    """The customer's answers to bank_accounts_(general)_031's two closed questions for a debit card dispute
+    (argument 10, card_in_possession; argument 11, pin_compromised), as recorded by the agent. Validates the card and
+    the answers; never writes the database."""
+    card = db.debit_cards.data.get(card_id)
+    if card is None or card.get("user_id") != user_id:
+        return {"recorded": False, "error": f"no debit card {card_id!r} for user {user_id!r}"}
+    possession = str(card_in_possession).strip().lower()
+    if possession not in ("true", "false") or pin_compromised not in PIN_ANSWERS or not str(customer_words).strip():
+        return {"recorded": False, "error": "give card_in_possession as true or false, pin_compromised as one of "
+                f"{list(PIN_ANSWERS)}, and the customer's own words answering both questions"}
+    return {"recorded": True, "card_id": card_id, "user_id": user_id, "card_in_possession": possession == "true",
+            "pin_compromised": pin_compromised, "customer_words": str(customer_words),
+            "next": f"File each dispute on {card_id} with card_in_possession {possession} and pin_compromised "
+            f"{pin_compromised}; if the customer answers differently for another transaction, record that first."}
 OVERCHARGE = "incorrect_amount"
 CARD_DIGITS_TOOL = "get_card_last_4_digits"
 

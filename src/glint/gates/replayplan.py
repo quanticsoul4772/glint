@@ -8,7 +8,8 @@ follow the plan the conversation's own disputes give. When the conversation has 
 that filing (τ²'s gold in 031, 037, 038), the read the filing requires (glint.gates.procedure.REQUIRED_LOOKUPS) goes
 in first, unlocked and called as an agent does; τ² does not log a read its gold lacks, so the scored database is
 unchanged. `with_address_asks` inserts the order an agent sends before confirming the shipping address, which the
-address_ask gate refuses once, before gold's first order per card to the address on file (039, 054). A replay's 0
+address_ask gate refuses once, before gold's first order per card to the address on file (039, 054). `with_plans` also inserts
+the record_dispute_answers call the debit dispute answers gate requires, carrying gold's own answers. A replay's 0
 false refusals is on gold plus these inserted steps. Deterministic.
 """
 from __future__ import annotations
@@ -18,7 +19,15 @@ from collections.abc import Callable
 
 from tau2.data_model.message import ToolCall
 
-from glint.assist.banking import DISPUTE_HISTORY_TOOL, PLAN_TOOL, REQUEST_TOOLS, REQUESTS_TOOL, RETENTION_TOOL
+from glint.assist.banking import (
+    DISPUTE_ANSWERS_TOOL,
+    DISPUTE_HISTORY_TOOL,
+    PLAN_TOOL,
+    REQUEST_TOOLS,
+    REQUESTS_TOOL,
+    RETENTION_TOOL,
+)
+from glint.gates.debit import DISPUTE as DEBIT_DISPUTE
 from glint.gates.rules import DISPUTE, REPLACE, parse_hidden_arguments, same_address
 
 WRAPPER = "call_discoverable_agent_tool"
@@ -88,11 +97,21 @@ def with_plans(calls: list[ToolCall]) -> list[ToolCall]:
     dispute-history read before it when none came earlier (ids `<filing id>-history-unlock`, `<filing id>-history`).
     Before each closure of a credit card account whose closure reason was logged earlier in the conversation, the
     record_retention_answer call (accepted false) an agent following the retention gate makes (id `<close id>-retention`):
-    the conversation closes the account, so the customer declined the offer."""
+    the conversation closes the account, so the customer declined the offer. Before each debit card dispute filing
+    whose card_in_possession and pin_compromised differ from the latest answers recorded for its card (none yet, at
+    the first), the record_dispute_answers call carrying the filing's own answers (id `<filing id>-answers`)."""
     plans = plan_arguments([f for c in calls if (f := filing(c))])
     requests = request_arguments(calls)
     out, planned, read, logged, answered, recorded = [], set(), False, set(), set(), False
+    answers: dict[str, tuple] = {}
     for c in calls:
+        if (debit := _hidden(c, DEBIT_DISPUTE)) is not None:
+            card, pair = debit.get("card_id"), (debit.get("card_in_possession"), debit.get("pin_compromised"))
+            if answers.get(card) != pair:
+                answers[card] = pair
+                out.append(ToolCall(id=f"{c.id}-answers", name=DISPUTE_ANSWERS_TOOL, requestor="assistant", arguments={
+                    "card_id": card, "user_id": debit.get("user_id"), "card_in_possession": pair[0],
+                    "pin_compromised": pair[1], "customer_words": "(replay: the conversation files these answers)"}))
         if requests and not recorded and any(_hidden(c, tool) is not None for tool in REQUEST_TOOLS):
             recorded = True
             out.append(ToolCall(id=f"{c.id}-requests", name=REQUESTS_TOOL, arguments=requests, requestor="assistant"))
