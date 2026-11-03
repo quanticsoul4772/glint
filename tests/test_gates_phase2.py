@@ -1045,3 +1045,142 @@ def test_replay_marks_the_fee_waiver_offered_for_an_annual_fee_closure():
     for reason, offered in (("annual_fee", True), ("other", False)):
         inserted = next(c for c in with_plans(calls(reason)) if c.id == "c1-retention")
         assert inserted.arguments["fee_waiver_offered"] is offered
+
+
+# ---- debit card disputes (bank_accounts_(general)_031/_032) ------------------------------------------------------
+
+DEBIT_DISPUTE = "file_debit_card_transaction_dispute_6281"
+
+
+def test_the_debit_dispute_has_rules_now():
+    assert DEBIT_DISPUTE not in rules.NO_RULE_REASONS and DEBIT_DISPUTE in rules.REQUIRED_GATES["banking_knowledge"]
+    names = {g.name for g in rules.build_registry("banking_knowledge").for_tool(DEBIT_DISPUTE)}
+    assert {"debit_dispute_open_limit_gate", "debit_dispute_answers_gate", "debit_dispute_liability_gate"} <= names
+    assert not any(n.startswith("no_rule_") for n in names)
+
+
+def test_open_disputes_stop_at_the_tier_maximum_counted_before_the_filing():
+    from glint.gates import debit
+    env, task, _ = _bank("task_084")
+    gold = _play(env, task, DEBIT_DISPUTE, 2)  # entry tier, one OPEN dispute already: gold files the second
+    db = env.tools.db
+    assert debit.dispute_open_limit(db, gold).allowed
+    db.debit_card_disputes.data["dsp_extra"] = {"account_id": gold["account_id"], "status": "OPEN"}
+    held = debit.dispute_open_limit(db, gold)
+    assert not held.allowed and held.rule_id == "debit.dispute.open_limit" and "at most 2" in held.facts[0]
+    db.debit_card_disputes.data["dsp_extra"]["status"] = "RESOLVED"  # a final status is not open
+    assert debit.dispute_open_limit(db, gold).allowed
+    assert _ran(_hidden(env, DEBIT_DISPUTE, **gold))
+    # the premium edge (task_086): one open dispute and three filings reach the maximum of 4, and the fifth is refused
+    env, task, _ = _bank("task_086")
+    gold = _play(env, task, DEBIT_DISPUTE, 4)
+    assert debit.dispute_open_limit(env.tools.db, gold).allowed
+    assert _ran(_hidden(env, DEBIT_DISPUTE, **gold))
+    assert not debit.dispute_open_limit(env.tools.db, gold | {"transaction_id": "another"}).allowed
+    assert debit.dispute_open_limit(env.tools.db, gold | {"account_id": "nope"}).allowed
+    env.tools.db.accounts.data[gold["account_id"]]["level"] = "Unknown Level"
+    assert debit.dispute_open_limit(env.tools.db, gold).rule_id == "debit.dispute.open_limit.tier_unknown"
+
+
+def test_a_duplicate_charge_is_disputed_on_the_earliest_twin():
+    from glint.gates import debit
+    env, task, _ = _bank("task_084")
+    gold = _play(env, task, DEBIT_DISPUTE, 0)  # gold disputes the same-day twin stored second
+    db = env.tools.db
+    assert gold["transaction_id"] == "btxn_e8c3b09d2c45" and debit.dispute_earliest_duplicate(db, gold).allowed
+    other = gold | {"transaction_id": "btxn_d7f2a98c1b34"}
+    held = debit.dispute_earliest_duplicate(db, other)
+    assert not held.allowed and held.rule_id == "debit.dispute.duplicate.earliest"
+    assert "transaction_id btxn_e8c3b09d2c45, transaction_date 11/06/2025" in held.fix
+    assert "fitted to τ² gold" in held.facts[1]
+    db.bank_account_transaction_history.data["btxn_d7f2a98c1b34"]["date"] = "11/05/2025"  # an earlier date wins
+    held = debit.dispute_earliest_duplicate(db, gold)
+    assert not held.allowed and "btxn_d7f2a98c1b34" in held.fix and "fitted" not in held.facts[1]
+    db.debit_card_disputes.data["dsp_x"] = {"transaction_id": "btxn_d7f2a98c1b34", "status": "OPEN"}
+    assert debit.dispute_earliest_duplicate(db, gold).allowed  # the earlier twin is disputed already
+    assert debit.dispute_earliest_duplicate(db, gold | {"dispute_category": "incorrect_amount"}).allowed
+    assert debit.dispute_earliest_duplicate(db, gold | {"transaction_id": "nope"}).allowed
+
+
+def test_card_in_possession_is_false_on_a_card_closed_lost_or_stolen():
+    from glint.gates import debit
+    env, task, _ = _bank("task_084")
+    gold = _play(env, task, DEBIT_DISPUTE, 0)
+    card = env.tools.db.debit_cards.data[gold["card_id"]]
+    assert debit.dispute_card_in_possession(env.tools.db, gold).allowed
+    card.update(status="CLOSED", closure_reason="stolen")
+    held = debit.dispute_card_in_possession(env.tools.db, gold | {"card_in_possession": "True"})
+    assert not held.allowed and "card_in_possession false" in held.fix and "stolen" in held.facts[0]
+    assert debit.dispute_card_in_possession(env.tools.db, gold | {"card_in_possession": False}).allowed
+    card["closure_reason"] = "fraud_suspected"  # task_091 files with possession true on such a card
+    assert debit.dispute_card_in_possession(env.tools.db, gold).allowed
+    assert debit.dispute_card_in_possession(env.tools.db, gold | {"card_id": "nope"}).allowed
+
+
+def test_provisional_credit_where_every_required_condition_holds():
+    from glint.gates import debit
+    env, task, _ = _bank("task_087")
+    gold = _play(env, task, DEBIT_DISPUTE, 0)  # card-present fraud, 8 days old, written statement, OPEN account
+    db = env.tools.db
+    assert debit.dispute_provisional_credit(db, gold).details["required"]
+    held = debit.dispute_provisional_credit(db, gold | {"provisional_credit_eligible": False})
+    assert not held.allowed and "provisional_credit_eligible true" in held.fix
+    # the discretion zone is not judged: a shared PIN, a non-fraud dispute without merchant contact, no statement,
+    # an old transaction, a category outside the list, a new account's card-not-present dispute
+    for change in ({"pin_compromised": "yes_shared"}, {"dispute_category": "duplicate_charge"},
+                   {"written_statement_provided": "False"}, {"dispute_category": "incorrect_amount"},
+                   {"dispute_category": "card_not_present_fraud", "transaction_type": "online_purchase"}):
+        if "transaction_type" in change:
+            db.accounts.data[gold["account_id"]]["date_opened"] = "11/01/2025"
+        assert debit.dispute_provisional_credit(db, gold | change | {"provisional_credit_eligible": False}).allowed
+    db.bank_account_transaction_history.data[gold["transaction_id"]]["date"] = "08/01/2025"
+    assert debit.dispute_provisional_credit(db, gold | {"provisional_credit_eligible": False}).allowed
+
+
+def test_a_liability_cap_of_zero_is_refused():
+    from glint.gates import debit
+    for value in (0, 0.0, "0", "$0.00"):
+        held = debit.dispute_liability(None, {"customer_max_liability_amount": value})
+        assert not held.allowed and held.rule_id == "debit.dispute.liability_zero" and "-1 (unlimited)" in held.fix
+    for value in (-1, 50, "500", 412.88, None):
+        assert debit.dispute_liability(None, {"customer_max_liability_amount": value}).allowed
+
+
+def test_the_filing_follows_the_recorded_answers():
+    from glint.gates import debit
+    env, task, events = _bank("task_084")
+    gold = _play(env, task, DEBIT_DISPUTE, 0)  # the replay plan recorded gold's answers before the filing
+    recorded = [e["payload"] for e in events.events("dispute_answers.recorded")]
+    assert [(r["card_id"], r["card_in_possession"], r["pin_compromised"]) for r in recorded] == [
+        (gold["card_id"], True, "no")]
+    reply = _hidden(env, DEBIT_DISPUTE, **(gold | {"pin_compromised": "unknown"}))
+    assert _denied(reply, "card_in_possession true, pin_compromised no") and _rule(events) == (
+        "debit.dispute.answers.mismatch")
+    assert _ran(_hidden(env, DEBIT_DISPUTE, **gold))
+    # no record for the card: refused until the answers are recorded
+    assert not debit.dispute_answers(type("T", (), {"db": env.tools.db})(), gold).allowed
+    assert debit.dispute_answers(type("T", (), {"db": env.tools.db})(), gold | {"card_id": "nope"}).allowed
+    # the record tool checks the card's owner and the answers, and reads "False" as false
+    record = {"card_id": gold["card_id"], "user_id": gold["user_id"], "customer_words": "I have it; PIN is safe"}
+    assert "no debit card" in _call(env, "record_dispute_answers", **(record | {"user_id": "x"}), card_in_possession=True,
+                                    pin_compromised="no").content
+    assert "give card_in_possession" in _call(env, "record_dispute_answers", **record, card_in_possession=True,
+                                              pin_compromised="maybe").content
+    _call(env, "record_dispute_answers", **record, card_in_possession="False", pin_compromised="unknown")
+    assert env.tools.glint_dispute_answers[gold["card_id"]]["card_in_possession"] is False
+    assert "[open]" not in _call(env, "record_dispute_answers", **record, card_in_possession=True,
+                                 pin_compromised="no").content
+
+
+def test_the_replay_records_the_answers_only_when_they_change():
+    def debit_filing(k: int, card: str, pin: str) -> ToolCall:
+        return ToolCall(id=f"g{k}", name="call_discoverable_agent_tool", requestor="assistant", arguments={
+            "agent_tool_name": DEBIT_DISPUTE, "arguments": json.dumps({
+                "card_id": card, "user_id": "u", "transaction_id": f"t{k}", "card_in_possession": True,
+                "pin_compromised": pin})})
+    calls = with_plans([debit_filing(0, "c1", "no"), debit_filing(1, "c1", "no"), debit_filing(2, "c1", "unknown"),
+                        debit_filing(3, "c2", "unknown")])
+    answers = [c for c in calls if c.name == "record_dispute_answers"]
+    assert [c.id for c in answers] == ["g0-answers", "g2-answers", "g3-answers"]
+    assert answers[1].arguments | {"customer_words": ""} == {"card_id": "c1", "user_id": "u", "card_in_possession": True,
+                                                             "pin_compromised": "unknown", "customer_words": ""}
