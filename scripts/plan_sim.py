@@ -23,6 +23,7 @@ from tau2.registry import registry
 
 from glint.assist.banking import CARD_DIGITS_TOOL, DISPUTE_HISTORY_TOOL, PLAN_TOOL
 from glint.gates import Enforcer, EventLog
+from glint.gates.replayplan import lookups
 from glint.gates.rules import DISPUTE
 
 WRAPPER = "call_discoverable_agent_tool"
@@ -71,6 +72,10 @@ def simulate(task, filings: dict[str, dict]) -> dict:
     Enforcer("banking_knowledge", EventLog(":memory:")).attach(env)
     user_id = next(iter(filings.values()))["user_id"]
     user = env.tools.db.users.data[user_id]
+    # the reads that show the user and every filed transaction (the identifier-provenance deny, N10)
+    for read in lookups([ToolCall(id=f"f{k}", name=DISPUTE, arguments=f, requestor="assistant")
+                         for k, f in enumerate(filings.values())], env.tools.db):
+        env.get_response(read)
     _call(env, "log_verification", time_verified=NOW, **{k: user[k] for k in VERIFY_FIELDS})
     # the card-digits tool every dispute on a card without digits on file needs given first (procedure.card_digits)
     _call(env, "give_discoverable_user_tool", discoverable_tool_name=CARD_DIGITS_TOOL)

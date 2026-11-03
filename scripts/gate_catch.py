@@ -100,7 +100,8 @@ def replay_run(dom: str, task, calls: list[dict], labels: dict, events: EventLog
         if not env.tools.has_tool(call.name) and not (env.user_tools and env.user_tools.has_tool(call.name)):
             continue
         if call.name != WRAPPER and env.tools.has_tool(call.name) and env.tools.tool_type(call.name) == ToolType.READ:
-            continue  # a plain read changes nothing the gates judge
+            env.get_response(call)  # a plain read changes no state; its result is what the provenance deny reads
+            continue
         gate = enforcer.write_call(env, call)
         twin_reply = twin.get_response(call)
         before = events.count()
