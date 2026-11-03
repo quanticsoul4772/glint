@@ -11,7 +11,7 @@
 
 ![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](docs/demo.gif)
 
-**[Watch (2:43; set Quality to 1080p in the gear menu)](https://youtu.be/jP8PEzjAamE)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
+**[Watch (2:43)](https://youtu.be/jP8PEzjAamE)** · **[Try the gate (no sign-in)](https://quanticsoul4772--glint-desk-web.us-east.modal.run)** · **[Replay without GPU](https://quanticsoul4772.github.io/glint/)**
 
 Glint is write authorization for AI agents that touch money. Every account change the agent attempts goes through a gate before it runs; where the bank's written policy has a rule, the gate applies it as code to the live account records. An allowed write runs. A refused write does not run, and the agent gets the rule, the facts and the fix. Every decision lands in a hash-chained, tamper-evident log. Built on Meta's open-weight Muse Glimmer 30B, Muse Spark and Muse Code.
 
