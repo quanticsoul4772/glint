@@ -23,6 +23,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "ruff"]
+# glint.integrations.llamafirewall_scanner (docs/llamafirewall.md); not in the default install or CI
+llamafirewall = ["llamafirewall==1.0.3"]
 
 [tool.uv.sources]
 # Pinned τ²-bench v1.0.1 (commit fc0055dc4e0a316c3f83133267fbd6faaa770992), cloned outside this repo.
