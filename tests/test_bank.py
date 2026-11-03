@@ -433,8 +433,8 @@ def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_pat
 
     real_gold = bank_replay.gold
 
-    async def small_gold():
-        return await real_gold(["task_054", "task_040"])
+    async def small_gold(task_ids=None, home=None, request_gate=True):
+        return await real_gold(["task_054", "task_040"], home, request_gate)
 
     runs = [r for r in json.loads(RUNS.read_text(encoding="utf-8")) if r["task"] == "task_054" and r["trial"] == 0]
     (tmp_path / "runs.json").write_text(json.dumps(runs), encoding="utf-8")
@@ -445,7 +445,7 @@ def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_pat
     assert "0 false refusals" in text and "banking.cli.submit.reduce_amount" in text
     assert json.loads(out.read_text(encoding="utf-8"))["gold"]["tasks"] == 2
 
-    async def refusing_gold():
+    async def refusing_gold(task_ids=None, home=None, request_gate=True):
         return {"tasks": 1, "gold_writes": 1, "allowed": 0, "also_rejected": [], "hash_mismatches": [{"task_id": "t"}],
                 "placeholder_gold": [{"task_id": "p", "tool": "y", "rule_id": "q", "why": "placeholder"}],
                 "placeholder_hash_differs": ["p"],
