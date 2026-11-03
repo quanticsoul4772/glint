@@ -4,7 +4,7 @@ Subcommands (all read-only, deterministic, no model, no network):
 - `gold [--clauses PATH] [--all] [--out PATH]`: every clause over τ²'s banking TRAINING gold traces (the 77 tasks
   gate_replay reads; the test split stays unread). A clause gold violates is either a wrong encoding or a place where
   gold departs from the written policy; each is listed with its tasks. In-sample on training gold. `--out` writes
-  {clause id: tasks} (data-public/clauses/gold_violations.json: the "declare" reminder skips those clauses).
+  {clause id: tasks} (src/glint/clauses/gold_violations.json: the "declare" reminder skips those clauses).
 - `runs DATA_FOLDER [...] [--clauses PATH] [--all]`: every clause over each saved run of the banking arm files; one
   line per run with a violation, then per-clause totals. Results on the test split are tuned (M10).
 - `mine [--min-support N] [--require-negative] [--out PATH]`: response/precedence rules mined from training gold
@@ -24,7 +24,7 @@ from pathlib import Path
 from glint import declare, mine
 
 ROOT = Path(__file__).resolve().parents[1]
-CLAUSES = ROOT / "data-public" / "clauses" / "reconciled.json"
+CLAUSES = declare.CLAUSE_DIR / "reconciled.json"
 NEGATIVES = ROOT / "data-public" / "wrong-write-runs.json"
 DOMAIN = "banking_knowledge"
 

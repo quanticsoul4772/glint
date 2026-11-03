@@ -2,7 +2,7 @@
 (appendix #60, reader 1 1b) and the clause-list reconciler (agenda T8, appendix #86).
 
 Source: fix-research 2026-11-02, appendix "Omissions, loops, extras, grading, simulator". Every rule this module
-judges comes from a clause list (data-public/clauses/), written from the banking policy documents alone by two
+judges comes from a clause list (src/glint/clauses/, CLAUSE_DIR: package data), written from the banking policy documents alone by two
 separate blind passes (pass_a.json, pass_b.json) and reconciled (reconciled.json), or from the miner (glint.mine,
 "fitted to τ² gold"). Nothing here reads τ²'s gold or a run's outcome; it never decides a write.
 
@@ -28,10 +28,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from importlib import resources
 from pathlib import Path
 
 from glint.gates.rules import parse_hidden_arguments
 from glint.gates.summary import norm, run_calls
+
+# the blind clause lists and their reconciliation: package data, so an installed (non-editable) Glint has them
+CLAUSE_DIR = Path(str(resources.files("glint") / "clauses"))
 
 TEMPLATES = ("existence", "absence", "at_most", "response", "precedence", "not_succession", "not_coexistence",
              "responded_existence", "value")

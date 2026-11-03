@@ -24,26 +24,29 @@ from glint.runlog import outcome as run_outcome
 DATA = paths.MEASURE
 TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.json"
 OUT = Path(__file__).resolve().parents[1] / "src" / "glint" / "desk" / "scenarios.json"
-# (task, folder, tuned) for tasks whose base arm failed and tools arm passed at least once; tuned = the tools were
-# refined after reading the task's runs
+# (task, folder, tuned) for tasks whose base arm failed and tools arm passed at least once; tuned = the tools or the
+# gates were refined after reading the task's runs (054 and 038 for the tools; 052 for the gates since 2026-10-30,
+# by_task.TUNED)
 SOURCES = [("task_054", "banking-failures", True), ("task_038", "banking-failures", True),
-           ("task_050", "banking-other", False), ("task_052", "banking-other", False)]
+           ("task_050", "banking-other", False), ("task_052", "banking-other", True)]
 # Gated pairs (decision 2026-10-31): Glimmer alone beside Glimmer with Glint's tools and every write gated, the same
 # trial (seed) in both arms, where alone failed and the gated run passed after at least one policy-gate deny. The arms
 # come from different sets: (scenario id, task, (alone set, arm), (gated set, arm), tuned, picked, title, note).
 # banking-plan-gated's own tools arm (an earlier version of the gates) passed task_054 4/4 on the same seeds with no
 # deny, so a pair shows the gate stopping a wrong write and the agent following its fix; it is not evidence that the
 # gate caused the pass (claims review 2026-10-31).
+# The untuned unseen pair is listed first, so the desk opens on it (judge panel 2026-11-03: a tuned default reads as
+# cherry-picked); the tuned pair stays available.
 GATED_SOURCES = [
-    ("task_054-gates", "task_054", ("banking-plan-gated", "base"), ("banking-plan-v9-gated", "tools"), True, False,
-     "Fraud dispute, replacement card and a credit limit increase (gated)",
-     ("Alone: the ungated arm of banking-plan-gated (2026-10-29). Gated: v9 (2026-10-30), same seed. An earlier gated "
-      "version (banking-plan-gated's tools arm) passed this task 4/4 on the same seeds without blocking anything.")),
     ("task_045-unseen", "task_045", ("banking-unseen-lean-gated", "base"), ("banking-unseen-lean-gated", "tools"),
      False, True, "Card closure on unseen task 045 (gated)",
      ("Both arms from banking-unseen-gated (2026-10-30 to 31), same seed, a task whose runs no gate was built from. "
       "Across the set, alone's misses include 30 context overflows, and the gated arm hit τ²'s step limit in 41 of "
       "its 108 runs (research note of 2026-10-31).")),
+    ("task_054-gates", "task_054", ("banking-plan-gated", "base"), ("banking-plan-v9-gated", "tools"), True, False,
+     "Fraud dispute, replacement card and a credit limit increase (gated)",
+     ("Alone: the ungated arm of banking-plan-gated (2026-10-29). Gated: v9 (2026-10-30), same seed. An earlier gated "
+      "version (banking-plan-gated's tools arm) passed this task 4/4 on the same seeds without blocking anything.")),
 ]
 TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increase",
           "task_038": "Three disputed charges on a card that is being reissued",

@@ -1,7 +1,7 @@
 """The field-value mechanisms from fix-research 2026-11-02's appendix that failed the Nov 4 gate or were deferred:
 the checking-credit amount rule (glint.gates.fees), the 48-hour entry-wait exemption as a flagged allow
-(glint.gates.debit), constrained values (glint.gates.constraints), conversation-text checks (glint.convcheck), LLM
-stages with fakes (glint.verifiers) and the conversation audit script. No test calls a model or a paid
+(glint.gates.debit), constrained values (glint.gates.constraints), conversation-text checks (glint.convcheck) and
+the conversation audit script (the LLM-stage tests of glint.verifiers are in archive/). No test calls a model or a paid
 service."""
 import json
 from types import SimpleNamespace
@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from test_gates_phase2 import BANKING, TEST_SPLIT, _bank, _hidden, _play, _ran
 
-from glint import convcheck, paths, verifiers
+from glint import convcheck, paths
 from glint.gates import Enforcer, EventLog, GateRegistry, constraints, debit, fees, rules
 
 DB = json.loads((paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "db.json").read_text(encoding="utf-8"))
@@ -236,41 +236,6 @@ def test_the_fact_extractor_is_off_without_a_model():
     assert convcheck.extract_fact(sim, "Card held?", ("yes", "no", "unknown"), lambda p: " No.") == "no"
     assert convcheck.extract_fact(sim, "Card held?", ("yes", "no"), lambda p: "maybe") is None
     assert convcheck.audit(sim, lambda p: "unknown")["possession_extracted"] == "unknown"
-
-
-# ---- LLM stages (fakes only) --------------------------------------------------------------------------------------
-
-def test_llm_stages_are_off_without_a_model():
-    assert verifiers.provenance_guard([], 1.0, "schedule").status == "off"
-    assert verifiers.draft_rules("text", "t") == []
-
-
-def test_provenance_guard_with_a_fake_model():
-    rows = [{"type": "atm_fee", "amount": -3.0}]
-    assert verifiers.provenance_guard(rows, 3.0, "s", lambda p: '{"expected": 3.0, "why": "fee"}').status == "pass"
-    assert verifiers.provenance_guard(rows, 3.0, "s", lambda p: '{"expected": 1.5}').status == "fail"
-    assert verifiers.provenance_guard(rows, 3.0, "s", lambda p: "no idea").status == "unsure"
-    assert verifiers.provenance_guard(rows, 3.0, "s", lambda p: '{"expected": "x"}').status == "unsure"
-    assert verifiers.provenance_guard(rows, 3.0, "s", lambda p: '{"expected": 3.0,}').status == "unsure"
-
-
-def test_drafted_rules_compile_and_are_accepted_only_without_gold_refusals():
-    assert verifiers.compile_rule({"tool": "t", "arg": "a", "op": "bogus", "value": 1}) is None
-    assert verifiers.compile_rule("not a dict") is None
-    rule = verifiers.compile_rule({"tool": CREDIT, "arg": "amount", "op": "le", "value": 50})
-    assert rule.allows(CREDIT, {"amount": 10}) and not rule.allows(CREDIT, {"amount": 60})
-    assert rule.allows("other", {"amount": 60}) and rule.allows(CREDIT, {})
-    assert not rule.allows(CREDIT, {"amount": "x"})
-    gold = [(CREDIT, a) for _, _, a in _gold(CREDIT) if "amount" in a]
-    probes = [(CREDIT, {"amount": 75.0})]
-    verdict = verifiers.accept_drafted_rule(rule, gold, lambda t, a: True, probes)
-    assert verdict["accepted"] and verdict["adds"] == probes
-    strict = verifiers.compile_rule({"tool": CREDIT, "arg": "amount", "op": "lt", "value": 5})
-    assert not verifiers.accept_drafted_rule(strict, gold, lambda t, a: True, probes)["accepted"]
-    reply = 'Here: [{"tool": "' + CREDIT + '", "arg": "amount", "op": "gt", "value": 0, "source": "_017"}, {"op": 1}]'
-    drafted = verifiers.draft_rules("text", CREDIT, lambda p: reply)
-    assert len(drafted) == 1 and drafted[0].source == "_017"
-    assert verifiers.draft_rules("text", CREDIT, lambda p: "[not json") == []
 
 
 def test_conversation_audit_script(tmp_path, capsys):

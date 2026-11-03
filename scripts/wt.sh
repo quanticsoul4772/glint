@@ -6,7 +6,12 @@
 # runs. GLINT_HOME defaults to the checkouts' parent folder, as in glint.paths.
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
-PY=${PY:-/d/Projects/meta/glint/.venv/Scripts/python.exe}
+# the run folder is the repo's main checkout: the folder that holds the git directory every worktree shares
+main=$(dirname "$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)")
+if [ -z "${PY:-}" ]; then
+  PY="$main/.venv/Scripts/python.exe"
+  [ -x "$PY" ] || PY="$main/.venv/bin/python"
+fi
 [ -x "$PY" ] || PY=python
 src=$(cd "$here/src" && pwd -W 2>/dev/null || pwd)
 export PYTHONPATH="$src"

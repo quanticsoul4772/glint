@@ -22,7 +22,7 @@ from glint.assist.banking import ADDRESS_TOOL, REQUEST_TOOLS
 from glint.gates import aids, constraints, debit, procedure, travel
 from glint.gates import banking as bank_rules
 from glint.gates.bankdb import undecided_increases
-from glint.gates.core import NO_RULE, Gate, GateRegistry, GateResult, allow, deny
+from glint.gates.core import AGENT_RECORDS, NO_RULE, Gate, GateRegistry, GateResult, allow, deny
 
 RETAIL_ACTIONS = {
     "cancel_pending_order": "cancel", "modify_pending_order_address": "modify_address",
@@ -408,7 +408,7 @@ def _register_banking(reg: GateRegistry, request_gate: bool = True) -> None:
                       "a check fails, with the first failing reason.", lambda db, a: _decision(db, a, False)))
     reg.register(Gate("banking_replacement_gate", (REPLACE,), "credit_card_account_logistics_007: a pending "
                       "replacement makes a credit limit increase fail, so the increase is decided first.",
-                      _replacement, toolkit=True))
+                      _replacement, toolkit=True, checks=AGENT_RECORDS))  # address and expedite asks
     debit_gates = ((debit.FREEZE, debit.freeze, "_026: only an ACTIVE card is frozen."),
                    (debit.UNFREEZE, debit.unfreeze, "_026: only a FROZEN card on an OPEN account is unfrozen."),
                    (debit.CLOSE, debit.close, ("_025: no pending transactions, the 14-day card age, a "
@@ -464,12 +464,11 @@ def _register_banking(reg: GateRegistry, request_gate: bool = True) -> None:
     for tool, fn, purpose in others:
         reg.register(Gate(f"banking_{tool}_gate", (tool,), purpose, fn, toolkit=fn is procedure.transfer))
     reg.register(Gate("banking_retention_answer_gate", ("close_credit_card_account_7834",), "credit_card_account_logistics_003 steps 5-6: after a reason is logged, close only on a declined retention offer recorded with "
-                      "record_retention_answer.", bank_rules.retention_answered, toolkit=True))
+                      "record_retention_answer.", bank_rules.retention_answered, toolkit=True, checks=AGENT_RECORDS))
     for tool in REQUEST_TOOLS if request_gate else ():  # off: research row 6, the request gate removed
         reg.register(Gate(f"banking_request_{tool}", (tool,), "Act only on what the customer asked for: the "
                           "write is covered by the record_requests record (a reversible write without one runs, "
-                          "flagged).", bank_rules.requested(tool),
-                          toolkit=True))
+                          "flagged).", bank_rules.requested(tool), toolkit=True, checks=AGENT_RECORDS))
     # procedure gates: every banking write acting for a user, and every write whose procedure names lookups
     reg.register(Gate("procedure_verified_gate", procedure.VERIFIED_WRITES, "Every procedure starts with a verified "
                       "customer: the user's log_verification record from this conversation.", procedure.verified))
@@ -487,7 +486,8 @@ def _register_banking(reg: GateRegistry, request_gate: bool = True) -> None:
                       procedure.card_digits))
     reg.register(Gate("procedure_dispute_plan_gate", (DISPUTE,), "credit_cards_(general)_015 criterion 4: the "
                       "disputes filed first take the provisional credit, so each filing follows the plan_disputes "
-                      "plan (order from τ² train gold, tasks 037-041 and 081).", procedure.dispute_plan, toolkit=True))
+                      "plan (order from τ² train gold, tasks 037-041 and 081).", procedure.dispute_plan, toolkit=True,
+                      checks=AGENT_RECORDS))  # the plan takes the customer's answers as the agent states them
     reg.register(Gate("procedure_give_card_digits_gate", ("give_discoverable_user_tool",), "credit_cards_(general)"
                       "_014: the customer looks up the card's digits only when its account record does not show "
                       "them.", procedure.give_card_digits, toolkit=True))
@@ -538,8 +538,9 @@ def build_registry(domain: str, request_gate: bool = True) -> GateRegistry:
 def manifest(domain: str, reg: GateRegistry) -> dict:
     return {"domain": domain, "required": sorted(REQUIRED_GATES[domain]), "no_rule_yet": list(NO_RULE_YET[domain]),
             "gated_generic": list(GATED_GENERIC.get(domain, ())),
-            "gates": [{"name": g.name, "tools": list(g.tools), "purpose": g.purpose, "timeout_s": g.timeout_s}
-                      for g in reg.gates()]}
+            "checks_counts": reg.checks_counts(),
+            "gates": [{"name": g.name, "tools": list(g.tools), "purpose": g.purpose, "timeout_s": g.timeout_s,
+                       "checks": g.checks} for g in reg.gates()]}
 
 
 def parse_hidden_arguments(raw) -> dict | None:

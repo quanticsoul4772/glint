@@ -11,7 +11,10 @@ Run: python -m glint.bank.server [--decision-tools] [--no-request-gate] [--no-un
   holds an environment built with `get_environment(retrieval_variant="bm25_grep")`, set to a task's initial state, and
   passed through `assist_environment` with the session's `Enforcer`, so every assistant write through `get_response`
   is checked first (`glint.gates.enforce`). The gate log is `$GLINT_BANK_HOME/sessions/<sid>/gates.sqlite`
-  (hash-chained; GLINT_BANK_HOME defaults to ~/.glint-bank).
+  (GLINT_BANK_HOME defaults to ~/.glint-bank), HMAC-SHA256 hash-chained under GLINT_LOG_KEY when set, else under a
+  per-install key generated on first use in GLINT_LOG_KEY_FILE (default `$GLINT_BANK_HOME/log.key`, outside every
+  session folder). The key protects the chain only while the agent cannot read that file: put it where the agent's
+  file tools do not reach. `log SESSION_ID` verifies keyed and older unkeyed logs alike and says which it is.
 - **Tools.** Generated from the toolkit: every visible τ² agent tool with its name, docstring and JSON schema, a
   read-only annotation on each tool that does not mutate state, and a destructive one on each WRITE tool. Plus the
   server's `load_scenario(task_id)` (fresh environment at the task's initial state) and `get_bank_policy`. Glint's
@@ -68,7 +71,7 @@ with quiet_stdout():
     from glint.assist.banking import ADDRESS_TOOL, DISPUTE_ANSWERS_TOOL, PLAN_TOOL, REQUESTS_TOOL, RETENTION_TOOL
     from glint.assist.tau2_tools import assist_environment
     from glint.gates import ChainBroken, Enforcer, EventLog
-    from glint.gates.eventlog import KEY_ENV, log_key
+    from glint.gates.eventlog import KEY_ENV, install_key, log_key, recorded_scheme
     from glint.gates.stages import AUTO
 
 DOMAIN = "banking_knowledge"
@@ -90,6 +93,20 @@ def bank_home() -> Path:
     if os.environ.get("GLINT_BANK_HOME"):
         return Path(os.environ["GLINT_BANK_HOME"])
     return (Path(os.environ["HOME"]) if os.environ.get("HOME") else Path.home()) / ".glint-bank"
+
+
+KEY_FILE_ENV = "GLINT_LOG_KEY_FILE"
+
+
+def key_file(home: Path) -> Path:
+    """GLINT_LOG_KEY_FILE, else `<home>/log.key`: outside every session folder, so no session's files include it."""
+    return Path(os.environ[KEY_FILE_ENV]) if os.environ.get(KEY_FILE_ENV) else Path(home) / "log.key"
+
+
+def session_key(home: Path) -> bytes:
+    """The key every session log is chained with: GLINT_LOG_KEY when set, else the per-install key file (created on
+    first use). Session logs are always keyed."""
+    return log_key() or install_key(key_file(home))
 
 
 def default_session_id() -> str:
@@ -159,10 +176,11 @@ class BankServer:
             s = self.sessions.get(sid)
             if s is None:
                 try:
-                    events = EventLog(session_dir(self.home, sid) / "gates.sqlite", key=log_key())
-                except ChainBroken as e:  # a resumed session whose log was opened with a different GLINT_LOG_KEY
-                    raise MCPError(types.INTERNAL_ERROR, f"{e}. Restart the server with {KEY_ENV} as it was when "
-                                   "this session's log was created, or start a new session.") from e
+                    events = EventLog(session_dir(self.home, sid) / "gates.sqlite", key=session_key(self.home))
+                except ChainBroken as e:  # a resumed session whose log has another key, or none (before keying)
+                    raise MCPError(types.INTERNAL_ERROR, f"{e}. Restart the server with {KEY_ENV} (or "
+                                   f"{KEY_FILE_ENV}) as it was when this session's log was created, or start a new "
+                                   "session.") from e
                 s = BankSession(sid, events)
                 s.enforcer = Enforcer(DOMAIN, s.events, context=s.context, request_gate=self.request_gate,
                                       uncovered_reminder=self.uncovered_reminder,
@@ -289,10 +307,14 @@ def brief(task_id: str) -> str:
 
 
 def show_log(sid: str, home: Path | None = None) -> str:
-    path = session_dir(Path(home) if home is not None else bank_home(), sid) / "gates.sqlite"
+    """A session's events and its chain check. A keyed log is verified with the session key; an unkeyed one (written
+    before session logs were keyed) is verified unkeyed and said to be unkeyed."""
+    home = Path(home) if home is not None else bank_home()
+    path = session_dir(home, sid) / "gates.sqlite"
     if not path.exists():
         raise SystemExit(f"no gate log for session {sid!r} at {path}")
-    events = EventLog(path, key=log_key())
+    unkeyed = recorded_scheme(path) == "sha256"
+    events = EventLog(path, key=None if unkeyed else session_key(home))
     try:
         lines = []
         for e in events.events():
@@ -305,6 +327,9 @@ def show_log(sid: str, home: Path | None = None) -> str:
                 lines.append(e["type"])
         n, head = events.head()
         lines.append(f"verify(): OK, {events.verify()} events, hash chain intact ({events.scheme})")
+        if unkeyed:
+            lines.append("unkeyed: anyone who can write this file can recompute its chain. Session logs are keyed "
+                         "since 2026-11-03, so an unkeyed log is either older or was replaced.")
         lines.append(f"head: event {n}, {head}  (keep this line off this machine; verify against it to detect truncation)")
         return "\n".join(lines)
     finally:

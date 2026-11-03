@@ -1,14 +1,13 @@
 """The LLM-stage harnesses, all off by default and tested with fake model calls only (glint.modelcall, glint.extract,
-glint.second_sim, glint.denystate, glint.draft_rules, scripts/llm_harness.py), and glint.conformal."""
+glint.second_sim, glint.denystate, glint.draft_rules, scripts/llm_harness.py). glint.conformal's test is in archive/."""
 import json
-import math
 import sys
 import types
 
 import llm_harness
 import pytest
 
-from glint import conformal, denystate, draft_rules, extract, modelcall, second_sim
+from glint import denystate, draft_rules, extract, modelcall, second_sim
 from glint.gates.core import DENY_PREFIX
 
 SIM = {"task_id": "task_1", "trial": 0, "messages": [
@@ -161,32 +160,6 @@ def test_drafted_rules_are_validated_and_measured(tmp_path):
     out = draft_rules.draft_all(docs, ["close", "log_reason"], fake(reply), only=["doc_2"])
     assert out["documents"] == 1 and out["clauses"][0]["doc"] == "doc_2"
     assert "close, log_reason" in draft_rules.prompt("d", "t", "c", ["close", "log_reason"])
-
-
-# ---- conformal ---------------------------------------------------------------------------------------------------
-
-def test_conformal_thresholds_and_the_cascade():
-    benign = [i / 10 for i in range(10)]  # 0.0 .. 0.9
-    assert conformal.block_threshold(benign, 0.2) == 0.8  # ceil(11 * 0.8) = 9th smallest
-    assert conformal.block_threshold(benign[:3], 0.1) == math.inf
-    assert conformal.ask_threshold([0.5, 0.6, 0.7, 0.8], 0.4) == 0.6  # floor(5 * 0.4) = 2nd smallest
-    assert conformal.ask_threshold([0.5], 0.1) == -math.inf
-    for bad in (0, 1):
-        with pytest.raises(ValueError):
-            conformal.block_threshold(benign, bad)
-        with pytest.raises(ValueError):
-            conformal.ask_threshold(benign, bad)
-    assert [conformal.cascade(s, 0.3, 0.8) for s in (0.1, 0.3, 0.8, 0.9)] == ["allow", "ask", "ask", "block"]
-    with pytest.raises(ValueError):
-        conformal.cascade(0.5, 0.9, 0.1)
-    scores = [0.1, 0.4, 0.6, 0.9]
-    lam = conformal.crc_threshold(lambda t: [1.0 if s > t else 0.0 for s in scores], [0.0, 0.5, 0.95], alpha=0.5)
-    assert lam == 0.95  # (4 + 1) / 5 at 0.0 and (2 + 1) / 5 at 0.5 exceed 0.5; (0 + 1) / 5 at 0.95 does not
-    assert conformal.crc_threshold(lambda t: [1.0] * 4, [0.0], alpha=0.1) is None
-    with pytest.raises(ValueError):
-        conformal.crc_threshold(lambda t: [2.0], [0.0], alpha=0.5)
-    c = conformal.calibrate(benign, [0.85, 0.9, 0.95, 0.99], alpha=0.2, beta=0.4)
-    assert c["block_at"] == 0.8 and c["ask_at"] == 0.8 and c["benign_blocked"] == 1 and c["offpolicy_allowed"] == 0
 
 
 # ---- the CLI ------------------------------------------------------------------------------------------------------

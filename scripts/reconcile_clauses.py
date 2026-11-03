@@ -1,4 +1,4 @@
-"""Reconcile the two blind clause lists (agenda T8/T10, appendix #86) into data-public/clauses/reconciled.json.
+"""Reconcile the two blind clause lists (agenda T8/T10, appendix #86) into src/glint/clauses/reconciled.json.
 
 pass_a.json and pass_b.json were written by two separate passes over the banking policy documents alone (tools.py for
 tool and argument names), without reading any run, gold action or each other (pass A document-first in file-name
@@ -16,7 +16,7 @@ from pathlib import Path
 
 from glint import declare
 
-DIR = Path(__file__).resolve().parents[1] / "data-public" / "clauses"
+DIR = declare.CLAUSE_DIR
 
 
 def build(pass_a: Path, pass_b: Path) -> dict:
