@@ -29,7 +29,7 @@ from tau2.runner.build import _derive_read_log_allowlist
 import splits
 from glint.assist.banking import ADDRESS_TOOL, PLAN_TOOL
 from glint.gates import Enforcer, EventLog
-from glint.gates.replayplan import with_address_confirmations, with_plans
+from glint.gates.replayplan import with_address_confirmations, with_lookups, with_plans
 
 DOMAINS = ("retail", "airline", "banking_knowledge")
 BANKING_SPLIT = splits.BANKING
@@ -74,7 +74,8 @@ def replay(domain: str, tasks: list, events: EventLog, request_gate: bool = True
                         (init.message_history if init else None) or [])
         gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
                 for k, a in enumerate(task.evaluation_criteria.actions or [] if task.evaluation_criteria else [])]
-        calls = with_address_confirmations(with_plans(gold, request_gate)) if domain == "banking_knowledge" else gold
+        calls = (with_lookups(with_address_confirmations(with_plans(gold, request_gate)), env.tools.db)
+                 if domain == "banking_knowledge" else gold)
         for call in calls:
             k = call.id.removeprefix("gold-")
             if call.name in (PLAN_TOOL, ADDRESS_TOOL):  # Glint's tools: the ungated twin has none

@@ -41,6 +41,10 @@ Runs go domain by domain (base then tools), so a domain that finishes has both a
   key `deny_wording` (default "plain") is how the tools arm's denies read (glint.gates.core.WORDINGS). Set key
   `request_gate` (default true) false turns the banking request gate off (research row 6, fix-research-2026-11-02):
   no request gates, no request-record reminder, no record_requests tool (glint.gates.Enforcer).
+  Opt-in tools-arm keys, all off by default: `reminders` (glint.gates.enforce.REMINDERS: "declare" shows pending
+  obligations of the agreed blind clause list), `step_warn` (replayed calls before the step-limit warning) and
+  `search_compact_after` (knowledge-base searches before searches answer with a diagnosis, glint.assist.kb). Keys
+  `llm_user` and `llm_args_user` replace the customer model of both arms (a second simulator, glint.second_sim).
 - `banking-plan-v2-gated`: the tools arm of `banking-plan-gated` only, after the incorrect_amount dispute became a
   planned partial refund of the overcharge with the customer's choice winning and neutral asking (PR 101, PR 102). It is
   compared with `banking-plan-gated`'s arms from the same day (its base arm runs no gates, so these changes cannot
@@ -150,6 +154,7 @@ from tau2.utils import llm_utils
 
 import splits
 from glint import glimmer_serve, inspect, paths
+from glint.assist import tau2_tools
 from glint.assist.tau2_tools import install
 from glint.atem import reparsing
 from glint.calllog import lean_saved, recording
@@ -448,7 +453,9 @@ def _save_dir(cfg: dict, arm: str, domain: str, stamp: str) -> Path:
 def _run(cfg: dict, domain: str, ids: list[str], arm: str, stamp: str, endpoint: str | None):
     model, args = _agent(cfg, domain, endpoint)
     common = {"domain": domain, "agent": "llm_agent", "llm_agent": model, "llm_args_agent": args,
-              "user": "user_simulator", "llm_user": SPARK, "llm_args_user": META, "num_trials": _trials(cfg, domain),
+              # a second simulator (appendix #80) sets llm_user/llm_args_user; every set so far uses Muse Spark
+              "user": "user_simulator", "llm_user": cfg.get("llm_user", SPARK),
+              "llm_args_user": cfg.get("llm_args_user", META), "num_trials": _trials(cfg, domain),
               "max_concurrency": cfg.get("concurrency", 8) if endpoint else 4, "seed": 5000,
               "save_to": f"glint-{cfg['save']}-{arm}-{domain}-{stamp}", "auto_review": False, "max_retries": 0,
               "auto_resume": True,
@@ -741,7 +748,8 @@ def _enforcer(cfg: dict, domain: str, data: Path) -> Enforcer | None:
         return None
     return Enforcer(domain, EventLog(data / f"gates-{domain}.sqlite"),
                     context=run_context,
-                    wording=cfg.get("deny_wording", "plain"), request_gate=cfg.get("request_gate", True))
+                    wording=cfg.get("deny_wording", "plain"), request_gate=cfg.get("request_gate", True),
+                    reminders=tuple(cfg.get("reminders", ())), step_warn=cfg.get("step_warn"))
 
 
 def rerun_command(argv: list[str] | None = None) -> str:
@@ -875,6 +883,7 @@ def generate(cfg: dict) -> None:
         for domain, ids, arm in pending:
             enforcer = _enforcer(cfg, domain, data) if arm == "tools" else None
             if arm == "tools":
+                tau2_tools.SEARCH_COMPACT_AFTER = cfg.get("search_compact_after")
                 install(domain, enforcer=enforcer)
             glim_before, meta_before = glim.meta_usd, meta.meta_usd
             events = RunEvents(_save_dir(cfg, arm, domain, stamp) / "results.json", data / "events.jsonl",

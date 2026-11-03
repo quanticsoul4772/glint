@@ -29,6 +29,7 @@ from glint.gates import (
     summary,
 )
 from glint.gates.core import NO_RULE
+from glint.gates.replayplan import lookups
 
 logger.remove()
 BANKING_TASKS = paths.tau2_data() / "tau2" / "domains" / "banking_knowledge" / "tasks.json"
@@ -224,6 +225,11 @@ def _banking(task_id: str):
     env, events = _gated("banking_knowledge", task)
     gold = [(a.arguments["agent_tool_name"], json.loads(a.arguments["arguments"]))
             for a in task.evaluation_criteria.actions if a.name == "call_discoverable_agent_tool"]
+    # the identifier-provenance deny (N10) needs every identifier gold names shown by a read first: look them up
+    calls = [ToolCall(id=f"g{k}", name=a.name, arguments=a.arguments, requestor="assistant")
+             for k, a in enumerate(task.evaluation_criteria.actions)]
+    for read in lookups(calls, env.tools.db):
+        env.get_response(read)
     # phase 2 gates banking writes on the user's verification and on the lookups each procedure names: do them as
     # the gold conversation does (the hidden lookups are reads; they change nothing the phase-1 gates judge)
     for a in task.evaluation_criteria.actions:

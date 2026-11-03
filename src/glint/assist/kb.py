@@ -71,6 +71,26 @@ def format_results(pipeline, results: list[tuple[str, float]], score, empty: str
     return "\n".join(out) + f"\n{tail}{READ_HINT}"
 
 
+def diagnosis(pipeline, results: list[tuple[str, float]], returned: list[str], searches: int) -> str:
+    """A compact search answer for a conversation past its search budget (appendix #72, reader 3 R6: "explicit
+    diagnosis replaces accumulated search output"): titles and IDs only, documents an earlier search already returned
+    named apart, and one line saying what the searching has found so far. A context budget, not a policy rule;
+    used only when glint.assist.tau2_tools.SEARCH_COMPACT_AFTER is set (default off: overflow occurred only in the
+    alone arm, so turning it on changes the tools arm's context handling, not the baseline's)."""
+    top = [doc_id for doc_id, _ in results[:TOP_DOCS]]
+    new = [d for d in top if d not in returned]
+    lines = [f"Search {searches} in this conversation; {len(set(returned))} distinct documents returned so far."]
+    if not top:
+        lines.append("This search found no documents.")
+    for doc_id in new:
+        lines.append(f"- {pipeline.get_document_title(doc_id) or 'Untitled'} (ID: {doc_id})")
+    if len(new) < len(top):
+        lines.append(f"Already returned by an earlier search: {', '.join(d for d in top if d in returned)}.")
+    lines.append("Diagnosis: more searching is unlikely to add policy. Read a listed document with KB_read(doc_id), "
+                 "or act on the policy already found and tell the customer what is left.")
+    return "\n".join(lines)
+
+
 def read_page(pipeline, doc_id: str, offset: int = 0) -> str:
     """Characters offset to offset+PAGE_CHARS of a document, with where the next page starts."""
     content = pipeline.get_document_content(doc_id)

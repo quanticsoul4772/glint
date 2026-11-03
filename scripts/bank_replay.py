@@ -53,7 +53,8 @@ from glint.assist.banking import (
 )
 from glint.bank.server import BankServer, build_environment, tasks
 from glint.gates import rules
-from glint.gates.replayplan import plan_arguments, with_address_confirmations, with_plans
+from glint.gates.aids import identifiers
+from glint.gates.replayplan import plan_arguments, with_address_confirmations, with_lookups, with_plans
 
 # the recorded runs the wrong check reads: banking12's runs of task_040/041/051/054 from the failure review of
 # 2026-10-28, trimmed to the fields used and kept in the repo so a clean checkout can run it
@@ -113,7 +114,7 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None, requ
                 actions = task.evaluation_criteria.actions or [] if task.evaluation_criteria else []
                 gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
                         for k, a in enumerate(actions)]
-                calls = with_address_confirmations(with_plans(gold, request_gate))
+                calls = with_lookups(with_address_confirmations(with_plans(gold, request_gate)), twin.tools.db)
                 for call in calls:
                     k, action = call.id.removeprefix("gold-"), call
                     # Glint's tools: the twin has none
@@ -242,6 +243,8 @@ async def wrong(recs: list[dict], home: Path | None = None, request_gate: bool =
                     if w["name"] == rules.REPLACE:  # recorded before address_ask: the address counts as confirmed
                         with session.lock:
                             session.env.tools.glint_address_asked.add(str(w["args"].get("credit_card_account_id", "")))
+                    with session.lock:  # the recording keeps writes only, not the reads that showed their identifiers
+                        session.env.tools.glint_seen.extend(identifiers(w["args"]).values())
                     before, db = session.events.count(), session.env.get_db_hash()
                     reply = await _send(client, w["name"], w["args"])
                     denied = _denies(session, before)

@@ -27,6 +27,9 @@ def build() -> dict:
         srv.load_scenario(None, TASK)
         task = bank.tasks()[TASK]
         verification = next(a.arguments for a in task.evaluation_criteria.actions if a.name == "log_verification")
+        # the reads that show the customer and her card, as an agent makes them (the identifier-provenance deny)
+        srv.call(None, "get_user_information_by_name", {"customer_name": verification["name"]})
+        srv.call(None, "get_credit_card_accounts_by_user", {"user_id": verification["user_id"]})
         reply = srv.call(None, "log_verification", verification)
         if reply.is_error:
             raise SystemExit(f"verification failed: {reply.content[0].text}")
