@@ -2,6 +2,21 @@
 
 All runs are on τ²-bench v1.0.1 with Muse Glimmer 30B at medium reasoning; both arms of a comparison run with the same seeds on the same backend. Results are reported **by task**, because runs of one task are not independent. Tuned and untuned tasks are reported apart and never pooled. The README carries the headline; this page carries the detail. The Bank Desk's Results tab shows the same numbers per task.
 
+## Banking test split, every write gated (2026-11-02)
+`banking-test-gated`: τ²'s 20 banking test tasks, k=2, Glimmer alone (ungated) against Glimmer with the gates and decision tools, both on Modal, same seeds, on the code after PRs 20-25 (verify once and the other policy conditions, the retention answer, the request record, attestation and repeat escalation, the savings interest rules). The split was read once ungated on 2026-10-28, and some debit rules were written from its failures then; this is its one gated read (decision 2026-11-02), reversing the 2026-10-28 decision that a gated run there would be circular. Spend: $5.58 GPU (metered upper bound), $0.27 Meta. Before it, `banking-smoke-gated` (6 design tasks, k=1, gated arm only, $0.84 GPU) checked that Glimmer calls the new recording tools: it did in all 6 runs, and it found that each record erased the previous one (fixed in PR 25).
+
+| | Glimmer alone | Glint |
+|---|---|---|
+| Passes | 7/40 | 7/40; by task 2 better (043, 078), 2 worse (014, 102), 16 same; sign test p = 1.0, two-sided |
+| Writes that differ from τ²'s expected ones | 34 in 12 runs (13 extra, 21 changed values) | 25 in 10 runs (4 extra, 21 changed values); by task 5 fewer, 2 more, 13 same (sign test p = 0.45, two-sided) |
+| Allowed writes, by what checked them | — | a rule 77, a recorded request 13, both 35, nothing 3 (of 128) |
+| Endings | 33 customer stop, 7 context overflow | 26 customer stop, 14 τ² step limit |
+
+- By tool (alone / Glint): debit disputes 12/11, debit card orders 6/5, checking credits 7/4, rewards corrections 3/0, debit card closures 2/1, replacement orders 1/2, others 3/2.
+- 45 refusals: the request record 20 (17 refusals of 13 writes τ² expects, false against gold until the agent recorded the request; 12 of those writes then ran matching τ²'s, 1 ended at the step limit), procedure lookups 10 (all followed), frozen card before a closure 5, address confirmation 4, entry-tier order wait 3 (another card), verify once 1 (a repeated verification; the first was already logged), checking credit once 1, pending transactions 1. Judged refusals 35, of them 18 false against gold (17 request record, 1 verify once).
+- The 14 step-limit runs: 10 are knowledge-base search loops with no refusal (the decision-tools setup, as before); 4 (077, 080 twice, 083) include refusals from several gates, the request record among them.
+- Reading: extra writes fell from 13 to 4; the request gate blocked 1 of them and the agent re-recorded others, so this may be chance (runs with an extra write 9/40 vs 3/40, Fisher p = 0.11 two-sided). Wrong values did not change. The pass rate did not change. Checked against the run data by the claims reviewer on 2026-11-02.
+
 ## Live gate decisions across the four gated banking sets
 An evaluation of every live gate decision in the four gated banking sets (v9 design data, `banking-unseen-gated` analyzed from its lean copy, `banking-unseen-v10-gated`, `banking-pressure-gated`), made 2026-11-01 from the recorded runs and gate logs and recounted 2026-11-02 (the scripts and notes are in the project's research record, outside this repo, so these numbers are recomputable from the run data but not from the repository alone). Two regimes: the 12 tasks the gates were developed on (v9), and the 59 tasks no gate rule came from (the unseen set, v10 and the pressure set; v10 and the pressure set are design data for the search fix, not for the gates). The gate log holds 978 write decisions (318 + 660), 14 more than the 964 write calls in the runs τ² saved as results (11 calls in 7 unseen-set runs not saved as results, and 3 log records whose call was not saved); the 113 refusals are the table's 109 denied write calls plus 4 refused transfers to a human agent, which are not write calls.
 

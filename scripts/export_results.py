@@ -29,6 +29,13 @@ GATED_NOTE = ("Glint's decision tools with every write gated (a denied write doe
               "compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count "
               "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
+    ("banking-test-gated", True, "Banking test split, every write gated (the one gated read of the split)", "tuned",
+     ("τ²'s 20 banking test tasks, k=2, Glimmer alone vs Glimmer with the gates and decision tools, on the "
+      "code after PRs 20-25 (the request record, the retention answer, the savings interest rules). Some debit "
+      "rules were written from this split's failures on 2026-10-28. Passes 7/40 vs 7/40 (by task 2 better, 2 worse). "
+      "Writes that differ from τ²'s expected ones: 34 alone vs 25 gated, extra writes 13 vs 4 (by task 5 fewer, 2 "
+      "more; may be chance); wrong values 21 vs 21. 14 gated runs hit τ²'s step limit (10 knowledge-base "
+      "search loops, 4 with request-record refusals); alone had 7 context overflows. Glimmer on Modal.")),
     ("banking-unseen-v10-gated", True, "Banking, 59 unseen tasks, gates plus the search fix (tuned on their failures)",
      "tuned",
      ("The same 59 tasks and seeds, k=2, the gated tools arm only, on the code after PR 158-174: the v10 fixes and the "
@@ -54,7 +61,7 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
       "increase verdict, which came from its failures). Do not read as general evidence. " + GATED_NOTE),
      lambda task: task in TUNED_GATES),
     ("banking-test", True, "Banking test split, read once (current tools, no gates)", "held-out",
-     ("τ²'s 20 untouched banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute "
+     ("τ²'s 20 banking test tasks, read once as the final check (2026-10-28). Only task_080 has a dispute "
       "or credit-limit step, and a decision tool was called in 1 of 80 runs, so this shows the tools neither helped "
       "nor hurt tasks they were not built for. By task: 1 improved, 18 tied, 1 worse. No gated run on this split. "
       "k=4. Glimmer on Modal.")),
