@@ -17,6 +17,7 @@ from tau2.environment.toolkit import ToolType
 from glint import paths
 from glint.bank import server as bank
 from glint.gates import rules
+from glint.gates.enforce import REPEAT_NOTE
 
 logger.remove()
 ROOT = Path(__file__).resolve().parents[1]
@@ -197,20 +198,57 @@ def test_load_scenario_resets_and_never_leaks_the_customer_instructions(server):
         rules.SUBMIT, requested_increase_amount=2500, **SOFIA))
     assert not submitted.is_error, submitted.content[0].text
     changed = first.get_db_hash()
-    reply = server.call(None, bank.LOAD, {"task_id": "task_054"})
+    text, error = server.load_scenario(None, "task_054")  # the operator's reload (the agent's is refused now)
+    reply = bank._result(text, error)
     fresh = bank.build_environment(bank.tasks()["task_054"])
     assert server.session().env is not first and server.session().env.get_db_hash() == fresh.get_db_hash() != changed
     text = reply.content[0].text
     assert not reply.is_error and json.loads(text)["task_id"] == "task_054"
     task = bank.tasks()["task_054"]
     assert "Sofia" not in text and "4,000" not in text and task.user_scenario.instructions[:40] not in text
-    # the base database, and an unknown task
+    # the base database, and an unknown task, through the agent's tool (no write since the reload)
     base = server.call(None, bank.LOAD, {})
     assert not base.is_error and server.session().env.get_db_hash() == bank.build_environment().get_db_hash()
     unknown = server.call(None, bank.LOAD, {"task_id": "task_999"})
     assert unknown.is_error and "unknown task_id" in unknown.content[0].text
     loaded = [e["payload"]["task_id"] for e in server.session().events.events("scenario.loaded")]
     assert loaded == ["task_054", "task_054", ""] and server.session().events.verify() > 3
+
+
+def test_the_agent_cannot_clear_the_gate_records_by_reloading_the_scenario(server):
+    """Bypass (judge panel 2026-11-01 and 2026-11-03, technical 2.6): refused, reload, the same write again. A reload
+    would rebuild the environment and the enforcer's records, so the repeat refusal would lose its escalation. Once a
+    gate has decided a write, the agent's load_scenario is refused and the records stay."""
+    async def body(client):
+        loaded = await client.call_tool(bank.LOAD, {"task_id": "task_054"})  # /start: before any write, allowed
+        for name, args in _lookups():
+            await client.call_tool(name, args)
+        await client.call_tool("log_verification", _verification())
+        await client.call_tool("unlock_discoverable_agent_tool", {"agent_tool_name": rules.SUBMIT})
+        args = _hidden_args(rules.SUBMIT, requested_increase_amount=4000, **SOFIA)
+        first = await client.call_tool("call_discoverable_agent_tool", args)
+        env = server.session().env
+        reload = await client.call_tool(bank.LOAD, {"task_id": "task_054"})
+        empty = await client.call_tool(bank.LOAD, {})
+        again = await client.call_tool("call_discoverable_agent_tool", args)
+        return loaded, first, env, reload, empty, again
+
+    loaded, first, env, reload, empty, again = _run(_with_client, server, body)
+    assert not loaded.is_error and first.is_error and "banking.cli.submit.reduce_amount" in first.content[0].text
+    for refused in (reload, empty):
+        assert refused.is_error and refused.content[0].text == bank.LOAD_LOCKED
+    assert server.session().env is env and env.tools.glint_denied  # same environment, records kept
+    assert again.is_error and again.content[0].text.endswith(REPEAT_NOTE)  # the repeat is still escalated
+    assert [e["payload"]["task_id"] for e in server.session().events.events("scenario.loaded")] == ["task_054"]
+    assert server.gated_since_load()
+    # the operator can still reset; then the agent's tool works again until the next write
+    assert not server.load_scenario(None, "task_054")[1] and not server.gated_since_load()
+    assert not server.call(None, bank.LOAD, {"task_id": "task_054"}).is_error
+
+
+def test_reads_alone_leave_the_agents_load_scenario_open(server):
+    server.call(None, "get_user_information_by_name", {"customer_name": "Sofia Papadopoulos"})
+    assert not server.gated_since_load() and not server.call(None, bank.LOAD, {"task_id": "task_054"}).is_error
 
 
 def test_a_session_log_opened_with_another_key_setting_names_the_fix(server, monkeypatch):
@@ -271,6 +309,8 @@ def test_selftest_round_trips_over_stdio_with_a_clean_stdout(capsys):
     assert bank.main(["--selftest"]) == 0
     report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
     assert report["ok"] and report["tasks"] == 97 and len(report["tools"]) == 23  # 16 τ², 5 Glint records, 2 server
+    assert (report["deny_4000"], report["deny_4000_rule"], report["allow_2500"]) == (
+        True, "banking.cli.submit.reduce_amount", True)
 
 
 def test_selftest_with_the_decision_tools_lists_them(capsys):
@@ -278,12 +318,15 @@ def test_selftest_with_the_decision_tools_lists_them(capsys):
     assert bank.main(["--decision-tools", "--selftest"]) == 0
     report = json.loads(capsys.readouterr().err.strip().splitlines()[-1])
     assert report["ok"] and bank.DECISION_TOOLS <= set(report["tools"]) and len(report["tools"]) == 27
+    assert (report["deny_4000"], report["deny_4000_rule"], report["allow_2500"]) == (
+        True, "banking.cli.submit.reduce_amount", True)
 
 
 def test_selftest_with_the_decision_tools_fails_when_they_are_missing(monkeypatch, capsys):
     async def gates_only(env, decision_tools):
         return {"tools": [f"t{i}" for i in range(17)] + [bank.LOAD, bank.POLICY], "load_error": False,
-                "policy_error": False, "policy_chars": 1, "lookup_error": False}
+                "policy_error": False, "policy_chars": 1, "lookup_error": False,
+                "verification_error": False, "deny_4000": True, "deny_4000_rule": bank.SELFTEST_RULE, "allow_2500": True}
 
     monkeypatch.setattr(bank, "_selftest_round_trip", gates_only)
     assert bank.selftest(decision_tools=False) == 0
@@ -326,9 +369,24 @@ def test_every_stdout_line_of_the_stdio_server_is_json_rpc(tmp_path):
 
 def test_selftest_fails_when_the_round_trip_does(monkeypatch, capsys):
     async def broken(env, decision_tools):
-        return {"tools": [], "load_error": True, "policy_error": False, "policy_chars": 0, "lookup_error": False}
+        return {"tools": [], "load_error": True, "policy_error": False, "policy_chars": 0, "lookup_error": False,
+                "verification_error": False, "deny_4000": True, "deny_4000_rule": bank.SELFTEST_RULE, "allow_2500": True}
 
     monkeypatch.setattr(bank, "_selftest_round_trip", broken)
+    assert bank.selftest() == 1
+
+
+@pytest.mark.parametrize("change", [{"deny_4000": False}, {"deny_4000_rule": "procedure.verified"},
+                                    {"deny_4000_rule": None}, {"allow_2500": False}, {"verification_error": True}])
+def test_selftest_fails_when_the_gate_check_does(monkeypatch, capsys, change):
+    """The self-test proves the gate, not only startup: a $4,000 increase on task_054 denied by the maximum rule, and
+    a $2,500 one allowed (indie hands-on 2.3)."""
+    async def round_trip(env, decision_tools):
+        return {"tools": [f"t{i}" for i in range(17)] + [bank.LOAD, bank.POLICY], "load_error": False,
+                "policy_error": False, "policy_chars": 1, "lookup_error": False, "verification_error": False,
+                "deny_4000": True, "deny_4000_rule": bank.SELFTEST_RULE, "allow_2500": True} | change
+
+    monkeypatch.setattr(bank, "_selftest_round_trip", round_trip)
     assert bank.selftest() == 1
 
 
@@ -409,6 +467,10 @@ def test_wrong_write_replay_denies_each_with_its_expected_rule():
     report = _run(bank_replay.wrong, json.loads(RUNS.read_text(encoding="utf-8")))
     stopped = {r["run"]: r for r in report["stopped"]}
     assert len(stopped) == report["denied_as_expected"] == 24
+    # technical 2.5: only 2 runs are stopped by their task's own policy rule; 22 stop earlier at a procedure or plan rule
+    assert (report["by_policy_rule"], report["by_procedure_rule"]) == (2, 22)
+    assert sorted(r["rule_id"] for r in stopped.values() if r["rule_id"] == r["expected_rule"]) == [
+        "banking.cli.approve", "banking.dispute"]
     assert all(r["ok"] and r["is_error"] and r["db_unchanged"] for r in stopped.values())
     # a credit card dispute needs the dispute-history read first (credit_cards_(general)_015 criterion 4): every run
     # that filed without it in its whole call list stops at that filing, task_054's base runs before their
@@ -464,6 +526,11 @@ def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_pat
     assert bank_replay.main(["--recs", str(tmp_path / "runs.json"), "--json", str(out)]) == 0
     text = capsys.readouterr().out
     assert "0 false refusals" in text and "banking.cli.submit.reduce_amount" in text
+    lines = text.strip().splitlines()
+    assert lines[-3].startswith("gold: 2 tasks") and lines[-2].startswith("wrong writes: 1 runs stopped by a deny")
+    # base trial 0 stops at a dispute filed with no dispute-history read, before its over-maximum submit
+    assert "0 by the task's expected policy rule, 1 earlier by a procedure or plan rule" in lines[-2]
+    assert lines[-1].startswith("verdict: PASS: 0 false refusals on gold")
     assert json.loads(out.read_text(encoding="utf-8"))["gold"]["tasks"] == 2
 
     known = [{"task_id": "task_091", "tool": "order_debit_card_5739", "rule_id": "debit.order.entry_wait",
@@ -489,7 +556,8 @@ def test_replay_main_prints_and_exits_by_the_result(monkeypatch, capsys, tmp_pat
 
     monkeypatch.setattr(bank_replay, "gold", refusing_gold)
     assert bank_replay.main(["--recs", str(tmp_path / "runs.json")]) == 1
-    assert "FALSE REFUSAL t x [r]" in capsys.readouterr().out
+    text = capsys.readouterr().out
+    assert "FALSE REFUSAL t x [r]" in text and text.strip().splitlines()[-1].startswith("verdict: FAIL: 1 false")
 
 
 def test_a_known_decided_refusal_is_keyed_by_task_tool_and_rule():

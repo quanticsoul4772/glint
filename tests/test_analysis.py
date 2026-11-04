@@ -167,6 +167,50 @@ def test_export_results_never_calls_the_banking_test_split_held_out():
     assert "task_052" in export_results.TUNED_GATES
 
 
+def test_export_results_says_the_untuned_decision_tool_sets_were_later_tuned():
+    # regression (claims judge round 2, 2026-11-03): the two "Banking, untuned tasks" sets of the decision-tools runs
+    # list tasks that were later tuned for the gates (by_task.TUNED); every task but 050 and 053
+    import export_results
+
+    untuned = [s for s in export_results.SETS if s[2].startswith("Banking, untuned tasks (")]
+    assert {s[2] for s in untuned} == {"Banking, untuned tasks (current tools)", "Banking, untuned tasks (earlier tools)"}
+    for s in untuned:
+        assert export_results.LATER_TUNED in s[4], s[2]
+    assert export_results.LATER_UNTUNED.isdisjoint(export_results.TUNED_GATES)
+
+
+def test_export_results_refuses_a_later_tuned_note_the_tasks_do_not_match(run_set, make_sim, monkeypatch, tmp_path):
+    import export_results
+
+    cfg = run_set({("base", "banking_knowledge"): [make_sim("task_050", 0, "fail"), make_sim("task_099", 0, "fail")],
+                   ("tools", "banking_knowledge"): [make_sim("task_050", 0, "pass"), make_sim("task_099", 0, "pass")]},
+                  k=1)
+    monkeypatch.setattr(tools_ab, "SETS", {"x": {}})
+    monkeypatch.setattr(tools_ab, "for_backend", lambda c, modal: cfg)
+    monkeypatch.setattr(export_results, "SETS", [("x", True, "X", "untuned", "a. " + export_results.LATER_TUNED)])
+    monkeypatch.setattr(export_results, "OUT", tmp_path / "results.json")
+    with pytest.raises(SystemExit, match="stayed untuned"):
+        export_results.main()
+
+
+def test_export_results_sign_tests_state_their_side_and_public_prs_use_hash():
+    # regression (claims and indie judges round 2, 2026-11-03): sign tests without "two-sided"; this repository's PRs
+    # written "PRs 29-44" beside the private record's "PR 147" (README: numbers with # are this repository's)
+    import re
+
+    import export_results
+
+    for _name, _modal, title, _role, note, *_ in export_results.SETS:
+        text = title + " " + note
+        # every sign test and every p-value says which side, within a few words of it
+        for m in re.finditer(r"sign test|p = [0-9.]+", text):
+            near = text[max(0, m.start() - 30):m.end() + 30]
+            assert "two-sided" in near or "one-sided" in near, (title, near)
+        # PR numbers without # are the private pre-swap record's; every one of those is above 100
+        for n in re.findall(r"\bPRs? (\d+)", text):
+            assert int(n) > 100, (title, n)
+
+
 def test_export_results_refuses_a_base_arm_with_other_seeds(run_set, make_sim):
     import export_results
 
