@@ -12,9 +12,11 @@ A class says what a gate reads, not whether it encodes a policy. Of the 146 bank
 | Kind | Gates | account records | agent-made records |
 |---|---|---|---|
 | Policy rules (a knowledge base clause or a written procedure step) | 60 | 43 | 17 |
-| Generated for each tool, no policy clause: same call once (`procedure_duplicate_<tool>`, 32), every identifier shown by an earlier tool result (`procedure_provenance_<tool>`, 34), the enums and bounds in the tool's own docstring (`constraints_<tool>`, 11) | 77 | 77 | 0 |
+| Generated for each tool, no policy clause: same call once (`procedure_duplicate_<tool>`, 32), every identifier shown by an earlier tool result (`procedure_provenance_<tool>`, 34), the enums and bounds in the tool's own docstring (`constraints_<tool>`, 11) | 77 | 77 (in effect 43; see below) | 0 (in effect 34) |
 | No rule yet (`no_rule_<tool>`): allows every call and logs it | 9 | 9 | 0 |
-| **All** | **146** | **129** | **17** |
+| **All** | **146** | **129 (in effect 95)** | **17 (in effect 51)** |
+
+**The 34 provenance gates are labeled `account_records` in code but can be passed by the agent (found by an audit on 2026-11-04; the code still labels them `account_records`).** They count an identifier as shown when any earlier non-error tool result contains it, and that includes the results of Glint's own added tools (the `record_*` tools, `plan_disputes`, the `check_*` tools), which repeat back what the agent sent. On task_054, a write on a made-up card id is refused by provenance, and after one `record_requests` call naming that id as its target, the same check allows it. The planned fix counts only results of τ²'s own tools. Until then, these 34 rest in effect on what the agent sends, which gives 95 account-record gates and 51 the agent can pass (corrected: this page counted 129 and 17).
 
 The 9 tools with no rule include money movement: `transfer_funds_between_bank_accounts_7291` and `pay_credit_card_from_checking_9182`, with `open_bank_account_4821` and `close_bank_account_7392`. Besides the generated checks, each of the four has only the verified-customer gate (agent-made) and the undecided credit limit increase gate; the card payment also has its request gate (agent-made).
 
@@ -38,7 +40,7 @@ The 9 tools with no rule include money movement: `transfer_funds_between_bank_ac
 - task_045: the customer accepts the retention credit and keeps the card in τ²'s gold. One `record_retention_answer` call recording a decline the customer never gave lets the close run.
 - task_084: a `record_requests` call naming a debit card the customer never mentioned, with made-up words, unlocks its close.
 
-So "a refused write never runs" holds for every gate. "The agent cannot skip the check" holds for the account-record gates. For the agent-made gates, an agent that makes up the record passes the check.
+So "a refused write never runs" holds for every gate. "The agent cannot skip the check" holds for the account-record gates other than the 34 provenance gates (above). For the agent-made gates, and for the provenance gates through an id echoed by a Glint tool, an agent that makes up the record passes the check.
 
 ## Refusals by class
 
