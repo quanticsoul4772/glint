@@ -31,6 +31,11 @@ Run: python -m glint.bank.server [--decision-tools] [--no-request-gate] [--no-un
   default (glint.gates.extend). `--no-uncovered-reminder` turns the [review] open item after a no_rule_yet write off;
   `--no-stages` turns the stages off (glint.gates.stages; the server sees no conversation, so even with a model
   configured no conversation stage has a transcript and none runs).
+- **The PreToolUse hook.** While the stdio server runs it serves its session's gate decisions on 127.0.0.1
+  (glint.bank.hook_endpoint, named by `<session dir>/hook.json`), which the Muse plugin's PreToolUse hook
+  (plugins/glint-bank/hooks/gate_check.py) asks before each write reaches the server: a second enforcement point, in
+  Muse's own permission path. `decide` runs the same gates on the same records and runs nothing; the server still
+  checks every call it receives.
 - **Results.** A gate deny and a τ² tool error both return `is_error=true` with the message text (a deny carries the
   rule, what the check found, the facts it used, why it matters, the next step and the verdict). An unknown tool is
   a protocol error.
@@ -84,6 +89,8 @@ with quiet_stdout():
 
     from glint.assist.banking import ADDRESS_TOOL, DISPUTE_ANSWERS_TOOL, PLAN_TOOL, REQUESTS_TOOL, RETENTION_TOOL
     from glint.assist.tau2_tools import assist_environment
+    from glint.bank.hook_endpoint import FILE as HOOK_FILE
+    from glint.bank.hook_endpoint import HookEndpoint
     from glint.gates import ChainBroken, Enforcer, EventLog
     from glint.gates.eventlog import KEY_ENV, install_key, log_key, recorded_scheme
     from glint.gates.stages import AUTO
@@ -301,6 +308,27 @@ class BankServer:
                 s.call_id = ""
         return _result(str(reply.content), bool(reply.error))
 
+    def decide(self, sid: str | None, name: str, arguments: dict | None, call_id: str | None = None) -> str | None:
+        """The gates' decision on a tool call before it runs, for the PreToolUse hook (glint.bank.hook_endpoint): the
+        refusal text `call` would return, or None when it would not be refused by a gate (a read, an allowed write,
+        the server's own tools, an unknown name: `call` answers those). Runs nothing; a refusal leaves the same log
+        and records as the server's own (Enforcer.precheck) and adds a hook.denied event."""
+        s = self.session(sid)
+        if name not in s.published:
+            return None
+        call = ToolCall(id=call_id or uuid.uuid4().hex, name=name, arguments=arguments or {}, requestor="assistant")
+        with s.lock, quiet_stdout():
+            s.call_id = call.id
+            try:
+                refusal = s.enforcer.precheck(s.env, call)
+            finally:
+                s.call_id = ""
+            if refusal is None:
+                return None
+            s.events.emit("hook.denied", {"tool": name, "call_id": call.id, "session_id": s.sid,
+                                          "task_id": s.task_id}, actor="glint.bank.hook")
+        return str(refusal.content)
+
     # ---- MCP ------------------------------------------------------------------------------------------------------
 
     def mcp_server(self) -> Server:
@@ -314,12 +342,18 @@ class BankServer:
 
         return Server(SERVER_NAME, instructions=INSTRUCTIONS, on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
+    def hook_endpoint(self) -> HookEndpoint:
+        """The decision endpoint for this server's session (unstarted): `<session dir>/hook.json` names it."""
+        return HookEndpoint(lambda name, args, call_id: self.decide(None, name, args, call_id),
+                            session_dir(self.home, self.sid) / HOOK_FILE)
+
     async def run_stdio(self) -> None:
         from mcp.server.stdio import stdio_server
 
         server = self.mcp_server()
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(read_stream, write_stream, server.create_initialization_options())
+        with self.hook_endpoint():
+            async with stdio_server() as (read_stream, write_stream):
+                await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 def _result(text: str, error: bool) -> types.CallToolResult:

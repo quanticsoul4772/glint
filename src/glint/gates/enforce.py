@@ -61,10 +61,11 @@ features this module owns are registered at its end; glint.gates.stages, glint.g
 (the reminders, step_warn and the transfer flag), glint.gates.request_switch (request_gate) and
 glint.gates.module_switches (entry_wait_fraud, credit_amount_mode, constraints, search_compact_after) register theirs.
 
-The gates run in the server that serves the tools (decision 2026-10-28). A Muse Code PreToolUse hook would return
-{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-"permissionDecisionReason": GateResult.message()} } to block a call (a PreToolUse deny
-blocking the call was checked in Muse Code on 2026-10-26).
+The gates run in the server that serves the tools (decision 2026-10-28). glint-bank's Muse Code PreToolUse hook
+(plugins/glint-bank/hooks/gate_check.py) is a second enforcement point in front of it: it asks the server's gates
+through `precheck` (glint.bank.hook_endpoint) and returns {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+"permissionDecision": "deny", "permissionDecisionReason": <the refusal>}} to block a denied call before Muse sends it
+(a PreToolUse deny blocking the call was checked in Muse Code on 2026-10-26).
 """
 from __future__ import annotations
 
@@ -551,6 +552,38 @@ class Enforcer:
         except Exception:
             log.exception("the check.recorded event was not logged")
 
+    def refuse(self, env, message: ToolCall, write: tuple[str, dict | None], result: GateResult) -> ToolMessage:
+        """The error reply for a denied write, after the records a refusal keeps: the cards an ask gate asked about
+        (the repeat order is the customer's choice) and the refused calls (the same call refused for the same rule
+        again gets REPEAT_NOTE)."""
+        asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
+        if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
+            asked[result.rule_id].add(str((write[1] or {}).get("credit_card_account_id", "")))
+        key = (write[0], json.dumps(write[1], sort_keys=True, default=str), result.rule_id)
+        repeat = key in env.tools.glint_denied  # the same call refused for the same rule before: escalate
+        env.tools.glint_denied.add(key)
+        content = result.message(self.wording) + (REPEAT_NOTE if repeat else "")
+        return ToolMessage(id=message.id, content=content, requestor=message.requestor, role="tool", error=True)
+
+    def precheck(self, env, message: ToolCall) -> ToolMessage | None:
+        """The refusal the attached environment's get_response would return for `message`, without running the call;
+        None when it is not a write or the gates allow it. For a check made before the call reaches the environment
+        (glint-bank's Muse Code PreToolUse hook, glint.bank.hook_endpoint).
+
+        An allow logs nothing: the call is checked, logged and attested when it runs through get_response. A deny
+        leaves the records get_response would leave: the before_call hooks run, the gates run again with their
+        gate.fired events logged, and refuse() keeps its records; so a call the hook blocks leaves the same log and
+        state as the same call refused by the server. The gates are deterministic; if the logged run allows after
+        all, None is returned and the call is checked once more when it runs."""
+        write = self.write_call(env, message)
+        if write is None or self.check(*write, env.tools.db, toolkit=env.tools, record=False).allowed:
+            return None
+        call = extend.Call(self, env, message, False)
+        extend.run("before_call", call)
+        call.write = write
+        call.result = result = self.check(*write, env.tools.db, toolkit=env.tools)
+        return None if result.allowed else self.refuse(env, message, write, result)
+
     def attach(self, env):
         """Gate this environment instance's writes. Raises when a write tool of its toolkit has no gate."""
         if getattr(env, "glint_enforcer", None) is self:
@@ -589,14 +622,7 @@ class Enforcer:
                 self._log_ran(env, write[0], raw, state["replay"])
                 reply = extend.run_reply("after_write", call, raw)
                 return extend.run_reply("reply", call, reply)
-            asked = {EXPEDITE_ASK: env.tools.glint_expedite_asked, ADDRESS_ASK: env.tools.glint_address_asked}
-            if result.rule_id in asked:  # asked once per card: the repeat order is the customer's choice
-                asked[result.rule_id].add(str((write[1] or {}).get("credit_card_account_id", "")))
-            key = (write[0], json.dumps(write[1], sort_keys=True, default=str), result.rule_id)
-            repeat = key in env.tools.glint_denied  # the same call refused for the same rule before: escalate
-            env.tools.glint_denied.add(key)
-            content = result.message(self.wording) + (REPEAT_NOTE if repeat else "")
-            return ToolMessage(id=message.id, content=content, requestor=message.requestor, role="tool", error=True)
+            return self.refuse(env, message, write, result)
 
         def set_state(*args, **kwargs):  # τ²'s evaluator replays the trajectory here: those events say replay=true
             state["replay"] = True
