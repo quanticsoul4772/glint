@@ -52,11 +52,24 @@ def test_the_gated_pairs_come_first_and_ids_never_collide():
 
 
 def test_the_desk_opens_on_the_untuned_unseen_pair_and_keeps_the_tuned_ones():
-    # regression (indie judge 2026-11-03): the desk loads the first scenario, which was the tuned task_054 pair
+    # regression (indie judge 2026-11-03): the desk loads the first scenario, which was the tuned task_054 pair;
+    # since 2026-11-03 the default is task_089, the submission video's opening run
     listing = client.get("/api/scenarios").json()
-    assert listing[0]["id"] == "task_045-unseen" and listing[0]["tuned"] is False
+    assert listing[0]["id"] == "task_089-unseen" and listing[0]["tuned"] is False
     assert "list[0].id" in client.get("/").text
-    assert {"task_054-gates", "task_054", "task_038"} <= {s["id"] for s in listing}
+    assert {"task_045-unseen", "task_054-gates", "task_054", "task_038"} <= {s["id"] for s in listing}
+
+
+def test_the_default_pair_is_one_seed_with_one_verification_refusal_and_counts_both_gated_sets():
+    s = client.get("/api/scenarios/task_089-unseen").json()
+    assert s["alone"]["trial"] == s["tools"]["trial"] == 0
+    assert not s["alone"]["outcome"]["passed"] and s["tools"]["outcome"]["passed"]
+    blocks = [e for e in s["tools"]["events"] if e["kind"] == "gate"]
+    assert [b["rule"] for b in blocks] == ["procedure.verified"]
+    assert blocks[0]["tool"] == "request_temporary_debit_card_limit_increase_8374"
+    # alone 0 of 2 (banking-unseen-gated); gated 1 of 2 there and 1 of 2 in v10
+    assert s["recorded"] == {"base": {"passed": 0, "runs": 2}, "tools": {"passed": 2, "runs": 4}}
+    assert "pressure set" in s["source"] and "1 of 2 and gated 0 of 2" in s["source"]
 
 
 def test_every_task_tuned_for_the_gates_is_labeled_tuned():
