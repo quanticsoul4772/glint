@@ -3,6 +3,7 @@ asks (glint.bank.hook_endpoint, BankServer.decide, Enforcer.precheck). The hook 
 Code 1.4.14 sent a PreToolUse hook in the live probes of 2026-10-28 (research: muse-code-plugin-and-hackathon-
 findings-2026-10-28, `muse-check/hooklog/pretooluse.jsonl`). No Muse and no model: the hook runs in-process, and once
 as a subprocess, against a real bank server's endpoint or none."""
+import http.client
 import importlib.util
 import io
 import json
@@ -259,7 +260,13 @@ def test_the_endpoint_refuses_malformed_requests(tmp_path):
         ok = {"token": endpoint.token, "tool": "log_verification", "arguments": {}}
         assert _post(endpoint.port, json.dumps(ok).encode(), "/other")[0] == 404
         assert _post(endpoint.port, b"{not json")[0] == 400
-        assert _post(endpoint.port, b"x" * (hook_endpoint.MAX_BODY + 1))[0] == 400
+        # an oversized body is refused from its Content-Length, unread (sending it would race the early answer)
+        conn = http.client.HTTPConnection("127.0.0.1", endpoint.port, timeout=10)
+        conn.putrequest("POST", "/decide")
+        conn.putheader("Content-Length", str(hook_endpoint.MAX_BODY + 1))
+        conn.endheaders()
+        assert conn.getresponse().status == 400
+        conn.close()
         assert _post(endpoint.port, json.dumps(ok | {"tool": 3}).encode())[0] == 400
         assert _post(endpoint.port, json.dumps(ok | {"arguments": "{}"}).encode())[0] == 400
         assert _post(endpoint.port, json.dumps(ok | {"token": "x"}).encode())[0] == 403

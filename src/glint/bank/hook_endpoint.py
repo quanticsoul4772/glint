@@ -73,13 +73,14 @@ class HookEndpoint:
 def _handler(endpoint: HookEndpoint) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
-            if self.path != ROUTE:
-                return self._send(404, {"error": f"unknown route {self.path}"})
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 < length <= MAX_BODY:
                 return self._send(400, {"error": "missing or oversized body"})
+            raw = self.rfile.read(length)  # read before any answer: closing on unread data resets the connection
+            if self.path != ROUTE:
+                return self._send(404, {"error": f"unknown route {self.path}"})
             try:
-                body = json.loads(self.rfile.read(length))
+                body = json.loads(raw)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 return self._send(400, {"error": "the body is not JSON"})
             if not isinstance(body, dict) or not isinstance(body.get("tool"), str):
