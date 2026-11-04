@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "glint-bank",
   "displayName": "Glint Bank",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A live τ²-bench bank as MCP tools, with every write checked by Glint's policy gates before it runs.",
   "compat": {
     "source": "native",
@@ -17,7 +17,20 @@
         "enabledDefault": true
       }
     ],
-    "hooks": [],
+    "hooks": [
+      {
+        "id": "gate-check",
+        "event": "PreToolUse",
+        "command": [
+          "uv",
+          "run",
+          "--script",
+          "hooks/gate_check.py"
+        ],
+        "timeoutMs": 10000,
+        "statusMessage": "Checking the write against Glint's policy gates"
+      }
+    ],
     "mcpServers": [
       {
         "id": "b",
