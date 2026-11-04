@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 
-from glint.assist.banking import TODAY
+from glint import clock
 from glint.gates import extend
 from glint.gates.bankdb import as_date
 from glint.gates.core import GateResult, allow, deny
@@ -46,7 +46,7 @@ def credit_note(db, tool: str, args: dict) -> str | None:
     if not user or not checking:
         return None
     today = {t.get("account_id") for t in db.bank_account_transaction_history.data.values()
-             if t.get("type") in CREDIT_TYPES and as_date(t.get("date")) == TODAY}
+             if t.get("type") in CREDIT_TYPES and as_date(t.get("date")) == clock.today()}
     credited = [a for a in checking if a in today]
     owed = [a for a in checking if a not in today]
     return (f"[policy] {CREDIT_SOURCE}: {CREDIT_TOOL} may be called ONCE per checking account per customer "

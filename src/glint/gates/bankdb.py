@@ -1,16 +1,17 @@
 """Shared reads of τ²'s banking database for the gates: the domain's clock, checking-account tiers, who owns a record,
 and what this conversation has already done (a verification, a recorded lookup, an undecided increase).
 
-"Today" is τ² banking_knowledge's fixed clock (`get_current_time` returns 2025-11-14 03:40:00 EST), so every
-date rule is deterministic.
+"Today" is the clock in effect (glint.clock): τ² banking_knowledge's fixed clock by default (`get_current_time`
+returns 2025-11-14 03:40:00 EST), or the one passed as `Enforcer(clock=...)`. Under a given clock every date rule is
+deterministic.
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
 
-from glint.assist.banking import TODAY, _date, _money
+from glint import clock
+from glint.assist.banking import _date, _money
 
-NOW_TEXT = "2025-11-14 03:40:00 EST"  # what get_current_time returns; log_verification's time_verified
 # bank_accounts_(general)_005 (personal checking) and _007 (business checking): the tier of each account level
 CHECKING_TIERS = {
     "light blue account": "entry", "light green account": "entry", "green fee-free account": "entry",
@@ -28,12 +29,12 @@ def checking_tier(account: dict) -> str | None:
 
 def days_since(value) -> int | None:
     d = _date(value) if value else None
-    return (TODAY - d).days if d else None
+    return (clock.today() - d).days if d else None
 
 
 def within_year(value) -> bool:
     d = _date(value) if value else None
-    return d is not None and d > TODAY - timedelta(days=365)
+    return d is not None and d > clock.today() - timedelta(days=365)
 
 
 def owner(db, args: dict) -> str | None:
@@ -52,7 +53,7 @@ def owner(db, args: dict) -> str | None:
 
 def verified_today(db, user_id: str) -> bool:
     """A log_verification record for this user at today's date (earlier records are from earlier conversations)."""
-    return any(r.get("user_id") == user_id and str(r.get("time_verified", "")).startswith(TODAY.isoformat())
+    return any(r.get("user_id") == user_id and str(r.get("time_verified", "")).startswith(clock.today().isoformat())
                for r in db.verification_history.data.values())
 
 

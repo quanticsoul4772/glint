@@ -2,8 +2,8 @@
 
 Rules come from τ²'s banking knowledge base documents: `credit_card_account_logistics_005`
 to `_007` (CLI tiers, order of steps, the checks before a decision), `credit_cards_(general)_014` (`card_action`) and
-`_015` (provisional credit). Reads the live `TransactionalDB`; "today" is the domain's fixed date. No language model
-is used.
+`_015` (provisional credit). Reads the live `TransactionalDB`; "today" is the clock in effect (glint.clock; τ²'s
+fixed date by default). No language model is used.
 """
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ import json
 import re
 from datetime import date, datetime
 
+from glint import clock
 from glint.assist import as_flag
 
-TODAY = date(2025, 11, 14)
 CLI_TIERS = {  # account age days, cooldown days, utilization must be below, on-time payments, max increase share
     "entry": {"age": 120, "cooldown": 120, "utilization": 0.70, "on_time": 6, "max_increase": 0.25},
     "mid": {"age": 90, "cooldown": 90, "utilization": 0.80, "on_time": 3, "max_increase": 0.50},
@@ -110,7 +110,7 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
         return out
 
     opened = _date(acc.get("date_of_account_open"))
-    age = (TODAY - opened).days if opened else None
+    age = (clock.today() - opened).days if opened else None
     # Cooldown (logistics_005): counted from the submission date of the most recent request, and only when that
     # request was approved ("Denied requests do not trigger a cooldown period")
     dated = [(d, r) for r in _rows(db.credit_limit_increase_requests, credit_card_account_id=credit_card_account_id)
@@ -131,7 +131,7 @@ def check_credit_limit_increase(db, user_id: str, credit_card_account_id: str, r
     checks = [  # Step 2, in the order the policy lists
         ("insufficient_account_age", age is not None and age >= rules["age"],
          f"account age {age} days, needs {rules['age']}"),
-        ("cooldown_period_active", last_increase is None or (TODAY - last_increase).days >= rules["cooldown"],
+        ("cooldown_period_active", last_increase is None or (clock.today() - last_increase).days >= rules["cooldown"],
          f"last approved increase {last_increase}, cooldown {rules['cooldown']} days"),
         ("pending_disputes", not disputes, f"open disputes {disputes}"),
         ("pending_replacement_card", not orders, f"replacement orders not delivered or cancelled {orders}"),
@@ -156,7 +156,7 @@ def replacements_today(db, credit_card_account_id: str) -> list[str]:
     """Replacement orders for this card placed today (in this conversation): its disputes use cancel_and_reissue
     (credit_cards_(general)_014 card_action)."""
     return [r["order_id"] for r in _rows(db.credit_card_orders, credit_card_account_id=credit_card_account_id)
-            if _date(r.get("order_date")) == TODAY]
+            if _date(r.get("order_date")) == clock.today()]
 
 
 def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id: str, dispute_reason: str,
@@ -190,14 +190,14 @@ def check_dispute(db, user_id: str, credit_card_account_id: str, transaction_id:
         out["ask_user"].append("Did you try to resolve this with the merchant first? (ask for every transaction)")
     tier = _tier(acc.get("card_type", ""))
     opened, purchased = _date(acc.get("date_of_account_open")), _date(txn.get("transaction_date"))
-    year_ago = TODAY.replace(year=TODAY.year - 1)
+    year_ago = clock.today().replace(year=clock.today().year - 1)
     filed = [r for r in _rows(db.transaction_disputes, user_id=user_id)
              if (d := _date(r.get("submitted_at"))) and d > year_ago and r.get("transaction_id") != transaction_id]
     criteria = {
-        "account_open_60_days": opened is not None and (TODAY - opened).days >= 60,
+        "account_open_60_days": opened is not None and (clock.today() - opened).days >= 60,
         "reason_qualifies": dispute_reason in PROVISIONAL_REASONS and (
             dispute_reason != "goods_services_not_received"
-            or (purchased is not None and (TODAY - purchased).days > 30)),
+            or (purchased is not None and (clock.today() - purchased).days > 30)),
         "amount_in_range": tier in PROVISIONAL_MAX and 25.0 <= out["amount"] <= PROVISIONAL_MAX[tier],
         "at_most_2_disputes_past_12_months": len(filed) + planned_before <= 2,
         "merchant_contacted_if_not_fraud": fraud or bool(contacted_merchant),
@@ -327,16 +327,20 @@ STATEMENT_CREDIT_TOOL = "apply_statement_credit_8472"
 WAIVER_TOOL = "apply_credit_card_account_flag_6147"
 WAIVER_FLAG = "annual_fee_waived"
 WAIVER_TENURE_YEARS = 2  # credit_card_account_logistics_003 step 4: "a customer for 2+ years"
-WAIVER_EXPIRES = TODAY.replace(year=TODAY.year + 1).strftime("%m/%d/%Y")  # step 4: "a date a year from today"
+
+
+def waiver_expires() -> str:
+    """credit_card_account_logistics_003 step 4: "a date a year from today", by the clock in effect."""
+    return clock.today().replace(year=clock.today().year + 1).strftime("%m/%d/%Y")
 
 
 def closure_reasons(db, credit_card_account_id: str) -> tuple[list[dict], list[dict]]:
     """(closure reasons logged today, earlier ones within the past year) for this credit card account."""
     rows = [r for r in db.credit_card_closure_reasons.data.values()
             if r.get("credit_card_account_id") == credit_card_account_id]
-    today = [r for r in rows if _date(r.get("logged_at")) == TODAY]
+    today = [r for r in rows if _date(r.get("logged_at")) == clock.today()]
     earlier = [r for r in rows if r not in today and (d := _date(r.get("logged_at"))) is not None
-               and (TODAY - d).days < 365]
+               and (clock.today() - d).days < 365]
     return today, earlier
 
 
@@ -367,13 +371,13 @@ def waiver_due(db, credit_card_account_id: str) -> date | None:
     if not any(r.get("closure_reason") == "annual_fee" for r in today) or waiver_applied(db, credit_card_account_id):
         return None
     since = customer_since(db, str(acc.get("user_id", "")))
-    cutoff = TODAY.replace(year=TODAY.year - WAIVER_TENURE_YEARS)
+    cutoff = clock.today().replace(year=clock.today().year - WAIVER_TENURE_YEARS)
     return since if since is not None and since <= cutoff else None
 
 
 def waiver_call(credit_card_account_id: str, user_id: str) -> str:
     return (f"{WAIVER_TOOL}(credit_card_account_id={credit_card_account_id!r}, user_id={user_id!r}, "
-            f"flag_type={WAIVER_FLAG!r}, expiration_date={WAIVER_EXPIRES!r}, reason='loyalty_benefit')")
+            f"flag_type={WAIVER_FLAG!r}, expiration_date={waiver_expires()!r}, reason='loyalty_benefit')")
 
 
 def record_retention_answer(db, credit_card_account_id: str, user_id: str, offer: str, accepted: bool,
@@ -518,9 +522,9 @@ def noticed_date(value) -> tuple[str | None, str]:
             day = datetime.strptime(text, fmt).date()
         except ValueError:
             continue
-        if day > TODAY:
-            return None, (f"issue_noticed_date {text!r} is after today ({TODAY:%m/%d/%Y}, get_current_time); if the "
-                          f"customer noticed the charge today, plan {TODAY:%m/%d/%Y}")
+        if day > clock.today():
+            return None, (f"issue_noticed_date {text!r} is after today ({clock.today():%m/%d/%Y}, get_current_time); "
+                          f"if the customer noticed the charge today, plan {clock.today():%m/%d/%Y}")
         return day.strftime("%m/%d/%Y"), ""
     return None, f"issue_noticed_date {text!r} is not a date (MM/DD/YYYY)"
 
@@ -611,7 +615,7 @@ def plan_disputes(db, user_id: str, transactions: list[dict], other_requests: li
     dispute fails the increase (credit_card_account_logistics_005 criterion 3), and in banking-plan-v8-gated 054
     trial 3 the dispute went first and the increase was denied for it. Reads the live database only; deterministic."""
     user_id = str(user_id or "")
-    year_ago = TODAY.replace(year=TODAY.year - 1)
+    year_ago = clock.today().replace(year=clock.today().year - 1)
     on_record = [r for r in _rows(db.transaction_disputes, user_id=user_id)
                  if (d := _date(r.get("submitted_at"))) and d > year_ago]
     disputed = {r.get("transaction_id") for r in _rows(db.transaction_disputes, user_id=user_id)}
@@ -682,7 +686,7 @@ def plan_disputes(db, user_id: str, transactions: list[dict], other_requests: li
             # credit_cards_(general)_014 field 11 is the customer's answer; banking-plan-v5-gated task_054 trial 2
             # filed today's 11/14/2025 for a charge the customer noticed on 11/12/2025 (its simulations file). The
             # question names today's date: asked without it, the v6 user simulator gave the real-world date for "today"
-            questions.append(f"When did you first notice the {tid} charge? (Today is {TODAY:%m/%d/%Y}.)")
+            questions.append(f"When did you first notice the {tid} charge? (Today is {clock.today():%m/%d/%Y}.)")
         if entry["card_action"] is None:
             # credit_cards_(general)_014 card_action is the customer's choice; in banking-plan-v5-gated task_039
             # trials 2-3 filed all 8 disputes with the wrong card_action and trials 0-1 never ordered the replacement

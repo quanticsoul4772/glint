@@ -22,8 +22,9 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 
+from glint import clock
 from glint.assist import as_flag
-from glint.assist.banking import DISPUTE_ANSWERS_TOOL, TODAY
+from glint.assist.banking import DISPUTE_ANSWERS_TOOL
 from glint.gates.bankdb import as_date, checking_tier, days_since, money
 from glint.gates.core import GateResult, allow, deny
 
@@ -144,7 +145,7 @@ def close(db, a: dict) -> GateResult:
 
 def _replacements_in_year(cards: list[dict]) -> list[dict]:
     return [c for c in cards if c.get("issue_reason") in REPLACEMENT_REASONS
-            and (d := as_date(c.get("issue_date"))) is not None and d > TODAY - timedelta(days=365)]
+            and (d := as_date(c.get("issue_date"))) is not None and d > clock.today() - timedelta(days=365)]
 
 
 def order(db, a: dict) -> GateResult:
@@ -255,7 +256,7 @@ def activate(tool: str):
                         "it.", details, consequence="The card's status is unchanged; tell the customer its current "
                         "status.", facts=[f"card {a['card_id']}: {card.get('status')}"])
         expires = as_date(card.get("expiration_date"))
-        if expires is not None and expires < TODAY:
+        if expires is not None and expires < clock.today():
             return deny("debit.activate.expired", source, "an expired card cannot be activated", "Do not activate "
                         "it; the customer needs a new card.", details,
                         consequence="The customer needs a replacement card; offer to order one.",
@@ -403,7 +404,7 @@ def dispute_provisional_credit(db, a: dict) -> GateResult:
     account = db.accounts.data.get(a.get("account_id", "")) or {}
     tx = db.bank_account_transaction_history.data.get(a.get("transaction_id", "")) or {}
     when = _when(tx.get("date")) or _when(a.get("transaction_date"))
-    age = (TODAY - when.date()).days if when else None
+    age = (clock.today() - when.date()).days if when else None
     opened = days_since(account.get("date_opened"))
     pin = a.get("pin_compromised")
     online = category == "card_not_present_fraud" or a.get("transaction_type") == "online_purchase"

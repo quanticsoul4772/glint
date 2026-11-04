@@ -77,6 +77,7 @@ from dataclasses import replace
 from tau2.data_model.message import ToolCall, ToolMessage
 from tau2.environment.toolkit import ToolType
 
+from glint import clock
 from glint.assist import as_flag
 from glint.assist.banking import (
     ADDRESS_TOOL,
@@ -87,7 +88,6 @@ from glint.assist.banking import (
     REQUESTS_TOOL,
     RETENTION_TOOL,
     STATEMENT_CREDIT_TOOL,
-    TODAY,
     _date,
     _tier,
     closure_reasons,
@@ -165,7 +165,7 @@ def _open_items(tools, request_gate: bool = True) -> list[str]:
                      f"({NO_RULE_REASONS.get(tool, 'no rule yet')}): confirm with the customer that it is what they "
                      "asked for")
     verified = [r.get("user_id") for r in db.verification_history.data.values()
-                if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
+                if str(r.get("time_verified", "")).startswith(clock.today().isoformat())]
     if request_gate and verified and getattr(tools, "glint_requests", "absent") is None:
         # banking-test-gated (2026-11-02): the request gate refused 17 writes τ² expects before the agent recorded
         # them; this reminder comes before the first account change instead of after a refusal
@@ -189,7 +189,7 @@ def _closure_items(tools) -> list[str]:
     asked = [str(r.get("target_id") or "") for r in getattr(tools, "glint_requests", None) or []
              if r.get("action") == "close_credit_card"]
     logged_today = {str(r.get("credit_card_account_id")) for r in db.credit_card_closure_reasons.data.values()
-                    if _date(r.get("logged_at")) == TODAY}
+                    if _date(r.get("logged_at")) == clock.today()}
     cards = sorted({c for c in asked if c} | set(retention) | logged_today)
     for card in cards:
         acc = accounts.get(card)
@@ -207,7 +207,7 @@ def _closure_items(tools) -> list[str]:
                          f"{waiver_call(card, user)}")
         if answer and answer.get("accepted") and "point" not in str(answer.get("offer", "")).lower():
             credited = any(r.get("credit_card_account_id") == card and r.get("credit_reason") == "retention_offer"
-                           and _date(r.get("transaction_date")) == TODAY
+                           and _date(r.get("transaction_date")) == clock.today()
                            for r in db.credit_card_transaction_history.data.values())
             amount = RETENTION_CREDIT.get(_tier(str(acc.get("card_type", ""))))
             if not credited:
@@ -284,6 +284,12 @@ class Enforcer:
 
     def check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None,
               record: bool = True) -> GateResult:
+        """_check under the enforcer's clock (the `clock` option)."""
+        with clock.using(self.clock):
+            return self._check(tool, args, db, replay, toolkit, record)
+
+    def _check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None,
+               record: bool = True) -> GateResult:
         """Run every gate on the write; the first deny wins. Each gate's decision is logged as gate.fired. A gate with
         `toolkit=True` gets `toolkit` (the environment's toolkit) instead of `db`. The returned allow carries every
         passing gate's note, which get_response appends to the tool's reply. `record` False logs no gate.fired and no
@@ -574,7 +580,12 @@ class Enforcer:
         leaves the records get_response would leave: the before_call hooks run, the gates run again with their
         gate.fired events logged, and refuse() keeps its records; so a call the hook blocks leaves the same log and
         state as the same call refused by the server. The gates are deterministic; if the logged run allows after
-        all, None is returned and the call is checked once more when it runs."""
+        all, None is returned and the call is checked once more when it runs. Runs under the enforcer's clock, as
+        get_response does."""
+        with clock.using(self.clock):
+            return self._precheck(env, message)
+
+    def _precheck(self, env, message: ToolCall) -> ToolMessage | None:
         write = self.write_call(env, message)
         if write is None or self.check(*write, env.tools.db, toolkit=env.tools, record=False).allowed:
             return None
@@ -608,7 +619,11 @@ class Enforcer:
         env.tools.glint_address_confirmed = {}  # card -> the shipping address recorded with record_address_confirmation
         extend.run("attach", self, env)  # each feature's own records (glint.gates.extend)
 
-        def get_response(message: ToolCall) -> ToolMessage:
+        def get_response(message: ToolCall) -> ToolMessage:  # every gate, record and reply under the enforcer's clock
+            with clock.using(self.clock):
+                return respond(message)
+
+        def respond(message: ToolCall) -> ToolMessage:
             call = extend.Call(self, env, message, state["replay"])
             extend.run("before_call", call)
             call.write = write = self.write_call(env, message)
@@ -629,7 +644,8 @@ class Enforcer:
             messages = args[2] if len(args) > 2 else kwargs.get("message_history")
             env.glint_seen_before, texts = aids.seen_before(messages)
             try:
-                return original_set_state(*args, **kwargs)
+                with clock.using(self.clock):
+                    return original_set_state(*args, **kwargs)
             finally:
                 state["replay"] = False
                 env.glint_seen_before, env.tools.glint_seen = {}, list(texts)
@@ -649,6 +665,15 @@ def _setup_wording(enforcer: Enforcer, wording: str) -> None:
 
 extend.option("wording", "plain", "how a refusal is worded to the agent (glint.gates.core.WORDINGS)", order=10,
               owner=__name__, setup=_setup_wording, manifest=lambda enforcer, wording: {"wording": wording})
+def _setup_clock(enforcer: Enforcer, value: clock.Clock) -> None:
+    if not isinstance(value, clock.Clock):
+        raise TypeError(f"clock must be a glint.clock.Clock, not {type(value).__name__}")
+    enforcer.clock = value
+
+
+extend.option("clock", clock.TAU2_BANKING, "the date and time the gates, open items and decision tools read "
+              "(glint.clock); τ²'s environment time by default", order=70, owner=__name__, setup=_setup_clock,
+              manifest=lambda enforcer, c: {} if c == clock.TAU2_BANKING else {"clock": c.text})
 extend.option("uncovered_reminder", True, "research appendix #15: a [review] open item for each no_rule_yet write "
               "that ran; on by default (owner's decision, 2026-11-03)", order=30, owner=__name__,
               manifest=lambda enforcer, on: {"uncovered_reminder": True} if on else {})

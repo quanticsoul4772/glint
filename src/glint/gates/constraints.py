@@ -21,7 +21,7 @@ import inspect
 import re
 from functools import lru_cache
 
-from glint.gates.core import Gate, GateRegistry, GateResult, allow, deny
+from glint.gates.core import ACCOUNT_RECORDS, Gate, GateRegistry, GateResult, allow, deny
 
 ENABLED = True
 SOURCE = "τ² banking tool docstrings (tau2.domains.banking_knowledge.tools)"
@@ -113,4 +113,4 @@ def register(reg: GateRegistry, domain: str) -> None:
         return
     for tool in sorted(tool_constraints()):
         reg.register(Gate(f"constraints_{tool}", (tool,), "The enums and bounds in the tool's own docstring.",
-                          gate(tool)))
+                          gate(tool), checks=ACCOUNT_RECORDS))
