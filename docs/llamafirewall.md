@@ -57,5 +57,65 @@ Verified:
   - the same call for $2,500 was `ALLOW`, score 0.0;
   - the database's credit-limit requests were the same before and after, so neither scan ran the write.
 
+## Recorded Glimmer tool calls through LlamaFirewall (2026-11-03)
+
+`scripts/lf_replay.py` put every recorded tool call of the Glint arm in the four gated banking sets (v9, the unseen set
+from its lean copy, v10, the pressure set; 314 runs that count as results) through LlamaFirewall 1.0.3 with only the
+`glint_gates` scanner. It ran on CPU with no model and no network, in a separate venv with Glint from source (this
+branch, off `6502f11`). Each run was replayed in a fresh environment at the task's initial state, with the tools
+arm's decision tools and a current-code Enforcer (stages off). Every call was sent in its recorded order. Before each
+gated assistant call ran, LlamaFirewall scanned an `AssistantMessage` carrying that recorded call, so the call was
+judged on the database as it was just before it ran live. The database followed the recorded run: a call the live
+gate allowed was run, and a call it refused was not.
+
+The live decision is read from the recorded tool reply: a gate refusal is a deny, or a hold under the two ask rules;
+anything else is an allow.
+
+| | Gated calls | Agree with the live gate | Writes agree |
+|---|---|---|---|
+| Current gates | 1,082 (964 writes, 118 transfers or give-tool calls) | 828 (76.5%) | 711 of 964 |
+| Current gates, request gate off (`--no-request-gate`) | 1,082 | 995 (92.0%) | 878 of 964 |
+
+- **Every live refusal and hold was matched.** All 90 live denies were `BLOCK` and all 23 live holds were
+  `HUMAN_IN_THE_LOOP_REQUIRED`, both scores 1.0. That is the 113 live refusals of the four-set evaluation (109 write
+  calls, 4 transfers). Every live `ALLOW` that LlamaFirewall also allowed had score 0.0.
+- **Every disagreement is a live allow that LlamaFirewall blocks**, under a rule added or tightened after the runs
+  were recorded. No live refusal was allowed. With the current gates there are 254 disagreements in 98 runs of 25
+  tasks (v9 8, unseen 82, v10 90, pressure 74):
+
+  | Rule (current code) | Calls |
+  |---|---|
+  | `banking.request.no_record`: the request gate (research row 6). None of the four sets had it or its `record_requests` tool live | 171 |
+  | `banking.savings_credit.amount` | 16 |
+  | `banking.retention.no_answer` | 15 |
+  | `banking.interest_report.expected_apy` | 12 |
+  | `banking.checking_credit.amount_unmatched` | 7 |
+  | `debit.dispute.liability_zero` | 6 |
+  | `debit.dispute.duplicate.earliest` | 6 |
+  | `banking.interest_report.amount` | 5 |
+  | `debit.dispute.open_limit` | 4 |
+  | `debit.dispute.provisional_credit` | 3 |
+  | `banking.verification.once` | 3 |
+  | `banking.closure_reason.already_on_record` | 3 |
+  | `debit.order.entry_wait` | 2 |
+  | `glint.duplicate_write` (a repeated `give_discoverable_user_tool`) | 1 |
+
+  With the request gate off there are 87 disagreements in 52 runs of 15 tasks (v9 1, unseen 30, v10 27, pressure
+  29): the same 83 calls under the other rules, plus 4 `constraints.value` refusals that the request gate had
+  refused first. The script prints each disagreement with its set, task, trial, message index, tool and both rules.
+- **The scanner path matches the gated environment.** On all 1,082 calls, LlamaFirewall's decision equals the
+  decision the gated environment made when the same call was sent through it.
+- **The replayed state matched the recording.** Of 18,316 other tool calls, 0 replies differ from the recorded
+  reply in error status. Of the live-allowed gated calls, 0 differ either. No call the live gate refused ran in the
+  replay. 254 live-allowed calls that the current gates refuse (87 with the request gate off) were run through τ²'s
+  own tool instead, so the database kept following the recording.
+
+What this shows and what it does not:
+- Real Glimmer tool calls, 1,082 of them, went through `LlamaFirewall.scan`, and on every recorded refusal LlamaFirewall
+  returned the decision the live gate made. The live-allow disagreements measure rule changes since the runs, not the
+  scanner.
+- These are scans of recorded calls. No agent loop acted on the decisions, and the host-loop question below stays
+  open.
+
 Not verified:
 - **Blocking before execution in a host agent loop.** Whether a host stops a single tool call on the scanner's `BLOCK` depends on the host calling `LlamaFirewall.scan` before it runs the call. This is design §9's open question, and it remains open.
