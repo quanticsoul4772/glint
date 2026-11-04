@@ -104,9 +104,12 @@ def _new_session(task_id: str) -> live.LiveSession:
 
 @app.get("/api/live/status")
 def live_status():
-    # public route: says whether live mode can run, never which settings are missing (the app log names them)
+    # public route: says whether live mode can run, never which settings are missing (the app log names them); when it
+    # cannot, nothing else (the hosted desk runs with live mode off, and its internals are no one's business)
+    if not all(os.environ.get(k) for k in LIVE_ENV):
+        return {"available": False}
     running = [s.id for s in _sessions.values() if not s.done]
-    return {"available": all(os.environ.get(k) for k in LIVE_ENV),
+    return {"available": True,
             "fallback_available": all(os.environ.get(k) for k in FALLBACK_ENV), "running": running,
             "pairs_today": budget.pairs_today(), "pairs_per_day": budget.pairs_per_day}
 

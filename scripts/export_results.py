@@ -23,6 +23,9 @@ TUNED_BANKING = {"task_038", "task_054"}  # the tools were refined after reading
 # the gates, the dispute plan and the open items were shaped by these tasks' runs or gold: 037-041, 054, 081, and
 # since 2026-10-30 031, 051 and 052
 TUNED_GATES = set(by_task.TUNED)
+# the "untuned" sets of the decision-tools runs predate the gates; every task in them but these two is in TUNED_GATES
+LATER_UNTUNED = {"task_050", "task_053"}
+LATER_TUNED = "All but 050 and 053 were later tuned for the gates (see the tuned v9 set above)."
 # a tools-only set -> the set whose base arm it is compared with (same tasks, trials and seeds; checked in main)
 BASE_FROM = {"banking-plan-v9-gated": "banking-plan-gated", "banking-unseen-v10-gated": "banking-unseen-gated",
              "banking-test-v2-gated": "banking-test-gated"}
@@ -32,23 +35,24 @@ GATED_NOTE = ("Glint's decision tools with every write gated (a denied write doe
               "compared with one baseline draw. Later changes (PR 148, PR 149: refusal wording and which requests count "
               "as a credit limit increase) are not in this run. k=4. Glimmer on Modal.")
 # The banking test split is design data: some debit rules came from its failures on 2026-10-28, and the rules of
-# PRs 29-44 were designed from its 2026-11-02 gated run. Every set on it is labeled tuned or design, never held-out.
-TEST_SPLIT_DESIGN = ("The rules of PRs 29-44 were designed from this split's 2026-11-02 gated run, so the split is "
+# #29-#44 were designed from its 2026-11-02 gated run. Every set on it is labeled tuned or design, never held-out.
+# PR numbers: "#29" is this repository's PR, "PR 147" (no #) the private pre-swap record's (README).
+TEST_SPLIT_DESIGN = ("The rules of #29-#44 were designed from this split's 2026-11-02 gated run, so the split is "
                      "design data and no held-out banking test result is possible from here on.")
 SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned and untuned tasks are never pooled
     ("banking-test-v2-gated", True,
      "Banking test split, gated arm after the rules designed from it (2026-11-03; tuned, in-sample)", "tuned",
-     ("τ²'s 20 banking test tasks, k=2, the gated tools arm only, on the code with every fix on (main at 7bf75cb, PRs "
-      "29-45). Its alone column is the 2026-11-02 alone arm of the run below: a cross-day comparison, and the alone "
+     ("τ²'s 20 banking test tasks, k=2, the gated tools arm only, on the code with every fix on (main at 7bf75cb, "
+      "#29-#45). Its alone column is the 2026-11-02 alone arm of the run below: a cross-day comparison, and the alone "
       "arm was not rerun. Tuned and in-sample: " + TEST_SPLIT_DESIGN + " Passes 11/40 vs alone's 7/40, by task 3 "
       "better, 0 worse (sign test p = 0.25, two-sided); may be chance. Against τ²'s offline re-grade of the alone "
-      "arm (10/40), 3 better, 1 worse (p = 0.63). Not re-graded. Step-limit endings 6 (the 2026-11-02 gated arm: 14). "
-      "The gate refused 40 writes; 25 refused a write τ² expects, and 4 of those 25 were false against gold "
+      "arm (10/40), 3 better, 1 worse (sign test p = 0.63, two-sided). Not re-graded. Step-limit endings 6 (the "
+      "2026-11-02 gated arm: 14). The gate refused 40 writes; 25 refused a write τ² expects, and 4 of those 25 were false against gold "
       "(request, verification once x2, closure reason). Glimmer on Modal.")),
-    ("banking-test-gated", True, "Banking test split, every write gated (2026-11-02; design data for PRs 29-44)",
+    ("banking-test-gated", True, "Banking test split, every write gated (2026-11-02; design data for #29-#44)",
      "tuned",
      ("τ²'s 20 banking test tasks, k=2, Glimmer alone vs Glimmer with the gates and decision tools, on the "
-      "code after PRs 20-25 (the request record, the retention answer, the savings interest rules). Some debit "
+      "code after #20-#25 (the request record, the retention answer, the savings interest rules). Some debit "
       "rules were written from this split's failures on 2026-10-28, and every conversation of this run was then "
       "read: " + TEST_SPLIT_DESIGN + " Passes 7/40 vs 7/40 (by task 2 better, 2 worse). "
       "Writes that differ from τ²'s expected ones: 34 alone vs 25 gated, extra writes 13 vs 4 (by task 5 fewer, 2 "
@@ -71,7 +75,7 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
       "not expect and are not judged.")),
     ("banking-plan-v9-gated", True, "Banking, untuned tasks, write gates enforced (v9)", "untuned",
      ("Tasks 050 and 053, which no gate, plan or open-item change came from. 053's failures are likely the simulated "
-      "customer's answers (not checked); two tasks cannot reach p < 0.05 by sign test. " + GATED_NOTE),
+      "customer's answers (not checked); two tasks cannot reach p < 0.05 by a two-sided sign test. " + GATED_NOTE),
      lambda task: task not in TUNED_GATES),
     ("banking-plan-v9-gated", True, "Banking, tuned tasks, write gates enforced (v9)", "tuned",
      ("Tasks 031, 037-041, 051, 052, 054 and 081: the gates, the dispute plan and the open items were shaped by "
@@ -87,9 +91,9 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
     ("heldout2", True, "Retail and airline, held-out tasks (current tools)", "held-out",
      ("A fresh random draw of 10 retail and 10 airline tasks, excluding the design tasks, the whole failure "
       "inventory and the first draw; no tool change came from these tasks. Run on the current tools. By task: 2 "
-      "improved, 14 tied, 4 worse (sign test p = 0.69); on retail 0 improved and 3 worse. 2 of the 5 retail "
-      "failures with the tools were caused by find_variants matching option names as exact strings. k=4. Glimmer "
-      "on Modal.")),
+      "improved, 14 tied, 4 worse (sign test p = 0.69, two-sided); on retail 0 improved and 3 worse. 2 of the 5 "
+      "retail failures with the tools were caused by find_variants matching option names as exact strings. k=4. "
+      "Glimmer on Modal.")),
     ("heldout", False, "Retail and airline, first held-out draw (now design data)", "design",
      ("Tasks drawn at random, excluding the tasks the tools were built from. The draw missed part of the failure "
       "inventory, so retail task 21 (already in it) is included. The two arms span four code commits (resumed runs). "
@@ -99,7 +103,8 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
     ("banking", True, "Banking, untuned tasks (current tools)", "untuned",
      ("The 10 banking tasks with a dispute or credit-limit step that no tool change came from, on the current tools "
       "(after commit 7789817). The tools' rules were checked against these tasks' correct answers, so they are not "
-      "fully held-out. By task: 3 improved, 7 tied, 0 worse (sign test p = 0.25). k=4. Glimmer on Modal."),
+      "fully held-out. " + LATER_TUNED + " By task: 3 improved, 7 tied, 0 worse (sign test p = 0.25, two-sided). "
+      "k=4. Glimmer on Modal."),
      lambda task: task not in TUNED_BANKING),
     ("banking", True, "Banking, tuned tasks (current tools)", "tuned",
      ("Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their "
@@ -108,8 +113,8 @@ SETS = [  # (set, Modal backend, title, role, note[, only these tasks]): tuned a
     ("banking-other", True, "Banking, untuned tasks (earlier tools)", "untuned",
      ("The banking tasks with a dispute or credit-limit step that no tool change came from. The tools' rules were "
       "checked against these tasks' correct answers, so they are not fully held-out. These runs predate the verdict "
-      "fixes of commit 7789817 (2026-10-27 16:59). 2 improved vs 0 worse is a sign test of p = 0.5. k=2. Glimmer "
-      "on Modal.")),
+      "fixes of commit 7789817 (2026-10-27 16:59). " + LATER_TUNED + " 2 improved vs 0 worse is a two-sided sign "
+      "test of p = 0.5. k=2. Glimmer on Modal.")),
     ("banking-failures", True, "Banking, tuned tasks (earlier tools)", "tuned",
      ("Tasks 038 and 054: chosen because Glimmer had failed them, and the tools were refined after reading their "
       "runs. Do not read as general evidence. These runs predate the verdict fixes of commit 7789817. k=4. Glimmer "
@@ -205,6 +210,10 @@ def main():
         runs = {arm: [sum(report[k][arm]["passes"] for k in compared), sum(report[k][arm]["runs"] for k in compared)]
                 for arm in ("base", "tools")}
         both = matched(base_cfg, cfg, compared)
+        untuned_now = {key.split("-", 1)[1] for key in compared} - TUNED_GATES
+        if LATER_TUNED in note and untuned_now != LATER_UNTUNED:
+            raise SystemExit(f"{name}: the note says only {sorted(LATER_UNTUNED)} stayed untuned, but the set's tasks "
+                             f"outside by_task.TUNED are {sorted(untuned_now)}")
         out.append({"set": name, "title": title, "role": role, "note": note, "tasks": rows, "by_task": tally,
                     "runs": {"alone": runs["base"], "tools": runs["tools"]}, "matched": both})
         print(f"{name}: {tally}, runs alone {runs['base']}, with tools {runs['tools']}, matched {both}")
