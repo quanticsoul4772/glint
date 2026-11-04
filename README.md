@@ -8,7 +8,7 @@
 [![coverage 97% (CI on main)](https://img.shields.io/badge/coverage-97%25-brightgreen)](docs/testing-strategy.md "coverage 97% (CI on main)")
 [![license MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-### ▶ [Hackathon submission video: Glint demo (2:36)](https://youtu.be/Da2YCnBoEfk)
+### ▶ [Hackathon submission video: Glint demo (2:50)](https://youtu.be/L6PhtP6KedU)
 Meta Global AI Developer Hackathon · Indie track · Push the Frontier
 
 ![Glint blocks a $4,000 credit-limit increase, returns the fix, and the $2,500 request runs](docs/demo.gif)
