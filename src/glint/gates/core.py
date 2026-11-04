@@ -8,6 +8,7 @@ deterministic, because τ²'s evaluator replays the agent's writes through the s
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import time
@@ -89,7 +90,8 @@ GateFn = Callable[[Any, dict], GateResult]
 # and the record of tool calls that actually ran in the conversation; a misbehaving agent cannot make such a gate allow
 # a write without changing what the database or a real tool result shows. AGENT_RECORDS: at least one of its checks
 # is passed by what the agent itself states the customer said (a record_* call, the customer's answers in a
-# plan_disputes call) or by repeating a refused call (an ask-once check). Nothing compares those statements with the
+# plan_disputes call, the details in a log_verification call, which the agent can copy from its own lookup) or by
+# repeating a refused call (an ask-once check). Nothing compares those statements with the
 # conversation unless a conversation stage is configured, so an agent that makes them up passes these checks.
 ACCOUNT_RECORDS, AGENT_RECORDS = "account_records", "agent_records"
 CHECKS = (ACCOUNT_RECORDS, AGENT_RECORDS)
@@ -99,14 +101,15 @@ CHECKS = (ACCOUNT_RECORDS, AGENT_RECORDS)
 class Gate:
     """One gate. `fn(db, args)` judges the write; with `toolkit=True` it gets the environment's toolkit instead of its
     database (a procedure gate reads `toolkit.db` and which hidden reads that environment records). `checks` says
-    what its decision rests on (CHECKS)."""
+    what its decision rests on (CHECKS); it is a required keyword with no default, so a gate nobody labeled cannot
+    be built, and so cannot be registered, rather than counting as the stronger class."""
     name: str
     tools: tuple[str, ...]
     purpose: str
     fn: GateFn
     timeout_s: float = DEFAULT_TIMEOUT_S
     toolkit: bool = False
-    checks: str = ACCOUNT_RECORDS
+    checks: str = field(kw_only=True)
 
 
 class GateRegistry:
@@ -163,7 +166,7 @@ def run_gate(gate: Gate, db, args: dict, wait: bool = False) -> tuple[GateResult
     the error. Returns the result and the duration in milliseconds. With `wait=True` (τ²'s evaluator replay) there is
     no wall-clock timeout, so the replayed decision depends only on the database and the arguments."""
     start = time.perf_counter()
-    future = _POOL.submit(gate.fn, db, args)
+    future = _POOL.submit(contextvars.copy_context().run, gate.fn, db, args)  # the caller's clock (glint.clock)
     try:
         result = future.result(timeout=None if wait else gate.timeout_s)
     except FutureTimeout:

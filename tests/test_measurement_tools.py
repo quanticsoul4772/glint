@@ -188,7 +188,8 @@ def test_a_close_debit_card_request_covers_the_order_on_the_closed_cards_account
 def test_no_closure_reason_log_is_due_when_a_reason_is_already_on_record():
     """Defect 4 (2026-11-03): credit_card_account_logistics_003 step 2 skips the reason log when a reason is on record
     within the past year; the grader required it anyway."""
-    from glint.assist.banking import TODAY
+    from glint.clock import TAU2_BANKING
+    TODAY = TAU2_BANKING.today
     req = turn(plain("record_requests"), recorded(("close_credit_card", "cc1")))
     close = turn(hidden("close_credit_card_account_7834", credit_card_account_id="cc1"))
     refused = GateResult("deny", "r", "p", "f", "banking.closure_reason.already_on_record", "s").message()

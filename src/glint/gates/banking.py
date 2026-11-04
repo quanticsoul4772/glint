@@ -16,18 +16,18 @@ from __future__ import annotations
 
 import json
 
+from glint import clock
 from glint.assist.banking import (
     FINAL_ORDER,
     OPEN_DISPUTE,
     REQUEST_ALSO_COVERS,
     REQUEST_TOOLS,
     REQUESTS_TOOL,
-    TODAY,
     _tier,
 )
 from glint.gates import apy
 from glint.gates import fees as fee_rules
-from glint.gates.bankdb import NOW_TEXT, as_date, days_since, money, verified_today, within_year
+from glint.gates.bankdb import as_date, days_since, money, verified_today, within_year
 from glint.gates.core import GateResult, allow, deny
 
 VERIFY_FIELDS = (("name", "name"), ("address", "address"), ("email", "email"), ("phone_number", "phone_number"),
@@ -61,8 +61,8 @@ def log_verification(db, a: dict) -> GateResult:
                     facts=[f"a verification for {a.get('user_id')} is on record today"])
     wrong = [arg for arg, field in VERIFY_FIELDS if arg in a and _norm(a[arg]) != _norm(user.get(field))]
     reasons = [f"{arg} {a[arg]!r} differs from the record on file" for arg in wrong]
-    if str(a.get("time_verified", "")).strip() != NOW_TEXT:
-        reasons.append(f"time_verified {a.get('time_verified')!r} is not the current time {NOW_TEXT!r}")
+    if str(a.get("time_verified", "")).strip() != clock.now_text():
+        reasons.append(f"time_verified {a.get('time_verified')!r} is not the current time {clock.now_text()!r}")
     if reasons:
         return deny("banking.verification", source, "the verification does not match the customer's record or the "
                     "current time", "Log the verification with the user's details exactly as on file and "
@@ -110,7 +110,7 @@ def checking_credit(db, a: dict) -> GateResult:
                and 0 <= d < 14]
     details = {"account_id": acc_id, "credits_past_14_days": [t.get("transaction_id") for t in credits]}
     if credits:
-        today = [t for t in credits if as_date(t.get("date")) == TODAY]
+        today = [t for t in credits if as_date(t.get("date")) == clock.today()]
         why = ("a credit was already applied to this account in this conversation; the tool may be called once per "
                "account per interaction") if today else "a credit was applied to this account within 14 days"
         return deny("banking.checking_credit.once", source, why,
@@ -144,8 +144,8 @@ def _interest_basis(db, acc_id: str) -> tuple[float, float, list[dict]] | None:
     interest = [t for t in rows if t.get("type") == "interest_credit"]
     if not interest:
         return None
-    latest = max(interest, key=lambda t: (as_date(t.get("date")) or TODAY, str(t.get("transaction_id"))))
-    today = [t for t in rows if t.get("type") == "interest_correction" and as_date(t.get("date")) == TODAY]
+    latest = max(interest, key=lambda t: (as_date(t.get("date")) or clock.today(), str(t.get("transaction_id"))))
+    today = [t for t in rows if t.get("type") == "interest_correction" and as_date(t.get("date")) == clock.today()]
     holdings = money(db.accounts.data.get(acc_id, {}).get("current_holdings"))
     return money(latest.get("amount")), round(holdings - sum(money(t.get("amount")) for t in today), 2), today
 
@@ -264,7 +264,7 @@ def temporary_limit(db, a: dict) -> GateResult:
             if t.get("account_id") == acc_id and "overdraft" in str(t.get("type", "")).lower()
             and (d := days_since(t.get("date"))) is not None and 0 <= d <= 30]
     granted = [k for k in ("atm", "purchase") if card.get(f"temporary_{k}_limit_increase")
-               and as_date(card.get(f"temporary_{k}_limit_expires")) == TODAY]
+               and as_date(card.get(f"temporary_{k}_limit_expires")) == clock.today()]
     details = {"card_id": card_id, "account_id": acc_id, "overdraft_fees_30_days": [t.get("transaction_id") for t in fees],
                "temporary_increases_today": granted}
     if fees:
@@ -308,7 +308,7 @@ def closure_blockers(db, card_id: str) -> list[str]:
 def _reasons_logged(db, card_id: str) -> tuple[list[dict], list[dict]]:
     """(records logged today, earlier records within the past year) for this account."""
     rows = [r for r in db.credit_card_closure_reasons.data.values() if r.get("credit_card_account_id") == card_id]
-    today = [r for r in rows if as_date(r.get("logged_at")) == TODAY]
+    today = [r for r in rows if as_date(r.get("logged_at")) == clock.today()]
     earlier = [r for r in rows if r not in today and within_year(r.get("logged_at"))]
     return today, earlier
 
@@ -387,7 +387,7 @@ def _request_user(db, a: dict) -> str:
             if row and row.get("user_id"):
                 return str(row["user_id"])
     verified = [r.get("user_id") for r in db.verification_history.data.values()
-                if str(r.get("time_verified", "")).startswith(TODAY.isoformat())]
+                if str(r.get("time_verified", "")).startswith(clock.today().isoformat())]
     return str(verified[-1]) if verified else "<user_id>"
 
 

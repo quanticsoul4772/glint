@@ -9,13 +9,16 @@ from tau2.data_model.message import ToolCall
 from test_gates_phase2 import _bank, _call, _denied, _hidden, _play, _ran, _verify
 
 from glint.gates import EventLog, Gate, GateRegistry, allow, summary
+from glint.gates import procedure as proc
 from glint.gates.core import ACCOUNT_RECORDS, AGENT_RECORDS, CHECKS
 from glint.gates.replayplan import lookups
 from glint.gates.rules import REQUEST_TOOLS, build_registry, manifest
 
-# the banking gates a record_* call, the customer's answers in a plan_disputes call or a repeated call can pass
+# the banking gates a record_* call, the customer's answers in a plan_disputes call, a log_verification call made from
+# the agent's own lookup or a repeated call can pass
 AGENT_GATES = ({f"banking_request_{t}" for t in REQUEST_TOOLS}
-               | {"banking_retention_answer_gate", "banking_replacement_gate", "procedure_dispute_plan_gate"})
+               | {"banking_retention_answer_gate", "banking_replacement_gate", "procedure_dispute_plan_gate",
+                  "banking_log_verification_gate", "procedure_verified_gate"})
 
 
 def test_every_gate_is_classed_and_the_agent_made_class_is_exactly_the_record_gates():
@@ -39,11 +42,46 @@ def test_the_manifest_carries_each_gates_class_and_the_counts():
     assert {g["name"]: g["checks"] for g in m["gates"]} == {g.name: g.checks for g in reg.gates()}
 
 
-def test_the_registry_refuses_an_unknown_class():
+def test_the_registry_refuses_an_unknown_class_and_a_gate_with_no_class_cannot_be_registered():
     with pytest.raises(ValueError, match="checks 'vibes'"):
         GateRegistry().register(Gate("g", ("t",), "a purpose", lambda db, a: allow("r", "s"), checks="vibes"))
-    assert GateRegistry().register(Gate("g", ("t",), "a purpose", lambda db, a: allow("r", "s"))).checks == \
-        ACCOUNT_RECORDS
+    # no default: an unlabeled gate used to count as account records (technical judge, round 2, 2.1)
+    with pytest.raises(TypeError, match="checks"):
+        GateRegistry().register(Gate("g", ("t",), "a purpose", lambda db, a: allow("r", "s")))
+    assert GateRegistry().register(Gate("g", ("t",), "a purpose", lambda db, a: allow("r", "s"),
+                                        checks=ACCOUNT_RECORDS)).checks == ACCOUNT_RECORDS
+
+
+def test_the_gate_kinds_split_policy_rules_from_generated_checks_and_no_rule_gates():
+    reg = build_registry("banking_knowledge")
+    kinds = {g.name: gate_classes.gate_kind(g.name) for g in reg.gates()}
+    assert kinds["procedure_duplicate_close_debit_card_4721"] == (gate_classes.GENERATED, "duplicate")
+    assert kinds["procedure_provenance_close_debit_card_4721"] == (gate_classes.GENERATED, "provenance")
+    assert kinds["no_rule_transfer_funds_between_bank_accounts_7291"] == (gate_classes.NO_RULE, "")
+    assert kinds["banking_cli_submit_gate"] == kinds["procedure_verified_gate"] == (gate_classes.POLICY, "")
+    # every agent-made gate is a policy rule; the generated and no-rule gates all rest on account records
+    assert all(kinds[g.name][0] == gate_classes.POLICY for g in reg.gates() if g.checks == AGENT_RECORDS)
+    n = {k: sum(v[0] == k for v in kinds.values()) for k in gate_classes.KINDS}
+    assert sum(n.values()) == len(reg.gates()) and n[gate_classes.NO_RULE] == 9
+    line = gate_classes.kinds_line()
+    assert line.startswith(f"KINDS banking_knowledge: policy rule {n[gate_classes.POLICY]} (account_records ")
+    assert line.endswith(f"no rule {n[gate_classes.NO_RULE]}")
+
+
+def test_a_verification_with_no_customer_turn_passes_and_unlocks_writes():
+    """The documented limit of the verification gates (docs/gate-classes.md): the conversation holds no customer
+    message at all. The agent looks the user up by name and copies the record into log_verification; the
+    verification gate allows it and the verified gate then allows that customer's writes. Neither gate can tell
+    whether the customer supplied those details, so both are agent-made."""
+    env, _, events = _bank("task_084")
+    user = "a7c2f85d91"
+    write = {"user_id": user}
+    assert not proc.verified(env.tools.db, write).allowed
+    _verify(env, user)  # one lookup and one log_verification call; no customer turn
+    fired = [e["payload"]["decision"] for e in events.events("gate.fired")
+             if e["payload"]["gate"] == "banking_log_verification_gate"]
+    assert fired == ["allow"]
+    assert proc.verified(env.tools.db, write).allowed
 
 
 def _log(path):
@@ -54,8 +92,8 @@ def _log(path):
                                           False),
                                          ("banking_request_close_debit_card_4721", "banking.request.no_record", "deny",
                                           True),  # replay: skipped
-                                         ("procedure_verified_gate", "procedure.verified", "deny", False),
-                                         ("procedure_verified_gate", "procedure.verified", "allow", False),
+                                         ("banking_cli_submit_gate", "banking.cli.submit", "deny", False),
+                                         ("banking_cli_submit_gate", "banking.cli.submit", "allow", False),
                                          ("unparsed", "unparsed_arguments", "deny", False)):
         log.emit("gate.fired", {"gate": gate, "rule_id": rule, "decision": decision, "replay": replay, **ctx})
     log.close()
@@ -66,7 +104,7 @@ def test_refusals_are_split_by_the_class_of_the_gate_that_refused(tmp_path):
     checks = {g.name: g.checks for g in build_registry("banking_knowledge").gates()}
     by = summary.denies_by_checks(summary.read_log(tmp_path / "g.sqlite"), checks)
     assert by == {AGENT_RECORDS: {("banking_request_close_debit_card_4721", "banking.request.no_record"): 1},
-                  ACCOUNT_RECORDS: {("procedure_verified_gate", "procedure.verified"): 1},
+                  ACCOUNT_RECORDS: {("banking_cli_submit_gate", "banking.cli.submit"): 1},
                   summary.OTHER_CHECKS: {("unparsed", "unparsed_arguments"): 1}}
 
 
@@ -78,9 +116,12 @@ def test_the_gate_classes_script_prints_the_registry_and_each_logs_split(tmp_pat
     counts = build_registry("banking_knowledge").checks_counts()
     assert out[0] == (f"GATES banking_knowledge: {sum(counts.values())} registered, account_records "
                       f"{counts[ACCOUNT_RECORDS]}, agent_records {counts[AGENT_RECORDS]}")
-    assert out[1].endswith(": 3 live, account_records 1, agent_records 1, other 1")
-    assert "banking_request_close_debit_card_4721  banking.request.no_record" in out[2]
-    assert out[-1] == "REFUSALS total: 6 live, account_records 2, agent_records 2, other 2"
+    assert out[1] == gate_classes.kinds_line()
+    assert out[2].endswith(": 3 live, account_records 1, agent_records 1, other 1")
+    assert out[3].endswith(": policy rule 2, generated check 0, no rule 0, other 1")
+    assert "banking_request_close_debit_card_4721  banking.request.no_record" in out[4]
+    assert out[-2] == "REFUSALS total: 6 live, account_records 2, agent_records 2, other 2"
+    assert out[-1] == "BY KIND total: policy rule 4, generated check 0, no rule 0, other 2"
 
 
 def _send_lookups(env, tool: str, args: dict) -> None:

@@ -23,8 +23,9 @@ from __future__ import annotations
 import json
 import re
 
+from glint import clock
 from glint.assist import as_flag
-from glint.assist.banking import CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, TODAY, card_of_transaction, replacements_today
+from glint.assist.banking import CARD_DIGITS_TOOL, OVERCHARGE, PLAN_TOOL, card_of_transaction, replacements_today
 from glint.gates.bankdb import as_date, money, owner, undecided_increases, verified_today
 from glint.gates.core import GateResult, allow, deny
 
@@ -284,13 +285,13 @@ def fraud_today(db) -> list[str]:
     """Fraud handled in this conversation, as the database shows it: a fraud dispute filed today, a debit card closed
     today as stolen or fraud_suspected, or a credit card replaced today for fraud or theft."""
     seen = [f"credit card dispute {k}" for k, r in db.transaction_disputes.data.items()
-            if r.get("dispute_reason") in FRAUD_DISPUTE and as_date(r.get("submitted_at")) == TODAY]
+            if r.get("dispute_reason") in FRAUD_DISPUTE and as_date(r.get("submitted_at")) == clock.today()]
     seen += [f"debit card dispute {k}" for k, r in db.debit_card_disputes.data.items()
-             if r.get("dispute_category") in FRAUD_DEBIT and as_date(r.get("submitted_at")) == TODAY]
+             if r.get("dispute_category") in FRAUD_DEBIT and as_date(r.get("submitted_at")) == clock.today()]
     seen += [f"debit card {k} closed {r.get('closure_reason')}" for k, r in db.debit_cards.data.items()
-             if as_date(r.get("closed_date")) == TODAY and r.get("closure_reason") in FRAUD_CLOSURE]
+             if as_date(r.get("closed_date")) == clock.today() and r.get("closure_reason") in FRAUD_CLOSURE]
     seen += [f"credit card order {k} ({r.get('reason')})" for k, r in db.credit_card_orders.data.items()
-             if as_date(r.get("order_date")) == TODAY and r.get("reason") in FRAUD_ORDER]
+             if as_date(r.get("order_date")) == clock.today() and r.get("reason") in FRAUD_ORDER]
     return seen
 
 
@@ -343,10 +344,10 @@ REPLAN = (f"If the customer's list changed, call {PLAN_TOOL} again with every di
 def count_fact(db, user: str) -> str:
     """The count criterion 4 reads (glint.assist.banking.check_dispute): this user's disputes submitted in the past
     12 months, with the ones filed in this conversation named."""
-    year_ago = TODAY.replace(year=TODAY.year - 1)
+    year_ago = clock.today().replace(year=clock.today().year - 1)
     rows = [r for r in db.transaction_disputes.data.values() if r.get("user_id") == user
             and (d := as_date(r.get("submitted_at"))) is not None and d > year_ago]
-    today = [str(r.get("transaction_id")) for r in rows if as_date(r.get("submitted_at")) == TODAY]
+    today = [str(r.get("transaction_id")) for r in rows if as_date(r.get("submitted_at")) == clock.today()]
     out = f"disputes counted for {user} in the past 12 months: {len(rows)}"
     return out + (f" ({len(today)} filed in this conversation: {', '.join(today)})" if today else "")
 

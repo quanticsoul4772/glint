@@ -12,7 +12,7 @@ from tau2.data_model.tasks import Task
 from tau2.registry import registry
 
 import splits
-from glint import paths
+from glint import clock, paths
 from glint.assist import banking
 from glint.assist.tau2_tools import BankingDecisionTools, DisputePlanTools, add_plan_tool, install
 from glint.gates import Enforcer, EventLog, enforce, rules
@@ -791,7 +791,7 @@ def test_a_ready_check_gives_no_filing_the_plan_gate_would_refuse():
     txn = env.tools.db.credit_card_transaction_history.data[tid]
     card = banking.card_of_transaction(env.tools.db, user, txn)
     env.tools.db.credit_card_orders.data["ccord_test"] = {"order_id": "ccord_test", "credit_card_account_id": card,
-                                                          "order_date": banking.TODAY.strftime("%m/%d/%Y")}
+                                                          "order_date": clock.today().strftime("%m/%d/%Y")}
     f = banking.filing_call(env.tools.db, user, plan, tid, increase_decided=True)
     assert json.loads(f["arguments_json"])["card_action"] == "cancel_and_reissue"
 
