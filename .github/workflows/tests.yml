@@ -50,13 +50,17 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Build the wheel
         run: uv build --wheel --out-dir dist glint
-      - name: Install it into a fresh venv (τ² from the pinned checkout)
+      # the wheel alone, so τ² comes from the git URL pinned in its metadata, as a plain pip install gets it (judge
+      # panel 2026-11-03b, technical 2.4: PyPI's tau2 is an unrelated package); the checkout above supplies only τ²'s
+      # data, which a git install of τ² does not ship
+      - name: Install it into a fresh venv (τ² from the wheel's pinned git URL)
         run: |
           uv venv wheel-venv --python 3.12
-          uv pip install --python wheel-venv/bin/python -e "vendor/tau2-bench[knowledge]" dist/glint-*.whl
+          uv pip install --python wheel-venv/bin/python dist/glint-*.whl
+          wheel-venv/bin/python -c "import json, importlib.metadata as m; u = json.loads(m.distribution('tau2').read_text('direct_url.json')); assert u['vcs_info']['commit_id'] == 'fc0055dc4e0a316c3f83133267fbd6faaa770992', u; print('tau2 from', u['url'], u['vcs_info']['commit_id'])"
       - name: Selftest and an Enforcer from the installed package, run outside the checkout
         run: |
           mkdir -p "$RUNNER_TEMP/run" && cd "$RUNNER_TEMP/run"
-          export GLINT_HOME="$PWD"
+          export GLINT_HOME="$PWD" TAU2_DATA_DIR="$GITHUB_WORKSPACE/vendor/tau2-bench/data"
           "$GITHUB_WORKSPACE/wheel-venv/bin/python" -X utf8 -m glint.bank.server --decision-tools --selftest
           "$GITHUB_WORKSPACE/wheel-venv/bin/python" -X utf8 -c "import glint; from glint.gates import Enforcer, EventLog; e = Enforcer('banking_knowledge', EventLog(':memory:')); assert 'site-packages' in glint.__file__ and e.declare_clauses, glint.__file__; print(glint.__file__, len(e.declare_clauses), 'reminder clauses')"

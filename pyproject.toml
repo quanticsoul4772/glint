@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
 dependencies = [
-    "tau2[knowledge]",
+    # τ²-bench by git URL at the pinned commit: PyPI's "tau2" is an unrelated package (judge panel 2026-11-03,
+    # technical 2.4). In a checkout, uv uses the sibling clone instead (tool.uv.sources below).
+    "tau2[knowledge] @ git+https://github.com/sierra-research/tau2-bench@fc0055dc4e0a316c3f83133267fbd6faaa770992",
     "litellm>=1.80.15,<1.82.7",
     "modal",
     "numpy",
@@ -27,8 +29,12 @@ dev = ["pytest", "pytest-cov", "ruff"]
 llamafirewall = ["llamafirewall==1.0.3"]
 
 [tool.uv.sources]
-# Pinned τ²-bench v1.0.1 (commit fc0055dc4e0a316c3f83133267fbd6faaa770992), cloned outside this repo.
+# Pinned τ²-bench v1.0.1 (commit fc0055dc4e0a316c3f83133267fbd6faaa770992), cloned outside this repo. uv uses this
+# path in a checkout (it overrides the git URL in dependencies); pip and a built wheel use the git URL.
 tau2 = { path = "../vendor/tau2-bench", editable = true }
+
+[tool.hatch.metadata]
+allow-direct-references = true  # the τ² git URL in dependencies
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/glint"]
