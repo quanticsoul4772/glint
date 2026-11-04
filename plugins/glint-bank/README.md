@@ -11,7 +11,7 @@ muse plugins install plugins/glint-bank --scope user
 muse plugins approve glint-bank
 ```
 
-The first start installs Glint (its git tag) and τ² (one pinned commit of its git repository) through uv, so it takes a few minutes; the bank data comes from this plugin's `data/`. Checked with Muse Code 1.4.14 in headless mode (`muse exec`, 2026-10-31, plugin 0.2.1; 0.3.0 and 0.4.0 have the selftest in CI only); interactive mode is not shown to work: on 2026-11-01 Muse's interactive start stopped the server about 0.15 s after fetching a fresh feature configuration, while a headless start three minutes later reached `ready` with 23 tools (Muse's bootstrap logs). Use `muse exec` until an interactive start is checked.
+The first start installs Glint (its git tag) and τ² (one pinned commit of its git repository) through uv, so it takes a few minutes; the bank data comes from this plugin's `data/`. Checked with Muse Code 1.4.14 in headless mode (`muse exec`): on 2026-11-03 plugin 0.4.0, installed from its tag, reached `ready` with 27 tools, and its PreToolUse hook blocked a $4,000 credit-limit increase before the server ran it, then allowed $2,500 (earlier check: 2026-10-31, plugin 0.2.1); interactive mode is not shown to work: on 2026-11-01 Muse's interactive start stopped the server about 0.15 s after fetching a fresh feature configuration, while a headless start three minutes later reached `ready` with 23 tools (Muse's bootstrap logs). Use `muse exec` until an interactive start is checked.
 
 ## Launcher
 
@@ -30,7 +30,7 @@ The plugin also declares a `PreToolUse` hook (`hooks/gate_check.py`, run as `uv 
 - Fail closed: when the hook cannot get a decision, it denies the write and says why. That covers no `hook.json`, a server that cannot be reached or does not answer within 8 s, a wrong token, a non-200 answer, or unreadable input.
 - The server-side gating is unchanged. The server still checks every call it receives, so a write is checked even where the hook does not run (another MCP client, or a hook not approved).
 
-Muse asks for approval of each plugin capability on its own. Approve the hook along with the server (`muse plugins approve glint-bank`, or `muse plugins approve glint-bank:hook:gate-check`). The hook's unit tests (`tests/test_bank_hook.py`) use the PreToolUse input Muse Code 1.4.14 sent in the 2026-10-28 probes. They run against a real bank server and need neither Muse nor a model. Plugin 0.4.0's hook has not yet been run under `muse`.
+Muse asks for approval of each plugin capability on its own. Approve the hook along with the server (`muse plugins approve glint-bank`, or `muse plugins approve glint-bank:hook:gate-check`). The hook's unit tests (`tests/test_bank_hook.py`) use the PreToolUse input Muse Code 1.4.14 sent in the 2026-10-28 probes. They run against a real bank server and need neither Muse nor a model. Under `muse exec` on 2026-11-03 (plugin 0.4.0, Muse Spark, task_054) the hook blocked the $4,000 increase with the gate's refusal (`tool blocked by hook`, a `hook.denied` event, no `write.ran`) and an unlooked-up `log_verification` (`glint.identifier_provenance`), then allowed both writes once the agent had done what the refusal asked.
 
 ## Environment
 
