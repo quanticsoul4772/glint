@@ -22,7 +22,11 @@
   be right on the live database (the gate allows it), and one whose flag matches gold can be wrong there (the gate
   denies it). task_051 runs that paid the card down before submitting get an approve verdict on the live database.
   Customer-side entries (a given user tool, the customer running it) are skipped: the server takes no customer calls,
-  and no gate reads them.
+  and no gate reads them. The summary counts the stopped runs apart: by the task's expected policy rule, and earlier
+  by a procedure or plan rule (judge panel 2026-11-03, technical 2.5).
+
+The detail lines come first, then the two summaries, and the verdict line last. Scenarios are loaded with the
+operator's `BankServer.load_scenario`: the server refuses the agent's load_scenario once a gate has decided a write.
 
 With --no-request-gate the server runs with the request gate off (research row 6: BankServer request_gate False),
 and no record_requests call is inserted or sent.
@@ -109,9 +113,10 @@ async def gold(task_ids: list[str] | None = None, home: Path | None = None, requ
         async with Client(bank.mcp_server()) as client:
             for task_id in ids:
                 task = tasks()[task_id]
-                loaded = await client.call_tool("load_scenario", {"task_id": task_id})
-                if loaded.is_error:
-                    raise RuntimeError(f"load_scenario({task_id}) failed: {_text(loaded)}")
+                # the operator's load (the agent's load_scenario is refused once a gate has decided a write)
+                text, error = await anyio.to_thread.run_sync(bank.load_scenario, None, task_id)
+                if error:
+                    raise RuntimeError(f"load_scenario({task_id}) failed: {text}")
                 session, twin = bank.session(), build_environment(task)
                 actions = task.evaluation_criteria.actions or [] if task.evaluation_criteria else []
                 gold = [ToolCall(id=f"gold-{k}", name=a.name, arguments=a.arguments, requestor=a.requestor)
@@ -230,7 +235,7 @@ async def wrong(recs: list[dict], home: Path | None = None, request_gate: bool =
                 if rec.get("dom") != "banking_knowledge" or rec["task"] not in EXPECTED:
                     continue
                 run = f"{rec['set']} {rec['arm']} {rec['task']} trial {rec['trial']}"
-                await client.call_tool("load_scenario", {"task_id": rec["task"]})
+                await anyio.to_thread.run_sync(bank.load_scenario, None, rec["task"])  # the operator's load
                 session, row = bank.session(), None
                 plans = plan_arguments([w["args"] for w in rec["writes"] if w["name"] == rules.DISPUTE])
                 requests = run_requests(rec["writes"]) if request_gate else None
@@ -273,7 +278,10 @@ async def wrong(recs: list[dict], home: Path | None = None, request_gate: bool =
                 else:
                     stopped.append(row)
         bank.session().events.close()
-    return {"stopped": stopped, "not_stopped": not_stopped, "denied_as_expected": sum(r["ok"] for r in stopped)}
+    ok = [r for r in stopped if r["ok"]]
+    return {"stopped": stopped, "not_stopped": not_stopped, "denied_as_expected": len(ok),
+            "by_policy_rule": sum(r["rule_id"] == r["expected_rule"] for r in ok),
+            "by_procedure_rule": sum(r["rule_id"] != r["expected_rule"] for r in ok)}
 
 
 def main(argv: list[str]) -> int:
@@ -283,7 +291,7 @@ def main(argv: list[str]) -> int:
     if not request_gate:
         print("request gate OFF (research row 6)")
     g = anyio.run(gold, None, None, request_gate)
-    print(f"gold: {g['tasks']} tasks, {g['gold_writes']} gold writes through MCP, {g['allowed']} allowed, "
+    gold_line = (f"gold: {g['tasks']} tasks, {g['gold_writes']} gold writes through MCP, {g['allowed']} allowed, "
           f"{len(g['false_refusals'])} false refusals, {len(g['known_decided'])} known (decided) refusals, "
           f"{len(g['also_rejected'])} denies τ²'s tool also rejects, "
           f"{len(g['placeholder_gold'])} denies of placeholder gold, "
@@ -305,8 +313,6 @@ def main(argv: list[str]) -> int:
     for m in g["result_mismatches"]:
         print(f"  RESULT MISMATCH {m['task_id']} {m['tool']}: {m['text'][:160]}")
     w = anyio.run(wrong, json.loads(recs_path.read_text(encoding="utf-8")), None, request_gate)
-    print(f"wrong writes: {len(w['stopped'])} runs stopped by a deny, {w['denied_as_expected']} of them with the "
-          f"expected rule (error result, database unchanged); {len(w['not_stopped'])} runs with no deny")
     for r in w["stopped"]:
         print(f"  {'ok  ' if r['ok'] else 'BAD '} {r['run']} i{r['write']} {r['tool']}: {r['rule_id']} "
               f"(expected {r['expected_rule']})"
@@ -319,6 +325,16 @@ def main(argv: list[str]) -> int:
                                                         encoding="utf-8")
     bad = (g["false_refusals"] or g["hash_mismatches"] or g["result_mismatches"]
            or w["denied_as_expected"] != len(w["stopped"]) or not w["stopped"])
+    # the summaries after every detail line, the verdict last
+    print(gold_line)
+    print(f"wrong writes: {len(w['stopped'])} runs stopped by a deny (error result, database unchanged): "
+          f"{w['by_policy_rule']} by the task's expected policy rule, {w['by_procedure_rule']} earlier by a procedure "
+          f"or plan rule (a step the recording shows skipped, or a write recorded as wrong or extra), "
+          f"{len(w['stopped']) - w['denied_as_expected']} by an unexpected rule; {len(w['not_stopped'])} runs with "
+          f"no deny")
+    print(f"verdict: {'FAIL' if bad else 'PASS'}: {len(g['false_refusals'])} false refusals on gold, "
+          f"{len(g['hash_mismatches'])} database hash mismatches, {len(g['result_mismatches'])} result mismatches, "
+          f"{w['denied_as_expected']} of {len(w['stopped'])} stopped wrong-write runs denied as expected")
     return 1 if bad else 0
 
 
