@@ -99,6 +99,42 @@ def test_the_picked_unseen_pair_carries_its_whole_set_result():
     assert s["set_result"] == {"set": "banking-unseen-lean-gated", "pairs": 108, "alone_passed": 21, "gated_passed": 19}
 
 
+def test_the_pair_caption_does_not_end_on_the_set_totals():
+    # regression (indie judge round 2, 2026-11-03): the default pair's caption ended "..., no gain."; the set's totals
+    # are now their own line under the panes, and the caption keeps its disclosure
+    page = client.get("/").text
+    assert "Selected pair, not a typical run" in page
+    assert ", no gain.`" not in page and "A picked example" not in page
+    assert '<p class="setline" id="set-result" hidden></p>' in page
+    assert page.index('id="set-result"') < page.index('id="source"')
+    assert '$("set-result").textContent = `The whole set, not this pair: on ${sr.pairs} matched runs' in page
+
+
+def test_the_desk_can_jump_to_the_first_gate():
+    # regression (indie judge round 2): the only gate block of task_045-unseen is event 61 of 95, about 40 s of
+    # chat at Normal speed; a button seeks to it
+    page = client.get("/").text
+    assert 'id="jump"' in page and ">Jump to the first gate</button>" in page
+    assert '$("jump").onclick = jumpToGate;' in page
+    assert 'data.tools.events.findIndex((e) => e.kind === "gate")' in page
+    events = client.get("/api/scenarios/task_045-unseen").json()["tools"]["events"]
+    assert any(e["kind"] == "gate" for e in events)  # the default scenario has a gate to jump to
+
+
+def test_the_try_card_says_gold_is_the_premium_tier():
+    # regression (indie judge round 2): the card said "Gold Rewards Card", every deny "premium-tier maximum"
+    assert "Gold Rewards Card (Gold = premium tier, 50%)" in client.get("/").text
+    deny = next(d for d in client.get("/api/try").json()["decisions"] if not d["allowed"])
+    assert "premium-tier maximum" in deny["message"] and "(50% of the current limit)" in deny["message"]
+
+
+def test_the_summary_counts_writes_in_words():
+    # regression (demo judge rounds 1 and 2): "after 3 write(s) blocked"
+    page = client.get("/").text
+    assert "write(s)" not in page and "action(s)" not in page
+    assert 'const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;' in page
+
+
 def test_task054_shows_the_overruled_dispute_before_the_increase():
     full = client.get("/api/scenarios/task_054").json()
     marked = [e for e in full["alone"]["events"] if e.get("overruled")]
@@ -817,6 +853,8 @@ def test_live_status_never_names_the_missing_settings(monkeypatch):
         monkeypatch.delenv(k, raising=False)
     body = client.get("/api/live/status").text
     assert '"available":false' in body
+    # regression (indie and demo judges, rounds 1 and 2): with live mode off the route said nothing but this
+    assert client.get("/api/live/status").json() == {"available": False}
     for k in ("GLINT_GLIMMER_URL", "MODAL_PROXY", "MODEL_API_KEY", "BASETEN_API_KEY", "missing"):
         assert k not in body
 

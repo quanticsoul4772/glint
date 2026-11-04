@@ -76,6 +76,8 @@
   .strip { display: flex; gap: var(--s6); align-items: flex-start; justify-content: space-between; margin-bottom: var(--s4); }
   .scn { min-width: 0; flex: 1; }
   .scn-row { display: flex; align-items: center; gap: var(--s2); }
+  .scn-row select { min-width: 0; text-overflow: ellipsis; }  /* the tag stays in view when the controls take room */
+  .scn-row .tag { flex-shrink: 0; }
   .scn select { appearance: none; border: 0; background: transparent; font-size: var(--t-xl); font-weight: 600;
                 letter-spacing: -0.01em; padding: 0 22px 0 0; cursor: pointer; max-width: 100%;
                 background-image: linear-gradient(45deg, transparent 50%, var(--text-2) 50%), linear-gradient(135deg, var(--text-2) 50%, transparent 50%);
@@ -193,6 +195,7 @@
   .caveat { margin-top: var(--s3); padding: var(--s3) var(--s4); border-radius: var(--r-container); background: var(--muted-bg);
             color: var(--text-2); font-size: var(--t-sm); display: flex; gap: var(--s2); }
   .caveat b { color: var(--text); font-weight: 600; }
+  .setline { margin: var(--s3) 0 0; color: var(--text-2); font-size: var(--t-sm); }
 
   @keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
@@ -276,6 +279,7 @@
       <button class="btn primary" id="play"><svg viewBox="0 0 16 16"><path d="M4 2.5v11l9-5.5z"/></svg><span>Play</span></button>
       <button class="btn" id="step" title="One step">Step</button>
       <button class="btn" id="all" title="Show the whole conversation">Show all</button>
+      <button class="btn" id="jump" title="Play up to the first write a policy gate blocked" hidden>Jump to the first gate</button>
       <select class="sel" id="speed" aria-label="Speed"><option value="1400">Slow</option><option value="700" selected>Normal</option><option value="250">Fast</option></select>
       <label class="switch"><input type="checkbox" id="lookups" checked> Lookups</label>
       <button class="btn" id="live" title="Run this task now on Glimmer 30B (Modal)" hidden>Run live</button>
@@ -294,13 +298,14 @@
       <div class="feed" id="tools"></div><div class="outcome" id="tools-out"></div>
     </section>
   </div>
+  <p class="setline" id="set-result" hidden></p>
   <div class="summary" id="summary"></div>
   <div class="caveat"><span>ⓘ</span><div id="source"></div></div>
 </div>
 <div id="try-view" class="try" hidden>
   <h2>Try the gate</h2>
-  <p>Be the agent. The customer (simulated, τ²-bench task_054) is verified and has a Gold Rewards Card with a $5,000
-    limit. Pick the credit-limit increase to submit; the card shows what Glint's gate says about that write.</p>
+  <p>Be the agent. The customer (simulated, τ²-bench task_054) is verified and has a Gold Rewards Card (Gold = premium tier, 50%)
+    with a $5,000 limit. Pick the credit-limit increase to submit; the card shows what Glint's gate says about that write.</p>
   <div class="amt"><span>Increase</span><input type="range" id="try-amt" min="100" max="6000" step="100" value="4000"
     aria-label="Requested increase"><b id="try-val">$4,000</b></div>
   <div id="try-out"></div>
@@ -396,7 +401,7 @@ function outcomeText(side, o, overruled) {
   return "Task failed: the bank's records do not match the correct outcome." +
     // the overrule count comes from the decision tools' checks; on a gated pair the gate story is told on the right
     (side === "alone" && overruled !== undefined && (liveRun || !(data && data.variant === "gates"))
-      ? (overruled ? ` ${overruled} action(s) a Glint tool would have overruled.` : " No action here is one Glint's tools judge; it failed for another reason.")
+      ? (overruled ? ` ${plural(overruled, "action")} a Glint tool would have overruled.` : " No action here is one Glint's tools judge; it failed for another reason.")
       : "");
 }
 function setOutcome(side, o, overruled) {
@@ -404,13 +409,14 @@ function setOutcome(side, o, overruled) {
   out.className = "outcome " + (o.passed ? "pass" : "fail");
   out.innerHTML = `<span class="dot ${o.passed ? "ok" : "bad"}"></span>${esc(outcomeText(side, o, overruled))}`;
 }
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 function summarize(alone, tools, overruled) {
   const line = (name, o, extra) => `<div><span class="dot ${o.passed ? "ok" : "bad"}"></span>${esc(name)}: ${o.passed ? "passed" : "failed"}${esc(extra)}</div>`;
   const gated = !liveRun && data && data.variant === "gates";
   const blocks = gated ? data.tools.gate_blocks || 0 : 0;
-  $("summary").innerHTML = line("Glimmer alone", alone, !alone.passed && overruled ? `, ${overruled} action(s) a Glint check would overrule` : "") +
+  $("summary").innerHTML = line("Glimmer alone", alone, !alone.passed && overruled ? `, ${plural(overruled, "action")} a Glint check would overrule` : "") +
                            line(gated ? "Glimmer + Glint tools + gates" : "Glimmer + Glint tools", tools,
-                                blocks ? `, after ${blocks} write(s) blocked by a policy gate` : "");
+                                blocks ? `, after ${plural(blocks, "write")} blocked by a policy gate` : "");
   $("summary").classList.add("on");
 }
 function steps() { return Math.max(data.alone.events.length, data.tools.events.length); }
@@ -456,6 +462,7 @@ async function runLive() {
   const body = await r.json();
   if (!r.ok) { $("live-note").textContent = body.detail || "live run failed to start"; return; }
   liveRun = true;
+  $("jump").hidden = true; $("set-result").hidden = true;  // live runs have no gates and no recorded set
   $("mode").classList.add("live"); $("mode").querySelector("span").textContent = "Live · Glimmer 30B on Modal";
   $("tools-title").textContent = "Glimmer + Glint tools (live: no gates)";
   $("summary").classList.remove("on");
@@ -482,6 +489,15 @@ function play() {
   timer = setInterval(() => { pos++; showUpTo(pos); if (pos >= steps()) stop(); }, Number($("speed").value));
   showUpTo(pos);
 }
+// the index of the first write a policy gate blocked in the right pane, or -1
+function firstGate() { return data.tools.events.findIndex((e) => e.kind === "gate"); }
+function jumpToGate() {
+  const i = firstGate();
+  if (i < 0) return;
+  stop(); pos = i + 1; showUpTo(pos);  // the gate card is the last event shown
+  const cards = $("tools").querySelectorAll(".gate");
+  if (cards.length) cards[cards.length - 1].scrollIntoView({block: "nearest"});
+}
 // open on the customer's first message, so neither pane starts empty
 function opening() { const i = data.alone.events.findIndex((e) => e.kind === "customer"); return i < 0 ? 0 : i + 1; }
 async function load(id) {
@@ -497,6 +513,8 @@ async function load(id) {
   $("alone-meta").textContent = `trial ${data.alone.trial}`;
   $("tools-meta").textContent = `trial ${data.tools.trial}`;
   const rec = data.recorded, gates = data.variant === "gates", task = data.task_id || data.id;
+  $("set-result").hidden = true; $("set-result").textContent = "";
+  $("jump").hidden = firstGate() < 0;
   $("tools-title").textContent = gates ? "Glimmer + Glint tools + gates" : "Glimmer + Glint tools";
   if (gates) {
     const sr = data.set_result;
@@ -507,8 +525,13 @@ async function load(id) {
       `caused the pass. All recorded runs of this task: alone ${rec.base.passed}/${rec.base.runs} passed, gated ` +
       `${rec.tools.passed}/${rec.tools.runs} passed. Source: ${data.source} τ²-bench banking task ${task} (MIT).` +
       (data.tuned ? " A tuned task: the gates, the plan and the tools were shaped by its runs." : "") +
-      (sr ? ` A picked example: across the whole set (${sr.pairs} matched runs) Glimmer alone passed ${sr.alone_passed}` +
-            ` and gated ${sr.gated_passed}, no gain.` : ""));
+      (sr ? " The whole set's totals are under the panes." : ""));
+    // the set's totals on their own line under the panes, so the pair's caption ends on what the pair shows
+    if (sr) {
+      $("set-result").textContent = `The whole set, not this pair: on ${sr.pairs} matched runs, Glimmer alone passed ` +
+        `${sr.alone_passed} and the gated arm passed ${sr.gated_passed}; the gates did not raise the pass rate.`;
+      $("set-result").hidden = false;
+    }
     return;
   }
   $("source").innerHTML = "<b>Selected pair, not a typical run:</b> " + esc("a recorded run where Glimmer alone failed, beside one " +
@@ -633,6 +656,7 @@ async function init() {
   $("play").onclick = play;
   $("step").onclick = () => { stop(); pos = Math.min(pos + 1, steps()); showUpTo(pos); };
   $("all").onclick = () => { stop(); pos = steps(); showUpTo(pos); };
+  $("jump").onclick = jumpToGate;
   $("scrub").oninput = (e) => { stop(); pos = Number(e.target.value); showUpTo(pos); };
   $("lookups").onchange = () => showUpTo(pos);
   $("live").onclick = runLive;
