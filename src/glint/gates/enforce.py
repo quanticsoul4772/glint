@@ -580,7 +580,12 @@ class Enforcer:
         leaves the records get_response would leave: the before_call hooks run, the gates run again with their
         gate.fired events logged, and refuse() keeps its records; so a call the hook blocks leaves the same log and
         state as the same call refused by the server. The gates are deterministic; if the logged run allows after
-        all, None is returned and the call is checked once more when it runs."""
+        all, None is returned and the call is checked once more when it runs. Runs under the enforcer's clock, as
+        get_response does."""
+        with clock.using(self.clock):
+            return self._precheck(env, message)
+
+    def _precheck(self, env, message: ToolCall) -> ToolMessage | None:
         write = self.write_call(env, message)
         if write is None or self.check(*write, env.tools.db, toolkit=env.tools, record=False).allowed:
             return None

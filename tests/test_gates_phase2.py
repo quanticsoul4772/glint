@@ -14,6 +14,7 @@ import splits
 from glint import paths
 from glint.gates import Enforcer, EventLog, Gate, GateRegistry, allow, rules
 from glint.gates import procedure as proc
+from glint.gates.core import ACCOUNT_RECORDS
 from glint.gates.replayplan import ADDRESS_ASK_SUFFIX, lookups, with_address_asks, with_lookups, with_plans
 
 logger.remove()
@@ -786,7 +787,7 @@ def test_a_toolkit_gate_given_no_toolkit_denies():
     enforcer = Enforcer("retail", events)
     enforcer.registry = GateRegistry()  # only the toolkit gate, so no other gate decides first
     enforcer.registry.register(Gate("needs_toolkit", ("cancel_pending_order",), "p",
-                                    lambda tk, a: allow("r", "s"), toolkit=True))
+                                    lambda tk, a: allow("r", "s"), toolkit=True, checks=ACCOUNT_RECORDS))
     result = enforcer.check("cancel_pending_order", {"order_id": "#W0000000"}, None)
     assert not result.allowed and result.rule_id == "gate_error" and "needs the environment's toolkit" in result.reason
     assert enforcer.check("cancel_pending_order", {}, None, toolkit=object()).allowed
@@ -856,7 +857,7 @@ def test_replay_waits_for_a_slow_gate_instead_of_timing_out():
     from glint.gates import run_gate
 
     release = threading.Event()
-    slow = Gate("slow", ("t",), "p", lambda db, a: release.wait(5) and allow("r", "s"), timeout_s=0.05)
+    slow = Gate("slow", ("t",), "p", lambda db, a: release.wait(5) and allow("r", "s"), timeout_s=0.05, checks=ACCOUNT_RECORDS)
     live, _ = run_gate(slow, None, {})
     assert live.rule_id == "gate_timeout"
     threading.Timer(0.2, release.set).start()

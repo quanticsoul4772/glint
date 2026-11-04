@@ -4,6 +4,7 @@ replayed decisions are unchanged; another clock changes every date-dependent dec
 from datetime import date, datetime
 
 import pytest
+from tau2.data_model.message import ToolCall
 from tau2.domains.banking_knowledge.tools import KnowledgeTools
 from tau2.domains.banking_knowledge.utils import get_now
 from test_gates_phase2 import _bank, _call, _denied, _ran
@@ -55,6 +56,23 @@ def test_the_enforcer_defaults_to_tau2s_clock_and_refuses_a_clock_of_another_typ
     assert "clock" not in events.events("gates.manifest")[-1]["payload"]  # recorded manifests are unchanged
     with pytest.raises(TypeError, match="glint.clock.Clock"):
         Enforcer("banking_knowledge", EventLog(":memory:"), clock="2026-11-03")
+
+
+def _verification_call(env, text: str) -> ToolCall:
+    user = env.tools.db.users.data[USER]
+    return ToolCall(id="v", name="log_verification", requestor="assistant", arguments={
+        "time_verified": text, **{k: user[k] for k in ("name", "user_id", "address", "email", "phone_number",
+                                                       "date_of_birth")}})
+
+
+def test_the_hooks_precheck_reads_the_enforcers_clock():
+    """Enforcer.precheck (glint-bank's Muse Code PreToolUse hook) decides under the same clock as get_response."""
+    env, _, _ = _bank("task_084", Enforcer("banking_knowledge", EventLog(":memory:"), clock=LATER))
+    _call(env, "get_user_information_by_name", customer_name=env.tools.db.users.data[USER]["name"])
+    refused = env.glint_enforcer.precheck(env, _verification_call(env, clock.TAU2_BANKING.text))
+    assert _denied(refused, "is not the current time '2026-11-03 09:00:00 EST'")
+    assert env.glint_enforcer.precheck(env, _verification_call(env, LATER.text)) is None
+    assert clock.current() is clock.TAU2_BANKING
 
 
 def _verify_at(env, text: str):

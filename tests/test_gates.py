@@ -28,7 +28,7 @@ from glint.gates import (
     run_gate,
     summary,
 )
-from glint.gates.core import NO_RULE
+from glint.gates.core import ACCOUNT_RECORDS, NO_RULE
 from glint.gates.replayplan import lookups
 
 logger.remove()
@@ -388,7 +388,7 @@ def test_user_calls_and_gold_actions_are_not_gated():
 
 def test_boot_check_raises_when_a_required_write_has_no_gate(monkeypatch):
     reg = GateRegistry()
-    reg.register(Gate("g", ("a",), "p", lambda db, a: allow("r", "s")))
+    reg.register(Gate("g", ("a",), "p", lambda db, a: allow("r", "s"), checks=ACCOUNT_RECORDS))
     with pytest.raises(RuntimeError, match=r"write tools without a gate: \['b'\]"):
         assert_required(reg, {"a", "b"}, "test")
     monkeypatch.setitem(rules.NO_RULE_YET, "banking_knowledge", ())  # example_agent_tool_0000 loses its gate
@@ -414,12 +414,12 @@ def test_attach_raises_when_the_toolkit_has_a_write_no_gate_covers(monkeypatch):
 def test_registration_rejects_a_gate_without_a_purpose():
     reg = GateRegistry()
     with pytest.raises(ValueError, match="no purpose"):
-        reg.register(Gate("g", ("a",), "  ", lambda db, a: allow("r", "s")))
+        reg.register(Gate("g", ("a",), "  ", lambda db, a: allow("r", "s"), checks=ACCOUNT_RECORDS))
     with pytest.raises(ValueError, match="names no tool"):
-        reg.register(Gate("g", (), "p", lambda db, a: allow("r", "s")))
-    reg.register(Gate("g", ("a",), "p", lambda db, a: allow("r", "s")))
+        reg.register(Gate("g", (), "p", lambda db, a: allow("r", "s"), checks=ACCOUNT_RECORDS))
+    reg.register(Gate("g", ("a",), "p", lambda db, a: allow("r", "s"), checks=ACCOUNT_RECORDS))
     with pytest.raises(ValueError, match="already registered"):
-        reg.register(Gate("g", ("a",), "p", lambda db, a: allow("r", "s")))
+        reg.register(Gate("g", ("a",), "p", lambda db, a: allow("r", "s"), checks=ACCOUNT_RECORDS))
     with pytest.raises(ValueError, match="no gates"):
         rules.build_registry("telecom")
 
@@ -430,19 +430,19 @@ def test_a_gate_that_raises_or_hangs_fails_closed():
     def boom(db, a):
         raise KeyError("order_id")
 
-    result, _ = run_gate(Gate("boom", ("t",), "purpose", boom), None, {})
+    result, _ = run_gate(Gate("boom", ("t",), "purpose", boom, checks=ACCOUNT_RECORDS), None, {})
     assert not result.allowed and result.facts == ("error: KeyError: 'order_id'",) and result.purpose == "purpose"
     assert result.consequence and "failed with an error" in result.reason
     release = threading.Event()
     result, ms = run_gate(Gate("slow", ("t",), "p", lambda db, a: release.wait(5) or allow("r", "s"),
-                               timeout_s=0.05), None, {})
+                               timeout_s=0.05, checks=ACCOUNT_RECORDS), None, {})
     release.set()
     assert not result.allowed and "did not finish within" in result.reason and ms < 4000
-    result, _ = run_gate(Gate("bad", ("t",), "p", lambda db, a: "yes"), None, {})
+    result, _ = run_gate(Gate("bad", ("t",), "p", lambda db, a: "yes", checks=ACCOUNT_RECORDS), None, {})
     assert not result.allowed and "returned no verdict" in result.reason and result.facts == ("returned: str",)
-    result, _ = run_gate(Gate("odd", ("t",), "p", lambda db, a: GateResult("maybe")), None, {})
+    result, _ = run_gate(Gate("odd", ("t",), "p", lambda db, a: GateResult("maybe"), checks=ACCOUNT_RECORDS), None, {})
     assert not result.allowed and result.facts == ("decision: 'maybe'",)
-    result, _ = run_gate(Gate("bare", ("t",), "p", lambda db, a: GateResult("deny")), None, {})
+    result, _ = run_gate(Gate("bare", ("t",), "p", lambda db, a: GateResult("deny"), checks=ACCOUNT_RECORDS), None, {})
     assert not result.allowed and result.reason and result.fix
 
 
@@ -832,11 +832,11 @@ def test_gate_replay_lists_a_known_decided_refusal_apart_and_exits_0(monkeypatch
 
 def test_a_deny_without_its_consequence_or_facts_is_kept_as_a_deny_that_names_what_is_missing():
     bare = GateResult("deny", reason="r", fix="f", rule_id="x.rule")
-    result, _ = run_gate(Gate("bare", ("t",), "purpose", lambda db, a: bare), None, {})
+    result, _ = run_gate(Gate("bare", ("t",), "purpose", lambda db, a: bare, checks=ACCOUNT_RECORDS), None, {})
     assert not result.allowed and result.rule_id == "x.rule" and result.reason == "r" and result.fix == "f"
     assert result.facts == ("the deny is missing ['consequence', 'facts']",) and result.consequence
     full, _ = run_gate(Gate("full", ("t",), "purpose", lambda db, a: deny("x.rule", "s", "r", "f", consequence="c",
-                                                                          facts=["a", "b"])), None, {})
+                                                                          facts=["a", "b"]), checks=ACCOUNT_RECORDS), None, {})
     assert (full.consequence, full.facts, full.purpose) == ("c", ("a", "b"), "purpose")
     assert "\nFacts it used:\n- a\n- b\nWhy it matters: c\nWhat to do next: f\n" in full.message()
 
