@@ -5,13 +5,15 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from test_gates_phase2 import _bank, _hidden, _play
+from tau2.data_model.message import ToolCall
+from test_gates_phase2 import _bank, _call, _hidden, _play
 
 from glint.gates import conversation as conv
 from glint.gates.enforce import Enforcer
 from glint.gates.eventlog import EventLog
-from glint.gates.rules import ADDRESS_ASK
+from glint.gates.rules import ADDRESS_ASK, parse_hidden_arguments
 from glint.gates.stages import REQUEST_RULES, ConversationAllowlist, StageRunner, Stages
+from glint.integrations import llamafirewall_scanner as lfs
 
 PAY = "pay_credit_card_from_checking_9182"
 
@@ -303,6 +305,83 @@ def test_an_ask_rule_turns_the_request_refusal_into_a_question_and_the_agreed_re
     assert "was NOT executed" not in second.content
     assert "asked_confirmed" in events.events("write.attested")[-1]["payload"]["classes"]
     assert events.events("stage.ask_confirmed")
+
+
+def _asked_twice():
+    """task_051's payment with no request record, in an environment whose stages ask (#16) with a fake yes-model and
+    review with a fake flag-mode alignment model; the customer already said yes to the agent's last question."""
+    talk = _turns(("assistant", "Do you want me to make this payment?"), ("user", "Yes, go ahead."))
+    confirm, align = _model("yes"), _model('{"aligned": true, "reason": ""}')
+    env, task, events = _gated("task_051", stages=Stages(transcript=lambda: talk, ask_rules=REQUEST_RULES,
+                                                         confirm_model=confirm, alignment=align))
+    args = _play(env, task, PAY)
+    env.tools.glint_requests = None
+    _call(env, "unlock_discoverable_agent_tool", agent_tool_name=PAY)
+    call = ToolCall(id="w", name="call_discoverable_agent_tool", requestor="assistant",
+                    arguments={"agent_tool_name": PAY, "arguments": json.dumps(args)})
+    return env, events, call, confirm, align
+
+
+def _asked_key(call):
+    """The call as #16 keeps it once asked (StageRunner._ask)."""
+    args = parse_hidden_arguments(call.arguments["arguments"])
+    return PAY, json.dumps(args, sort_keys=True, default=str), "banking.request.no_record"
+
+
+def _stage_records(env):
+    t = env.tools
+    return (dict(t.glint_stage_seen), set(t.glint_stage_asked), list(t.glint_stage_trace), t.glint_requests,
+            set(t.glint_address_asked))
+
+
+def test_the_hooks_precheck_decides_as_the_logged_check_alone():
+    """Code review 2026-11-03: precheck's unlogged check ran the stages too, so the ask marked the call asked and the
+    logged check that followed confirmed it from the customer's earlier yes: the hook let through a write the server
+    would have turned into a question. Now the dry check leaves the stage records as they were."""
+    alone_env, alone_events, call, _, _ = _asked_twice()
+    alone = alone_env.get_response(call)
+    env, events, call, confirm, _ = _asked_twice()
+    before = _stage_records(env)
+    refusal = env.glint_enforcer.precheck(env, call)
+    assert refusal is not None and refusal.content == alone.content
+    assert "banking.request.no_record.ask" in refusal.content
+    assert _stage_records(env) == _stage_records(alone_env) != before  # the logged check's records, once
+    rules = [e["payload"]["rule_id"] for e in events.events("gate.fired")]
+    assert rules == [e["payload"]["rule_id"] for e in alone_events.events("gate.fired")]
+    # the same call again (the customer agreed) runs, with the confirm model asked once
+    assert "was NOT executed" not in env.get_response(call).content and len(confirm.calls) == 1
+
+
+def test_the_scanners_dry_check_leaves_no_stage_trace_and_asks_each_model_once():
+    """The LlamaFirewall scanner's check (record=False) on an allowed write: the stage records are unchanged, no stage
+    event is logged, and the write that then runs reads the scan's model answers instead of asking again; the
+    write's records and events are those of the write run alone."""
+    alone_env, alone_events, call, _, _ = _asked_twice()
+    alone_env.tools.glint_stage_asked.add(_asked_key(call))
+    alone_env.get_response(call)  # asked before: the customer's yes confirms it
+    env, events, call, confirm, align = _asked_twice()
+    env.tools.glint_stage_asked.add(_asked_key(call))
+    before, kinds = _stage_records(env), [e["type"] for e in events.events()]
+    asked = (len(confirm.calls), len(align.calls))  # the gold writes before it were reviewed too
+    verdict = lfs.judge_call(env.glint_enforcer, env, call)
+    assert verdict.decision == lfs.ALLOW, verdict.reason
+    assert _stage_records(env) == before and [e["type"] for e in events.events()] == kinds
+    assert "was NOT executed" not in env.get_response(call).content
+    assert (len(confirm.calls) - asked[0], len(align.calls) - asked[1]) == (1, 1)
+    assert _stage_records(env) == _stage_records(alone_env)
+    stage_events = [e["type"] for e in events.events() if e["type"].startswith("stage.")]
+    assert stage_events == [e["type"] for e in alone_events.events() if e["type"].startswith("stage.")]
+    assert stage_events.count("stage.ask_confirmed") == 1
+
+
+def test_a_dry_checks_model_error_is_logged_once_when_the_write_runs():
+    runner, events = _runner(Stages(transcript=list, alignment=_model("not json"), alignment_mode="deny"))
+    tk, tool, args = _toolkit(), "close_credit_card_1234", {"credit_card_account_id": "cc_1"}
+    with runner.dry(tk):
+        dry = runner.review(tk, tool, args, replay=False)[0]
+    assert dry.rule_id == "stage.alignment.cannot_decide" and not events.events("stage.error")
+    assert tk.glint_stage_seen == {} and runner.review(tk, tool, args, replay=False)[0] == dry
+    assert len(events.events("stage.error")) == 1
 
 
 def test_without_stages_the_same_write_is_refused_as_before():

@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import anyio
@@ -23,6 +25,7 @@ logger.remove()
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "glint-bank"
 RUNS = ROOT / "data-public" / "wrong-write-runs.json"  # bank_replay.RECS: the recorded wrong-write runs
+PAUSE_S = 0.3  # the race tests' pause: the second thread reaches the session lock well within it
 SOFIA = {"user_id": "584f9c5d00", "credit_card_account_id": "cc_584f9c5d00_gold"}
 
 
@@ -244,6 +247,59 @@ def test_the_agent_cannot_clear_the_gate_records_by_reloading_the_scenario(serve
     # the operator can still reset; then the agent's tool works again until the next write
     assert not server.load_scenario(None, "task_054")[1] and not server.gated_since_load()
     assert not server.call(None, bank.LOAD, {"task_id": "task_054"}).is_error
+
+
+def _write_and_load_together(server, monkeypatch, hold: str):
+    """A gated write and the agent's load_scenario on two threads: `hold` ("write" or "load") starts first and pauses
+    PAUSE_S inside its work (the write before its gates run, the load while it builds the environment), and the other
+    starts during that pause. The write is the customer's log_verification after the lookups. Returns the load's reply
+    and the write's reply."""
+    for name, args in _lookups():
+        server.call(None, name, args)
+    started = threading.Event()
+
+    def paused(fn):
+        def run(*args):
+            started.set()
+            time.sleep(PAUSE_S)
+            return fn(*args)
+        return run
+    if hold == "write":
+        server.session().env.get_response = paused(server.session().env.get_response)
+    else:
+        monkeypatch.setattr(bank, "build_environment", paused(bank.build_environment))
+    out = {}
+
+    def write():
+        out["write"] = server.call(None, "log_verification", _verification())
+
+    def load():
+        out["load"] = server.call(None, bank.LOAD, {"task_id": "task_054"})
+
+    first, second = (write, load) if hold == "write" else (load, write)
+    threads = [threading.Thread(target=first), threading.Thread(target=lambda: (started.wait(5), second()))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    return out["load"], out["write"]
+
+
+def test_a_load_scenario_during_a_gated_write_waits_for_it_and_is_refused(server, monkeypatch):
+    load, write = _write_and_load_together(server, monkeypatch, hold="write")
+    assert not write.is_error and load.is_error and load.content[0].text == bank.LOAD_LOCKED
+    assert server.gated_since_load()
+
+
+def test_a_gated_write_during_a_load_scenario_runs_on_the_loaded_environment(server, monkeypatch):
+    """Code review 2026-11-03: the load_scenario lock was checked outside the session lock, so a gated write could run
+    between the check and the reload, on the old environment, and the reload then wiped its decision and records."""
+    load, write = _write_and_load_together(server, monkeypatch, hold="load")
+    assert not load.is_error
+    # the write waited for the reload and was judged in the new environment (refused there: its lookups were made in
+    # the old one), so its decision counts against the new load and a second load is refused
+    assert write.is_error and "was NOT executed" in write.content[0].text and server.gated_since_load()
+    assert server.call(None, bank.LOAD, {"task_id": "task_054"}).content[0].text == bank.LOAD_LOCKED
 
 
 def test_reads_alone_leave_the_agents_load_scenario_open(server):

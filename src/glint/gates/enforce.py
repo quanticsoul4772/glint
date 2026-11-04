@@ -284,9 +284,14 @@ class Enforcer:
 
     def check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None,
               record: bool = True) -> GateResult:
-        """_check under the enforcer's clock (the `clock` option)."""
+        """_check under the enforcer's clock (the `clock` option). With `record` False the stages run dry
+        (StageRunner.dry): the check leaves their records as it found them, so the logged check that follows decides
+        as it would alone."""
         with clock.using(self.clock):
-            return self._check(tool, args, db, replay, toolkit, record)
+            if record or self.stages is None or toolkit is None:
+                return self._check(tool, args, db, replay, toolkit, record)
+            with self.stages.dry(toolkit):
+                return self._check(tool, args, db, replay, toolkit, record)
 
     def _check(self, tool: str, args: dict | None, db, replay: bool = False, toolkit=None,
                record: bool = True) -> GateResult:
