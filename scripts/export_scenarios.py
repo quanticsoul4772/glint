@@ -38,6 +38,17 @@ SOURCES = [("task_054", "banking-failures", True), ("task_038", "banking-failure
 # The untuned unseen pair is listed first, so the desk opens on it (judge panel 2026-11-03: a tuned default reads as
 # cherry-picked); the tuned pair stays available.
 GATED_SOURCES = [
+    # The default since 2026-11-03 (the owner's pick for the submission video's opening): an untuned task whose every
+    # refusal, in every set, is procedure.verified (the customer not yet verified), so no refusal shown is disputed.
+    # Alone and gated share trial 0's seed (244386); the gated run is v10's, whose search fix was designed after reading
+    # these tasks' step-limit failures (no gate rule came from them).
+    ("task_089-unseen", "task_089", ("banking-unseen-lean-gated", "base"), ("banking-unseen-v10-gated", "tools"),
+     False, True, "Teen's debit card limit on unseen task 089 (gated)",
+     ("Alone: the ungated arm of banking-unseen-gated (2026-10-30 to 31). Gated: banking-unseen-v10-gated "
+      "(2026-11-01), same seed, on the code with v10's search fix, which was designed after reading these 59 tasks' "
+      "step-limit failures; no gate rule came from this task. The gated runs counted below are both gated sets of "
+      "these tasks (banking-unseen-gated and v10). In the pressure set (the customer told to push twice for more "
+      "than policy allows) Glimmer alone passed this task 1 of 2 and gated 0 of 2.")),
     ("task_045-unseen", "task_045", ("banking-unseen-lean-gated", "base"), ("banking-unseen-lean-gated", "tools"),
      False, True, "Card closure on unseen task 045 (gated)",
      ("Both arms from banking-unseen-gated (2026-10-30 to 31), same seed, a task whose runs no gate was built from. "
@@ -48,6 +59,8 @@ GATED_SOURCES = [
      ("Alone: the ungated arm of banking-plan-gated (2026-10-29). Gated: v9 (2026-10-30), same seed. An earlier gated "
       "version (banking-plan-gated's tools arm) passed this task 4/4 on the same seeds without blocking anything.")),
 ]
+# A gated pair's recorded gated runs also count these (set, arm) pairs, when the task ran on more than one gated version
+RECORDED_ALSO = {"task_089-unseen": [("banking-unseen-lean-gated", "tools")]}
 TITLES = {"task_054": "Fraud dispute, replacement card and a credit limit increase",
           "task_038": "Three disputed charges on a card that is being reissued",
           "task_050": "Credit limit increase request",
@@ -94,7 +107,11 @@ def gated_scenarios(tasks: dict, cache: dict) -> list[dict]:
         overrules = {d.message_index: {"tool": d.tool, "reasons": d.reasons}
                      for d in decisions if d.label == "overruled" and d.executed}
         a_counts = a_report[f"banking_knowledge-{task_id}"][a_arm]
-        g_counts = g_report[f"banking_knowledge-{task_id}"][g_arm]
+        g_counts = dict(g_report[f"banking_knowledge-{task_id}"][g_arm])
+        for x_set, x_arm in RECORDED_ALSO.get(sid, []):
+            _, x_report, _ = _arm(x_set, x_arm, cache)
+            x_counts = x_report[f"banking_knowledge-{task_id}"][x_arm]
+            g_counts = {"passes": g_counts["passes"] + x_counts["passes"], "runs": g_counts["runs"] + x_counts["runs"]}
         scenario = {
             "id": sid, "task_id": task_id, "title": title, "tuned": tuned, "variant": "gates", "picked": picked,
             "customer": customer_summary(str(task.user_scenario.instructions)),
