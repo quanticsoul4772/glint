@@ -34,6 +34,7 @@ from pathlib import Path
 
 GENESIS_HASH = "genesis"
 KEY_ENV = "GLINT_LOG_KEY"
+KEY_WAIT_S = 2.0  # how long install_key waits for an empty key file to be filled before it calls the file damaged
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
     id TEXT PRIMARY KEY,
@@ -76,19 +77,27 @@ def log_key() -> bytes | None:
 
 def install_key(path: str | Path) -> bytes:
     """The per-install chain key kept in `path`, created on first use: 32 random bytes as hex, in a file opened with
-    owner-only permissions (0600 where the system honors them). An existing file is never replaced; an empty one is an
-    error, because a key that changed would leave every log written with the old one unverifiable."""
+    owner-only permissions (0600 where the system honors them). The key is written whole to a temporary file in the same
+    folder and then hard-linked to `path`, which fails when `path` exists: two first starts never see a half-written
+    key, and the second one reads the first one's (code review 2026-11-03: a second start read the file empty). An
+    existing file is never replaced; a file that stays empty for KEY_WAIT_S is an error, because a key that changed would
+    leave every log written with the old one unverifiable."""
     path = Path(path)
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(tmp := path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp"),
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:  # another process created it between the check and the open
-            pass
-        else:
             with os.fdopen(fd, "w", encoding="ascii") as f:
                 f.write(secrets.token_hex(32))
-    value = path.read_text(encoding="ascii").strip()
+            os.link(tmp, path)
+        except FileExistsError:  # another start created it first: read that key
+            pass
+        finally:
+            tmp.unlink()
+    deadline = time.monotonic() + KEY_WAIT_S
+    while not (value := path.read_text(encoding="ascii").strip()) and time.monotonic() < deadline:
+        time.sleep(0.05)  # a key file another writer has created but not yet filled (one written before this change)
     if not value:
         raise ChainBroken(f"the log key file {path} is empty: restore it from a backup, or move it away to start new "
                           "logs under a new key (logs written with the old key then need the old key to verify)")

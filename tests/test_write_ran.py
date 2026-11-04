@@ -5,6 +5,8 @@ files in a test folder."""
 import logging
 import os
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +16,7 @@ from test_gates import _rewrite_chain
 from test_gates_phase2 import _bank, _hidden, _play
 
 from glint.bank import server as bank
-from glint.gates import ChainBroken, Enforcer, EventLog
+from glint.gates import ChainBroken, Enforcer, EventLog, eventlog
 from glint.gates.eventlog import KEY_ENV, install_key, recorded_scheme
 
 
@@ -81,15 +83,47 @@ def test_bank_sessions_are_keyed_by_default_with_a_key_file_outside_the_session(
     assert bank.session_key(server.home) != key_file.read_text().encode()
 
 
-def test_the_install_key_is_made_once_and_never_replaced(tmp_path):
+def test_the_install_key_is_made_once_and_never_replaced(tmp_path, monkeypatch):
     path = tmp_path / "keys" / "log.key"
     first = install_key(path)
     assert len(first) == 64 and install_key(path) == first and path.read_text() == first.decode()
     if os.name == "posix":
         assert path.stat().st_mode & 0o777 == 0o600
+    assert [p.name for p in path.parent.iterdir()] == ["log.key"]  # no temporary file left behind
+    monkeypatch.setattr(eventlog, "KEY_WAIT_S", 0.1)
     path.write_text("")
     with pytest.raises(ChainBroken, match="is empty"):
         install_key(path)
+
+
+def test_two_first_starts_get_the_same_install_key(tmp_path):
+    """Code review 2026-11-03: two first starts raced on the key file, and the second read it empty after the first
+    created it. Each of several concurrent creators gets the one key the file holds."""
+    path, barrier = tmp_path / "keys" / "log.key", threading.Barrier(8)
+
+    def start():
+        barrier.wait()
+        return install_key(path)
+
+    for _ in range(20):
+        if path.exists():
+            path.unlink()
+        with ThreadPoolExecutor(8) as pool:
+            keys = list(pool.map(lambda _: start(), range(8)))
+        assert len(set(keys)) == 1 and keys[0] == path.read_text().encode()
+        assert [p.name for p in path.parent.iterdir()] == ["log.key"]
+
+
+def test_a_key_file_another_start_has_not_filled_yet_is_waited_for(tmp_path):
+    """A reader that finds the key file empty (created, not yet written) waits for the key instead of refusing."""
+    path = tmp_path / "log.key"
+    path.write_text("")
+    timer = threading.Timer(0.2, lambda: path.write_text("ab" * 32))
+    timer.start()
+    try:
+        assert install_key(path) == b"ab" * 32
+    finally:
+        timer.join()
 
 
 def test_a_changed_result_in_a_keyed_session_log_fails_the_check(server, monkeypatch, capsys):  # noqa: F811

@@ -33,6 +33,7 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from glint.assist.banking import REQUEST_TOOLS
@@ -152,6 +153,33 @@ class StageRunner:
     def __init__(self, stages: Stages, events, context: Callable[[], dict]):
         self.stages, self.events, self.context = stages, events, context
         self._kept: dict[tuple, object] = {}
+        self._dry = False
+        self._ahead: dict[tuple, object] = {}  # the last dry run's live answers, for the check that follows it
+
+    @contextmanager
+    def dry(self, toolkit):
+        """A check that does not run the write (Enforcer.check with record=False: precheck, the LlamaFirewall scanner)
+        leaves no trace: the records the stages keep on `toolkit` are restored after it, it logs no stage event, and
+        each live answer it got is kept for the next check of the same call, which reads it instead of asking again.
+        So a dry check followed by the logged one decides as the logged one alone would (code review 2026-11-03: the
+        dry check's ask marked the call asked, and the logged check then let it through as asked_confirmed)."""
+        seen, asked = Counter(toolkit.glint_stage_seen), set(toolkit.glint_stage_asked)
+        trace, address = list(toolkit.glint_stage_trace), set(toolkit.glint_address_asked)
+        requests = getattr(toolkit, "glint_requests", _MISSING)
+        self._dry, self._ahead = True, {}
+        try:
+            yield
+        finally:
+            self._dry = False
+            toolkit.glint_stage_trace[:] = trace
+            for record, saved in ((toolkit.glint_stage_seen, seen), (toolkit.glint_stage_asked, asked),
+                                  (toolkit.glint_address_asked, address)):
+                record.clear()
+                record.update(saved)
+            if requests is _MISSING:
+                vars(toolkit).pop("glint_requests", None)
+            else:
+                toolkit.glint_requests = requests
 
     @staticmethod
     def init(toolkit) -> None:
@@ -161,6 +189,8 @@ class StageRunner:
         toolkit.glint_stage_trace = []  # (tool, arguments) of every write the stages saw allowed (#11)
 
     def _emit(self, kind: str, payload: dict) -> None:
+        if self._dry:
+            return
         try:
             self.events.emit(kind, payload | self.context())
         except Exception:
@@ -168,19 +198,25 @@ class StageRunner:
 
     def _once(self, toolkit, stage: str, tool: str, args: dict, replay: bool, compute: Callable[[], object]):
         """`compute()` live, kept under the call's key; in replay the kept value (_MISSING when the live run never
-        asked). An exception is logged as stage.error and returned, so the caller decides fail-closed or no-op."""
+        asked). An exception is logged as stage.error and returned, so the caller decides fail-closed or no-op. A dry
+        check's answer is kept aside (`dry`), and the next live check of the same call takes it instead of computing."""
         call = (stage, tool, json.dumps(args, sort_keys=True, default=str))
         toolkit.glint_stage_seen[call] += 1
         key = (json.dumps(self.context(), sort_keys=True, default=str), *call, toolkit.glint_stage_seen[call])
         if replay:
             return self._kept.get(key, _MISSING)
-        try:
-            value = compute()
-        except Exception as exc:
-            log.exception("stage %s failed on %s", stage, tool)
-            self._emit("stage.error", {"stage": stage, "tool": tool, "error": f"{type(exc).__name__}: {exc}"[:300]})
-            value = exc
-        self._kept[key] = value
+        if not self._dry and key in self._ahead:
+            value = self._ahead.pop(key)
+        else:
+            try:
+                value = compute()
+            except Exception as exc:
+                log.exception("stage %s failed on %s", stage, tool)
+                value = exc
+        if isinstance(value, Exception):  # a dry check logs nothing (_emit): its error is logged when the call runs
+            self._emit("stage.error", {"stage": stage, "tool": tool,
+                                       "error": f"{type(value).__name__}: {value}"[:300]})
+        (self._ahead if self._dry else self._kept)[key] = value
         return value
 
     def _conversation(self) -> list[conv.Turn]:

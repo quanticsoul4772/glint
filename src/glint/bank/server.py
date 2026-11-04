@@ -232,16 +232,19 @@ class BankServer:
         """A fresh environment at the task's initial state (the base database for an empty task_id). Returns only the
         task id and an opening line: never the customer's instructions or the evaluation criteria."""
         s = self.session(sid)
+        with s.lock:
+            return self._load(s, task_id)
+
+    def _load(self, s: BankSession, task_id: str) -> tuple[str, bool]:
+        """load_scenario for a session whose lock the caller holds."""
         task_id = (task_id or "").strip()
         if task_id and task_id not in tasks():
             return (f"Error: unknown task_id {task_id!r}; the 97 banking task ids run from task_001 to task_102, with "
                     "gaps."), True
         task = tasks()[task_id] if task_id else None
-        env = build_environment(task)
-        with s.lock:
-            s.task_id = task_id
-            self._install(s, env)
-            s.events.emit("scenario.loaded", {"session_id": s.sid, "task_id": task_id}, actor="glint.bank")
+        s.task_id = task_id
+        self._install(s, build_environment(task))
+        s.events.emit("scenario.loaded", {"session_id": s.sid, "task_id": task_id}, actor="glint.bank")
         where = f"scenario {task_id}" if task_id else "the base bank database"
         return json.dumps({"task_id": task_id, "opening": (
             f"The bank is set to {where}. A customer is on the line and will describe what they need. Verify their "
@@ -253,7 +256,10 @@ class BankServer:
         the repeat escalation reads, the requests, the decided increases), so an agent could otherwise clear them
         between attempts (judge panel 2026-11-01 and 2026-11-03, technical 2.6). The operator's
         `BankServer.load_scenario` (the replays, scripts) is not limited."""
-        s = self.session(sid)
+        return self._gated(self.session(sid))
+
+    @staticmethod
+    def _gated(s: BankSession) -> bool:
         return any(not e["payload"].get("replay") for e in s.events.events("gate.fired", after=s.loaded_at))
 
     # ---- tools ----------------------------------------------------------------------------------------------------
@@ -288,12 +294,12 @@ class BankServer:
              ) -> types.CallToolResult:
         """One tool call. τ² tools go through the session environment's gated `get_response` as an assistant call."""
         arguments = arguments or {}
-        if name == LOAD:
-            if self.gated_since_load(sid):
-                return _result(LOAD_LOCKED, True)
-            text, error = self.load_scenario(sid, str(arguments.get("task_id", "")))
-            return _result(text, error)
         s = self.session(sid)
+        if name == LOAD:  # the lock check and the reload under the lock tool calls take: no write lands between them
+            with s.lock:
+                if self._gated(s):
+                    return _result(LOAD_LOCKED, True)
+                return _result(*self._load(s, str(arguments.get("task_id", ""))))
         if name == POLICY:
             with s.lock:
                 return _result(s.env.get_policy(), False)
